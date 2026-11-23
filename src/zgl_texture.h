@@ -34,6 +34,17 @@ void SampleTextureCube(const Texture& texture,
                        GLenum min_filter,
                        GLenum mag_filter,
                        float out[4]);
+void SampleTexture2DArray(const Texture& texture,
+                          float u,
+                          float v,
+                          float layer,
+                          float lod,
+                          GLenum min_filter,
+                          GLenum mag_filter,
+                          GLenum wrap_s,
+                          GLenum wrap_t,
+                          float out[4]);
+
 void SampleTexture3D(const Texture& texture,
                      const float position[3],
                      float lod,

@@ -1234,9 +1234,16 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
 
   const BaseType base = args[0].type.base();
   const bool cube = expr.builtin_func == BuiltinFunc::kTextureCube ||
-                    base == BaseType::kSamplerCube;
+                    base == BaseType::kSamplerCube ||
+                    base == BaseType::kISamplerCube ||
+                    base == BaseType::kUSamplerCube;
   const bool volume = expr.builtin_func == BuiltinFunc::kTexture3D ||
-                      base == BaseType::kSampler3D;
+                      base == BaseType::kSampler3D ||
+                      base == BaseType::kISampler3D ||
+                      base == BaseType::kUSampler3D;
+  const bool array = base == BaseType::kSampler2DArray ||
+                     base == BaseType::kISampler2DArray ||
+                     base == BaseType::kUSampler2DArray;
   if (expr.builtin_func == BuiltinFunc::kTextureLod && args.size() > 2)
     lod = args[2].data[0];
 
@@ -1252,6 +1259,15 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
       coords[i] = args[1].data[i];
     out = Value(Type::Vec(4));
     sampler_->Sample3D(unit, coords, lod, out.data);
+    return out;
+  }
+  if (array) {
+    coords[0] = args[1].data[0];
+    coords[1] = args[1].data[1];
+    coords[2] = args[1].data[2];
+    out = Value(Type::Vec(4));
+    sampler_->Sample2DArray(unit, coords[0], coords[1], coords[2], lod,
+                            out.data);
     return out;
   }
   coords[0] = args[1].data[0];

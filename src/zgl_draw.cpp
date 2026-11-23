@@ -406,6 +406,12 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
                 const float position[3],
                 float lod_bias,
                 float out[4]) override;
+  void Sample2DArray(int unit,
+                     float u,
+                     float v,
+                     float layer,
+                     float lod_bias,
+                     float out[4]) override;
   void Size(int unit, int out[3]) override;
 
  private:
@@ -1418,14 +1424,19 @@ void Pipeline::Size(int unit, int out[3]) {
   out[2] = 0;
   const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
   const Texture* texture =
-      context_->textures.Get(state().textures_3d[slot]);
+      context_->textures.Get(state().textures_2d_array[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_3d[slot]);
   if (!texture)
     texture = context_->textures.Get(state().textures_2d[slot]);
   if (!texture)
     return;
   out[0] = texture->width;
   out[1] = texture->height;
-  out[2] = texture->target == GL_TEXTURE_3D ? texture->depth : 1;
+  out[2] = texture->target == GL_TEXTURE_3D ||
+                   texture->target == GL_TEXTURE_2D_ARRAY
+               ? texture->depth
+               : 1;
 }
 
 namespace {
@@ -1468,6 +1479,37 @@ void Pipeline::Sample2D(int unit,
   }
   SampleTexture2D(*texture, u, v, lod_bias, min_filter, mag_filter, wrap_s,
                   wrap_t, out);
+  MaskSampledAlpha(texture->internal_format, out);
+}
+
+void Pipeline::Sample2DArray(int unit,
+                             float u,
+                             float v,
+                             float layer,
+                             float lod_bias,
+                             float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture =
+      context_->textures.Get(state().textures_2d_array[slot]);
+  if (!texture)
+    return;
+  GLenum min_filter = texture->min_filter;
+  GLenum mag_filter = texture->mag_filter;
+  GLenum wrap_s = texture->wrap_s;
+  GLenum wrap_t = texture->wrap_t;
+  const Sampler* sampler = context_->samplers.Get(state().samplers[slot]);
+  if (sampler) {
+    min_filter = sampler->min_filter;
+    mag_filter = sampler->mag_filter;
+    wrap_s = sampler->wrap_s;
+    wrap_t = sampler->wrap_t;
+  }
+  SampleTexture2DArray(*texture, u, v, layer, lod_bias, min_filter,
+                       mag_filter, wrap_s, wrap_t, out);
   MaskSampledAlpha(texture->internal_format, out);
 }
 

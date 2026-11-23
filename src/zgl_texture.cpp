@@ -289,6 +289,75 @@ void SampleTexture2D(const Texture& texture,
   }
 }
 
+void SampleTexture2DArray(const Texture& texture,
+                          float u,
+                          float v,
+                          float layer,
+                          float lod,
+                          GLenum min_filter,
+                          GLenum mag_filter,
+                          GLenum wrap_s,
+                          GLenum wrap_t,
+                          float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  if (!texture.IsComplete())
+    return;
+  int level = 0;
+  if (lod > 0.0f)
+    level = std::min(static_cast<int>(std::floor(lod)), texture.levels - 1);
+  const TextureImage* image = texture.image(level, 0);
+  if (!image || image->width <= 0 || image->height <= 0 ||
+      image->depth <= 0 || !ImageHasTexels(*image))
+    return;
+  const int slice = std::max(
+      0, std::min(image->depth - 1,
+                  static_cast<int>(std::floor(layer + 0.5f))));
+  const size_t base =
+      static_cast<size_t>(slice) * image->width * image->height;
+  const GLenum filter = lod > 0.0f ? BaseFilter(min_filter) : mag_filter;
+  const float s = WrapCoordinate(u, wrap_s);
+  const float t = WrapCoordinate(texture.render_target_flip_y ? 1.0f - v : v,
+                                 wrap_t);
+  if (s < 0.0f || t < 0.0f)
+    return;
+  if (filter == GL_NEAREST) {
+    const int x =
+        std::min(image->width - 1, static_cast<int>(s * image->width));
+    const int y =
+        std::min(image->height - 1, static_cast<int>(t * image->height));
+    FetchTexel(*image, base + static_cast<size_t>(y) * image->width + x, out);
+    return;
+  }
+  const float px = s * image->width - 0.5f;
+  const float py = t * image->height - 0.5f;
+  const int x0 = static_cast<int>(std::floor(px));
+  const int y0 = static_cast<int>(std::floor(py));
+  const float fx = px - static_cast<float>(x0);
+  const float fy = py - static_cast<float>(y0);
+  float c00[4];
+  float c10[4];
+  float c01[4];
+  float c11[4];
+  const auto fetch = [&](int x, int y, float rgba[4]) {
+    const int cx = WrapTexel(x, image->width, wrap_s);
+    const int cy = WrapTexel(y, image->height, wrap_t);
+    FetchTexel(*image, base + static_cast<size_t>(cy) * image->width + cx,
+               rgba);
+  };
+  fetch(x0, y0, c00);
+  fetch(x0 + 1, y0, c10);
+  fetch(x0, y0 + 1, c01);
+  fetch(x0 + 1, y0 + 1, c11);
+  for (int i = 0; i < 4; ++i) {
+    const float top = c00[i] + (c10[i] - c00[i]) * fx;
+    const float bottom = c01[i] + (c11[i] - c01[i]) * fx;
+    out[i] = top + (bottom - top) * fy;
+  }
+}
+
 void SampleTextureCube(const Texture& texture,
                        const float direction[3],
                        float lod,

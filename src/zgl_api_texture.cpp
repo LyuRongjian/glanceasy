@@ -827,6 +827,7 @@ void SetTextureStorage(GLenum target,
         image->float_rgba.assign(texels * 4, 0.0f);
       } else if (IsIntegerInternalFormat(internal_format)) {
         image->float_rgba.clear();
+        image->integer_signed = IsSignedIntegerInternalFormat(internal_format);
         image->integer_rgba.assign(texels * 4, 0u);
       } else {
         image->float_rgba.clear();

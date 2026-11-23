@@ -130,9 +130,16 @@ void JitTexture(const JitRuntime* runtime,
 
   const BaseType base = call->arg_types[0].base();
   const bool cube = call->function == BuiltinFunc::kTextureCube ||
-                    base == BaseType::kSamplerCube;
+                    base == BaseType::kSamplerCube ||
+                    base == BaseType::kISamplerCube ||
+                    base == BaseType::kUSamplerCube;
   const bool volume = call->function == BuiltinFunc::kTexture3D ||
-                      base == BaseType::kSampler3D;
+                      base == BaseType::kSampler3D ||
+                      base == BaseType::kISampler3D ||
+                      base == BaseType::kUSampler3D;
+  const bool array = base == BaseType::kSampler2DArray ||
+                     base == BaseType::kISampler2DArray ||
+                     base == BaseType::kUSampler2DArray;
   if (call->function == BuiltinFunc::kTextureLod && call->arg_count > 2)
     lod = args[2 * kValueFloats];
   for (int i = 0; i < 3; ++i)
@@ -142,6 +149,9 @@ void JitTexture(const JitRuntime* runtime,
     runtime->sampler->SampleCube(unit, coords, lod, out);
   else if (volume)
     runtime->sampler->Sample3D(unit, coords, lod, out);
+  else if (array)
+    runtime->sampler->Sample2DArray(unit, coords[0], coords[1], coords[2],
+                                   lod, out);
   else
     runtime->sampler->Sample2D(unit, coords[0], coords[1], lod, out);
 }

@@ -84,6 +84,12 @@ class TextureSampler {
                         const float position[3],
                         float lod_bias,
                         float out[4]) = 0;
+  virtual void Sample2DArray(int unit,
+                             float u,
+                             float v,
+                             float layer,
+                             float lod_bias,
+                             float out[4]) = 0;
   virtual void Size(int unit, int out[3]) = 0;
 };
 
