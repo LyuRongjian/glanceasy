@@ -28,6 +28,8 @@ enum class Storage {
   kBuiltin,
 };
 
+constexpr int kMaxFragmentOutputs = 4;
+
 enum class BuiltinId {
   kNone,
   kPosition,     // gl_Position, vec4
@@ -40,6 +42,20 @@ enum class BuiltinId {
   kFragColor,    // gl_FragColor, vec4
   kFragData,     // gl_FragData[0], vec4
   kFragDepth,    // gl_FragDepth, float
+  kFragOutput0,  // First user-defined fragment output, vec4
+  kFragOutput1,  // Second user-defined fragment output, vec4
+  kFragOutput2,  // Third user-defined fragment output, vec4
+  kFragOutput3,  // Fourth user-defined fragment output, vec4
+  kCount,
+};
+
+// A user-defined fragment shader output before the linker resolves explicit
+// glBindFragDataLocation() overrides.  |slot| is the global slot that both the
+// interpreter and the JIT write.
+struct FragmentOut {
+  std::string name;
+  int location = -1;
+  int slot = -1;
 };
 
 // Operator codes, indexed by precedence level in the parser.
@@ -267,6 +283,7 @@ struct ShaderAst {
   std::vector<Variable> uniforms;
   std::vector<Variable> attributes;
   std::vector<Variable> varyings;  // Outputs for VS, inputs for FS.
+  std::vector<FragmentOut> outputs;  // Fragment shader colour outputs.
   std::vector<Function> functions;
   std::vector<GlobalInit> global_initializers;
 

@@ -344,12 +344,20 @@ void glBindAttribLocation(GLuint program, GLuint index, const GLchar* name) {
 }
 
 void glBindFragDataLocation(GLuint program, GLuint color, const GLchar* name) {
-  (void)color;
-  if (!name)
-    return;
   zgl::Context* context = zgl::ApiContext();
-  if (context && !context->programs.Get(program))
+  if (!context)
+    return;
+  if (color >= static_cast<GLuint>(zgl::kMaxDrawBuffers)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object) {
     context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (name)
+    object->frag_data_bindings.emplace_back(name, static_cast<int>(color));
 }
 
 void glLinkProgram(GLuint program) {
@@ -392,7 +400,8 @@ void glLinkProgram(GLuint program) {
   }
   object->program.reset(new zgl::glsl::Program());
   object->linked =
-      object->program->Link(vertex, fragment, object->bindings, &object->log);
+      object->program->Link(vertex, fragment, object->bindings,
+                            object->frag_data_bindings, &object->log);
 }
 
 void glGetProgramiv(GLuint program, GLenum pname, GLint* params) {
@@ -510,16 +519,17 @@ int glGetUniformLocation(GLuint program, const GLchar* name) {
 }
 
 int glGetFragDataLocation(GLuint program, const GLchar* name) {
-  (void)name;
   zgl::Context* context = zgl::ApiContext();
-  if (!context)
+  if (!context || !name)
     return -1;
   zgl::ProgramObject* object = context->programs.Get(program);
   if (!object) {
     context->SetError(GL_INVALID_OPERATION);
     return -1;
   }
-  return 0;
+  if (!object->program)
+    return -1;
+  return object->program->FragDataLocation(name);
 }
 
 void glGetActiveAttrib(GLuint program,

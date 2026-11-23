@@ -654,18 +654,31 @@ void glClear(GLbitfield mask) {
                                       zgl::FloatToUnorm8(state.clear_color[1]),
                                       zgl::FloatToUnorm8(state.clear_color[2]),
                                       zgl::FloatToUnorm8(state.clear_color[3])};
-    for (int y = area.y; y < area.bottom(); ++y) {
-      uint8_t* row = target.color + static_cast<size_t>(y) * target.width * 4;
-      for (int x = area.x; x < area.right(); ++x) {
-        uint32_t previous;
-        memcpy(&previous, row + static_cast<size_t>(x) * 4, sizeof(previous));
-        const zgl::Rgba stored = zgl::UnpackRgba(previous);
-        const uint32_t value =
-            zgl::PackRgba(state.color_mask[0] ? color.r : stored.r,
-                          state.color_mask[1] ? color.g : stored.g,
-                          state.color_mask[2] ? color.b : stored.b,
-                          state.color_mask[3] ? color.a : stored.a);
-        memcpy(row + static_cast<size_t>(x) * 4, &value, sizeof(value));
+    for (int buffer_index = 0; buffer_index < target.draw_buffer_count;
+         ++buffer_index) {
+      const GLenum buffer = target.draw_buffers[buffer_index];
+      if (buffer < GL_COLOR_ATTACHMENT0 ||
+          buffer >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments)
+        continue;
+      uint8_t* const color_buffer =
+          target.colors[buffer - GL_COLOR_ATTACHMENT0];
+      if (!color_buffer)
+        continue;
+      for (int y = area.y; y < area.bottom(); ++y) {
+        uint8_t* row =
+            color_buffer + static_cast<size_t>(y) * target.width * 4;
+        for (int x = area.x; x < area.right(); ++x) {
+          uint32_t previous;
+          memcpy(&previous, row + static_cast<size_t>(x) * 4,
+                 sizeof(previous));
+          const zgl::Rgba stored = zgl::UnpackRgba(previous);
+          const uint32_t value =
+              zgl::PackRgba(state.color_mask[0] ? color.r : stored.r,
+                            state.color_mask[1] ? color.g : stored.g,
+                            state.color_mask[2] ? color.b : stored.b,
+                            state.color_mask[3] ? color.a : stored.a);
+          memcpy(row + static_cast<size_t>(x) * 4, &value, sizeof(value));
+        }
       }
     }
   }

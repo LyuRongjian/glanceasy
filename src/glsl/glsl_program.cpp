@@ -31,10 +31,12 @@ bool TypeMismatch(const Type& a, const Type& b) {
 Program::Program() = default;
 Program::~Program() = default;
 
-bool Program::Link(ShaderAst* vertex,
-                   ShaderAst* fragment,
-                   const std::vector<std::pair<std::string, int>>& bindings,
-                   std::string* log) {
+bool Program::Link(
+    ShaderAst* vertex,
+    ShaderAst* fragment,
+    const std::vector<std::pair<std::string, int>>& bindings,
+    const std::vector<std::pair<std::string, int>>& frag_bindings,
+    std::string* log) {
   linked_ = false;
   attributes_.clear();
   uniforms_.clear();
@@ -128,6 +130,42 @@ bool Program::Link(ShaderAst* vertex,
   if (varying_floats_ > kMaxVaryingVectors * 4)
     return fail("too many varying components");
 
+  // Fragment colour outputs.  A layout(location) or glBindFragDataLocation()
+  // binding selects the draw buffer; the slot is the global the shader writes.
+  {
+    for (const FragmentOut& output : fragment->outputs) {
+      int location = output.location;
+      for (const auto& binding : frag_bindings) {
+        if (binding.first == output.name)
+          location = binding.second;
+      }
+      if (location < 0 || location >= kMaxFragmentOutputs)
+        return fail("fragment output '" + output.name +
+                    "' has an invalid location");
+      for (const FragmentOutputInfo& existing : fragment_outputs_) {
+        if (existing.location == location)
+          return fail("two fragment outputs share location " +
+                      std::to_string(location));
+      }
+      FragmentOutputInfo info;
+      info.name = output.name;
+      info.location = location;
+      info.slot = output.slot;
+      fragment_outputs_.push_back(info);
+    }
+    if (fragment_outputs_.empty()) {
+      int slot =
+          fragment->builtin_slots[static_cast<int>(BuiltinId::kFragColor)];
+      if (slot < 0)
+        slot = fragment->builtin_slots[static_cast<int>(BuiltinId::kFragData)];
+      FragmentOutputInfo info;
+      info.name = "gl_FragColor";
+      info.location = 0;
+      info.slot = slot;
+      fragment_outputs_.push_back(info);
+    }
+  }
+
   // Uniforms.  Names and types must agree across stages; the merged list is
   // the program-wide uniform namespace that glGetUniformLocation() exposes.
   {
@@ -217,6 +255,14 @@ int Program::AttributeLocation(const std::string& name) const {
   for (const AttributeInfo& info : attributes_) {
     if (info.name == name)
       return info.location;
+  }
+  return -1;
+}
+
+int Program::FragDataLocation(const std::string& name) const {
+  for (const FragmentOutputInfo& output : fragment_outputs_) {
+    if (output.name == name)
+      return output.location;
   }
   return -1;
 }

@@ -1439,10 +1439,13 @@ void Program::RunVertex(const VertexInput& input,
 }
 
 bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
-  output->color[0] = 0.0f;
-  output->color[1] = 0.0f;
-  output->color[2] = 0.0f;
-  output->color[3] = 1.0f;
+  for (int i = 0; i < kMaxFragmentOutputs; ++i) {
+    output->color[i][0] = 0.0f;
+    output->color[i][1] = 0.0f;
+    output->color[i][2] = 0.0f;
+    output->color[i][3] = 1.0f;
+    output->written[i] = false;
+  }
   output->depth = 0.0f;
   output->writes_depth = false;
   output->discarded = false;
@@ -1484,14 +1487,16 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
     return true;
   }
 
-  int slot = fragment_->builtin_slots[static_cast<int>(BuiltinId::kFragColor)];
-  if (slot < 0) {
-    slot = fragment_->builtin_slots[static_cast<int>(BuiltinId::kFragData)];
-  }
-  if (slot >= 0 && slot < static_cast<int>(fragment_globals_.size())) {
-    const Value& value = fragment_globals_[slot];
+  for (const FragmentOutputInfo& fragment_output : fragment_outputs_) {
+    if (fragment_output.location < 0 ||
+        fragment_output.location >= kMaxFragmentOutputs ||
+        fragment_output.slot < 0 ||
+        fragment_output.slot >= static_cast<int>(fragment_globals_.size()))
+      continue;
+    const Value& value = fragment_globals_[fragment_output.slot];
     for (int i = 0; i < 4; ++i)
-      output->color[i] = value.data[i];
+      output->color[fragment_output.location][i] = value.data[i];
+    output->written[fragment_output.location] = true;
   }
   if (uses_frag_depth_) {
     const int depth_slot =

@@ -35,7 +35,7 @@ the host build within one 8-bit LSB, which is the regression guarantee the
 suite provides.
 
 These fifteen cases are the complete visual set, one screenshot per case. The
-API-level suite has 150 cases; many of them exercise state transitions, invalid
+API-level suite has 155 cases; many of them exercise state transitions, invalid
 enums and error paths that never touch a framebuffer, so those are asserted in
 code instead of captured as images.
 
@@ -71,9 +71,9 @@ The second argument is the output directory; one PPM per case is written there.
 | Area | State |
 | --- | --- |
 | GLES 2.0 API | Complete: buffers, vertex arrays, textures, framebuffers, shaders, state, draws |
-| GLES 3.0 API | Core subset: VAOs, instancing, primitive restart, queries, fences, sampler objects, blit, invalidate. Still missing: MRT, MSAA, UBOs, transform feedback and compressed/float texture formats |
+| GLES 3.0 API | Core subset: VAOs, instancing, primitive restart, queries, fences, sampler objects, blit, invalidate. Still missing: MSAA, UBOs, transform feedback and compressed/float texture formats |
 | GLSL | Interpreter and SLJIT tier for ES 1.00 / 3.00 shaders; unsupported constructs fall back per stage, see [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
-| Multiple render targets | One colour attachment is written; `gl_FragData[i]` and `out` variables beyond the first are rejected by the compiler |
+| Multiple render targets | Up to four colour outputs through `layout(location = N)`, `gl_FragData[0..3]` or sequential `out` variables; `glDrawBuffers` selects the attachment for each output |
 | Transform feedback, compute, SSBO, image load/store | Accepted stubs; report `GL_INVALID_OPERATION` where output would change |
 | Tessellation / geometry shaders | Not part of GLES; entry points are stubs |
 | Platform integration | None by design; the embedder owns the surface |
@@ -171,7 +171,7 @@ tools/coverage.sh build-cov
 ```
 
 The script configures a gcov build, runs the tests, and prints per-file line
-coverage into `build-cov/coverage/summary.txt`. The current tree executes 150
+coverage into `build-cov/coverage/summary.txt`. The current tree executes 155
 API tests with zero failed checks; `tools/coverage.sh` reports line coverage for
 the host build. The uncovered remainder is dominated by defensive error
 branches, unsupported-format rejection paths and the GPU-only stubs, which are
@@ -213,8 +213,8 @@ image, draw statistics or the last shader log.
 
 ## Known limitations
 
-- A fragment shader may write one colour output. `gl_FragData` is restricted to
-  index 0, and additional `out` variables are rejected with a compile error.
+- A fragment shader may write up to four colour outputs, at locations 0 to 3.
+  More than four outputs, or two outputs at the same location, fail to link.
 - Arrays, structures, uniform blocks, `out`/`inout` parameters and recursive
   functions are outside the interpreted GLSL subset.
 - Texture images are stored top-down; `v = 0` addresses the first stored row.

@@ -93,6 +93,10 @@ const BuiltinVarEntry kBuiltinVars[] = {
     {"gl_FragColor", BuiltinId::kFragColor, Type::Vec(4), false},
     {"gl_FragData", BuiltinId::kFragData, Type::Vec(4), false},
     {"gl_FragDepth", BuiltinId::kFragDepth, Type::Float(), false},
+    {"__zgl_frag_output_0", BuiltinId::kFragOutput0, Type::Vec(4), false},
+    {"__zgl_frag_output_1", BuiltinId::kFragOutput1, Type::Vec(4), false},
+    {"__zgl_frag_output_2", BuiltinId::kFragOutput2, Type::Vec(4), false},
+    {"__zgl_frag_output_3", BuiltinId::kFragOutput3, Type::Vec(4), false},
 };
 
 struct BuiltinFuncEntry {
@@ -454,13 +458,42 @@ bool Parser::AddGlobalVariable(const std::string& name,
   }
 
   if (stage_ == Stage::kFragment && qualifiers.is_out) {
-    if (fragment_outputs_ > 0)
-      return FailAt(line, "only one fragment shader output is supported");
     if (!(type == Type::Vec(4)))
       return FailAt(line, "fragment output '" + name + "' must be a vec4");
-    const int slot = EnsureBuiltin(BuiltinId::kFragColor);
+    int location = qualifiers.location;
+    if (location < 0) {
+      for (int candidate = 0; candidate < kMaxFragmentOutputs; ++candidate) {
+        bool used = false;
+        for (const FragmentOut& output : ast_->outputs) {
+          if (output.location == candidate) {
+            used = true;
+            break;
+          }
+        }
+        if (!used) {
+          location = candidate;
+          break;
+        }
+      }
+    }
+    if (location < 0 || location >= kMaxFragmentOutputs)
+      return FailAt(line, "fragment output location is out of range");
+    for (const FragmentOut& output : ast_->outputs) {
+      if (output.location == location)
+        return FailAt(line, "duplicate fragment output location");
+    }
+    BuiltinId id = static_cast<BuiltinId>(
+        static_cast<int>(BuiltinId::kFragOutput0) + location);
+    const int slot = EnsureBuiltin(id);
+    if (slot < 0)
+      return FailAt(line, "could not allocate a fragment output");
+    FragmentOut output;
+    output.name = name;
+    output.location = location;
+    output.slot = slot;
+    ast_->outputs.push_back(output);
     global_names_.push_back({name, slot});
-    ++fragment_outputs_;
+    ast_->uses_frag_color = true;
     return true;
   }
 
@@ -1417,14 +1450,32 @@ ExprPtr Parser::ParsePrimary() {
         return nullptr;
       }
       Advance();
-      if (current_.kind != Token::Kind::kIntLiteral || current_.number != 0) {
-        FailAt(line, "only gl_FragData[0] is supported");
+      if (current_.kind != Token::Kind::kIntLiteral ||
+          current_.number < 0 || current_.number >= kMaxFragmentOutputs) {
+        FailAt(line, "gl_FragData index is out of range");
         return nullptr;
       }
+      const int location = static_cast<int>(current_.number);
       Advance();
       if (!ExpectPunct("]"))
         return nullptr;
-      const int slot = EnsureBuiltin(BuiltinId::kFragData);
+      BuiltinId id = static_cast<BuiltinId>(
+          static_cast<int>(BuiltinId::kFragOutput0) + location);
+      int slot = -1;
+      for (const FragmentOut& output : ast_->outputs) {
+        if (output.location == location) {
+          slot = output.slot;
+          break;
+        }
+      }
+      if (slot < 0) {
+        slot = EnsureBuiltin(id);
+        FragmentOut output;
+        output.name = "gl_FragData[" + std::to_string(location) + "]";
+        output.location = location;
+        output.slot = slot;
+        ast_->outputs.push_back(output);
+      }
       ExprPtr expr = MakeExpr(Expr::Kind::kVariable, line);
       expr->storage = Storage::kGlobal;
       expr->index = slot;
@@ -1476,6 +1527,12 @@ int Parser::EnsureBuiltin(BuiltinId id) {
         break;
       case BuiltinId::kFragData:
         ast_->uses_frag_data = true;
+        break;
+      case BuiltinId::kFragOutput0:
+      case BuiltinId::kFragOutput1:
+      case BuiltinId::kFragOutput2:
+      case BuiltinId::kFragOutput3:
+        ast_->uses_frag_color = true;
         break;
       case BuiltinId::kFragDepth:
         ast_->uses_frag_depth = true;
@@ -1583,7 +1640,7 @@ Type Parser::BuiltinResultType(BuiltinFunc function,
 std::unique_ptr<ShaderAst> Parser::Parse() {
   ast_.reset(new ShaderAst());
   ast_->stage = stage_;
-  ast_->builtin_slots.assign(static_cast<int>(BuiltinId::kFragDepth) + 1, -1);
+  ast_->builtin_slots.assign(static_cast<int>(BuiltinId::kCount), -1);
   Advance();
   if (!lexer_.ok()) {
     Fail(lexer_.error());

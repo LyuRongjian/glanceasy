@@ -28,7 +28,7 @@ ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、�
 与 SLJIT 后端的输出相对宿主机构建均在 1 个 8 位 LSB 以内，这正是该套件提供的
 回归保障。
 
-这十五个用例构成完整的可视化集合，每个用例一张截图。API 层测试共 150 个，
+这十五个用例构成完整的可视化集合，每个用例一张截图。API 层测试共 155 个，
 其中不少只验证状态迁移、非法枚举和错误路径，根本不会触碰帧缓冲，因此这些
 用例只用代码断言，不做截图。
 
@@ -64,9 +64,9 @@ cmake --build build --target zgl_visual_tests
 | 范围 | 状态 |
 | --- | --- |
 | GLES 2.0 API | 完整：缓冲、顶点数组、纹理、帧缓冲、着色器、状态、绘制 |
-| GLES 3.0 API | 核心子集：VAO、instancing、primitive restart、query、fence、sampler object、blit、invalidate。仍缺 MRT、MSAA、UBO、transform feedback 与压缩/浮点纹理格式 |
+| GLES 3.0 API | 核心子集：VAO、instancing、primitive restart、query、fence、sampler object、blit、invalidate。仍缺 MSAA、UBO、transform feedback 与压缩/浮点纹理格式 |
 | GLSL | 支持 ES 1.00 / 3.00 的解释执行与 SLJIT 分层编译；不支持的构造按 stage 回退，见 [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
-| 多重渲染目标 | 只写入一个颜色附件；`gl_FragData[i]` 与第一个之外的 `out` 变量会被编译器拒绝 |
+| 多重渲染目标 | 最多四个颜色输出，可用 `layout(location = N)`、`gl_FragData[0..3]` 或顺序 `out` 变量；`glDrawBuffers` 决定每个输出写到哪个附件 |
 | Transform feedback、compute、SSBO、image load/store | 纯桩；会影响输出的调用返回 `GL_INVALID_OPERATION` |
 | 细分 / 几何着色器 | 不属于 GLES；入口为桩 |
 | 平台集成 | 有意不做；表面归集成方所有 |
@@ -159,7 +159,7 @@ tools/coverage.sh build-cov
 ```
 
 脚本会配置 gcov 构建、运行测试，并把逐文件行覆盖率写入
-`build-cov/coverage/summary.txt`。当前共 150 个 API 测试、0 个失败断言；
+`build-cov/coverage/summary.txt`。当前共 155 个 API 测试、0 个失败断言；
 `tools/coverage.sh` 会给出宿主机构建的行覆盖率。未覆盖部分主要是防御性错误
 分支、不支持的格式拒绝路径以及 GPU 专用桩，均如实列在覆盖率汇总中。
 
@@ -197,10 +197,10 @@ zglDestroyContext();
 
 ## 已知限制
 
-- 片元着色器只能写一个颜色输出；`gl_FragData` 仅允许下标 0，额外的 `out` 变量
-  会被编译错误拒绝。
+- 片元着色器最多写四个颜色输出，location 为 0 到 3；超过四个输出或两个输出
+  占用同一 location 会链接失败。
 - 数组、结构体、uniform block、`out`/`inout` 参数、递归函数不在解释器子集内。
-- MRT、MSAA、UBO、transform feedback 与压缩/浮点纹理格式尚未实现。
+- MSAA、UBO、transform feedback 与压缩/浮点纹理格式尚未实现。
 - 纹理图像按 top-down 存储，`v = 0` 对应第一条存储的行。
 - `dFdx`、`dFdy`、`fwidth` 恒为 0，不计算隐式 LOD；`textureLod` 可显式选级。
 - 恰好落在视口底边或右边的线与点会被非对称裁剪，因为 NDC 的 `y = -1` 映射到

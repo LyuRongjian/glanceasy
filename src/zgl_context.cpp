@@ -46,7 +46,8 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
   if (framebuffer_name == 0) {
     target.width = context->surface.width;
     target.height = context->surface.height;
-    target.color = context->surface.rgba.data();
+    target.colors[0] = context->surface.rgba.data();
+    target.color = target.colors[0];
     target.depth = context->surface.depth16.data();
     target.stencil = context->surface.stencil8.data();
     return target;
@@ -54,15 +55,38 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
   const Framebuffer* framebuffer = context->framebuffers.Get(framebuffer_name);
   if (!framebuffer)
     return target;
-  const TextureImage* color = AttachmentImage(*context, framebuffer->colors[0]);
+  const TextureImage* color = nullptr;
+  for (int i = 0; i < kMaxColorAttachments; ++i) {
+    const TextureImage* image = AttachmentImage(*context, framebuffer->colors[i]);
+    if (image) {
+      target.colors[i] =
+          reinterpret_cast<uint8_t*>(const_cast<uint32_t*>(image->rgba.data()));
+      if (!color)
+        color = image;
+    }
+  }
   const TextureImage* depth = AttachmentImage(*context, framebuffer->depth);
   const TextureImage* stencil = AttachmentImage(*context, framebuffer->stencil);
   if (!color || !color->width || !color->height)
     return target;
   target.width = color->width;
   target.height = color->height;
-  target.color =
-      reinterpret_cast<uint8_t*>(const_cast<uint32_t*>(color->rgba.data()));
+  for (int i = 0; i < kMaxColorAttachments; ++i) {
+    target.draw_buffers[i] = framebuffer->draw_buffers[i];
+  }
+  target.draw_buffer_count = framebuffer->draw_buffer_count;
+  target.color = target.colors[0];
+  int first = -1;
+  for (int i = 0; i < target.draw_buffer_count; ++i) {
+    const GLenum buffer = target.draw_buffers[i];
+    if (buffer >= GL_COLOR_ATTACHMENT0 &&
+        buffer < GL_COLOR_ATTACHMENT0 + kMaxColorAttachments) {
+      first = static_cast<int>(buffer - GL_COLOR_ATTACHMENT0);
+      break;
+    }
+  }
+  if (first >= 0 && target.colors[first])
+    target.color = target.colors[first];
   if (depth && depth->width == target.width && depth->height == target.height)
     target.depth = const_cast<uint16_t*>(depth->depth16.data());
   if (stencil && stencil->width == target.width &&
@@ -179,7 +203,20 @@ RenderTarget Context::GetDrawTarget() {
 }
 
 RenderTarget Context::GetReadTarget() {
-  return ResolveFramebuffer(this, state.read_framebuffer);
+  RenderTarget target = ResolveFramebuffer(this, state.read_framebuffer);
+  const Framebuffer* framebuffer = framebuffers.Get(state.read_framebuffer);
+  if (framebuffer) {
+    if (framebuffer->read_buffer == GL_NONE) {
+      target.color = nullptr;
+    } else if (framebuffer->read_buffer >= GL_COLOR_ATTACHMENT0 &&
+               framebuffer->read_buffer <
+                   GL_COLOR_ATTACHMENT0 + kMaxColorAttachments) {
+      const int index =
+          static_cast<int>(framebuffer->read_buffer - GL_COLOR_ATTACHMENT0);
+      target.color = target.colors[index];
+    }
+  }
+  return target;
 }
 
 ShaderObject* Context::FindShader(GLuint name) {

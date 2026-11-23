@@ -254,3 +254,231 @@ TEST(RenderbufferStorageValidation) {
   glDeleteRenderbuffers(1, &renderbuffer);
   zglDestroyContext();
 }
+
+TEST(FragmentShaderWritesTwoDrawBuffers) {
+  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  GLuint textures[2] = {};
+  glGenTextures(2, textures);
+  for (int i = 0; i < 2; ++i) {
+    glBindTexture(GL_TEXTURE_2D, textures[i]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 32, 32, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  }
+  GLuint framebuffer = 0;
+  glGenFramebuffers(1, &framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         textures[0], 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D,
+                         textures[1], 0);
+  EXPECT_EQ(glCheckFramebufferStatus(GL_FRAMEBUFFER), GL_FRAMEBUFFER_COMPLETE);
+  const GLenum buffers[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+  glDrawBuffers(2, buffers);
+  glViewport(0, 0, 32, 32);
+
+  const char* vertex =
+      "#version 300 es\n"
+      "in vec2 a_pos;\n"
+      "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+  const char* fragment =
+      "#version 300 es\n"
+      "precision mediump float;\n"
+      "layout(location = 0) out vec4 colour0;\n"
+      "layout(location = 1) out vec4 colour1;\n"
+      "void main() {\n"
+      "  colour0 = vec4(1.0, 0.0, 0.0, 1.0);\n"
+      "  colour1 = vec4(0.0, 0.0, 1.0, 1.0);\n"
+      "}\n";
+  const GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+  glShaderSource(vs, 1, &vertex, nullptr);
+  glCompileShader(vs);
+  const GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(fs, 1, &fragment, nullptr);
+  glCompileShader(fs);
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vs);
+  glAttachShader(program, fs);
+  glLinkProgram(program);
+  GLint linked = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &linked);
+  EXPECT_EQ(linked, GL_TRUE);
+  EXPECT_EQ(glGetFragDataLocation(program, "colour0"), 0);
+  EXPECT_EQ(glGetFragDataLocation(program, "colour1"), 1);
+  EXPECT_EQ(glGetFragDataLocation(program, "missing"), -1);
+
+  glUseProgram(program);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, kFullscreen);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+
+  unsigned char rgba[4] = {};
+  glReadBuffer(GL_COLOR_ATTACHMENT0);
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_EQ(rgba[0], 255);
+  EXPECT_EQ(rgba[1], 0);
+  EXPECT_EQ(rgba[2], 0);
+  glReadBuffer(GL_COLOR_ATTACHMENT1);
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_EQ(rgba[0], 0);
+  EXPECT_EQ(rgba[1], 0);
+  EXPECT_EQ(rgba[2], 255);
+
+  glDeleteProgram(program);
+  glDeleteShader(vs);
+  glDeleteShader(fs);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteFramebuffers(1, &framebuffer);
+  glDeleteTextures(2, textures);
+  zglDestroyContext();
+}
+
+
+TEST(LegacyFragDataWritesTwoDrawBuffers) {
+  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  GLuint textures[2] = {};
+  glGenTextures(2, textures);
+  for (int i = 0; i < 2; ++i) {
+    glBindTexture(GL_TEXTURE_2D, textures[i]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 32, 32, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  }
+  GLuint framebuffer = 0;
+  glGenFramebuffers(1, &framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         textures[0], 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D,
+                         textures[1], 0);
+  const GLenum buffers[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+  glDrawBuffers(2, buffers);
+  EXPECT_EQ(glCheckFramebufferStatus(GL_FRAMEBUFFER), GL_FRAMEBUFFER_COMPLETE);
+  glViewport(0, 0, 32, 32);
+
+  const char* vertex =
+      "#version 100\n"
+      "attribute vec2 a_pos;\n"
+      "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+  const char* fragment =
+      "#version 100\n"
+      "precision mediump float;\n"
+      "void main() {\n"
+      "  gl_FragData[0] = vec4(1.0, 0.0, 0.0, 1.0);\n"
+      "  gl_FragData[1] = vec4(0.0, 1.0, 0.0, 1.0);\n"
+      "}\n";
+  const GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+  glShaderSource(vs, 1, &vertex, nullptr);
+  glCompileShader(vs);
+  const GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(fs, 1, &fragment, nullptr);
+  glCompileShader(fs);
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vs);
+  glAttachShader(program, fs);
+  glLinkProgram(program);
+  GLint linked = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &linked);
+  EXPECT_EQ(linked, GL_TRUE);
+
+  glUseProgram(program);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, kFullscreen);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+
+  unsigned char rgba[4] = {};
+  glReadBuffer(GL_COLOR_ATTACHMENT0);
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_EQ(rgba[0], 255);
+  EXPECT_EQ(rgba[1], 0);
+  glReadBuffer(GL_COLOR_ATTACHMENT1);
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_EQ(rgba[0], 0);
+  EXPECT_EQ(rgba[1], 255);
+
+  glDeleteProgram(program);
+  glDeleteShader(vs);
+  glDeleteShader(fs);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteFramebuffers(1, &framebuffer);
+  glDeleteTextures(2, textures);
+  zglDestroyContext();
+}
+
+TEST(DrawBufferTableMapsOutputOne) {
+  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  GLuint textures[2] = {};
+  glGenTextures(2, textures);
+  for (int i = 0; i < 2; ++i) {
+    glBindTexture(GL_TEXTURE_2D, textures[i]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 32, 32, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  }
+  GLuint framebuffer = 0;
+  glGenFramebuffers(1, &framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         textures[0], 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D,
+                         textures[1], 0);
+  const GLenum buffers[2] = {GL_NONE, GL_COLOR_ATTACHMENT1};
+  glDrawBuffers(2, buffers);
+  EXPECT_EQ(glCheckFramebufferStatus(GL_FRAMEBUFFER), GL_FRAMEBUFFER_COMPLETE);
+  glViewport(0, 0, 32, 32);
+
+  const char* vertex =
+      "#version 300 es\n"
+      "in vec2 a_pos;\n"
+      "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+  const char* fragment =
+      "#version 300 es\n"
+      "precision mediump float;\n"
+      "layout(location = 1) out vec4 colour;\n"
+      "void main() { colour = vec4(0.0, 1.0, 0.0, 1.0); }\n";
+  const GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+  glShaderSource(vs, 1, &vertex, nullptr);
+  glCompileShader(vs);
+  const GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(fs, 1, &fragment, nullptr);
+  glCompileShader(fs);
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vs);
+  glAttachShader(program, fs);
+  glLinkProgram(program);
+  GLint linked = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &linked);
+  EXPECT_EQ(linked, GL_TRUE);
+  EXPECT_EQ(glGetFragDataLocation(program, "colour"), 1);
+
+  glUseProgram(program);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, kFullscreen);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+
+  unsigned char rgba[4] = {};
+  glReadBuffer(GL_COLOR_ATTACHMENT1);
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_EQ(rgba[1], 255);
+  glReadBuffer(GL_COLOR_ATTACHMENT0);
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_EQ(rgba[0], 0);
+  EXPECT_EQ(rgba[1], 0);
+
+  glDeleteProgram(program);
+  glDeleteShader(vs);
+  glDeleteShader(fs);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteFramebuffers(1, &framebuffer);
+  glDeleteTextures(2, textures);
+  zglDestroyContext();
+}

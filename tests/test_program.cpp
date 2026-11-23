@@ -432,3 +432,36 @@ TEST(ProgramInfoLogIsEmptyAfterSuccessfulLink) {
   glDeleteShader(fs);
   zglDestroyContext();
 }
+
+TEST(FragmentOutputLocationsAreBoundedAndUnique) {
+  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  const char* five_outputs =
+      "#version 300 es\n"
+      "precision mediump float;\n"
+      "layout(location = 0) out vec4 c0;\n"
+      "layout(location = 1) out vec4 c1;\n"
+      "layout(location = 2) out vec4 c2;\n"
+      "layout(location = 3) out vec4 c3;\n"
+      "layout(location = 4) out vec4 c4;\n"
+      "void main() { c0 = vec4(1.0); c1 = vec4(1.0); c2 = vec4(1.0);\n"
+      "             c3 = vec4(1.0); c4 = vec4(1.0); }\n";
+  const GLuint fs = MakeShader(GL_FRAGMENT_SHADER, five_outputs);
+  GLint status = GL_TRUE;
+  glGetShaderiv(fs, GL_COMPILE_STATUS, &status);
+  EXPECT_EQ(status, GL_FALSE);
+
+  const char* duplicate =
+      "#version 300 es\n"
+      "precision mediump float;\n"
+      "layout(location = 1) out vec4 c0;\n"
+      "layout(location = 1) out vec4 c1;\n"
+      "void main() { c0 = vec4(1.0); c1 = vec4(1.0); }\n";
+  const GLuint duplicate_shader =
+      MakeShader(GL_FRAGMENT_SHADER, duplicate);
+  status = GL_TRUE;
+  glGetShaderiv(duplicate_shader, GL_COMPILE_STATUS, &status);
+  EXPECT_EQ(status, GL_FALSE);
+  glDeleteShader(fs);
+  glDeleteShader(duplicate_shader);
+  zglDestroyContext();
+}

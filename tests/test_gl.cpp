@@ -334,7 +334,7 @@ TEST(InterpreterWritesAllPositionComponents) {
 
   Program program;
   std::string log;
-  EXPECT_TRUE(program.Link(vertex_ast.get(), fragment_ast.get(), {}, &log));
+  EXPECT_TRUE(program.Link(vertex_ast.get(), fragment_ast.get(), {}, {}, &log));
 
   float attributes[zgl::kMaxVertexAttribs * 4] = {-1.0f, -1.0f};
   VertexInput input;
@@ -354,7 +354,7 @@ TEST(InterpreterWritesAllPositionComponents) {
   EXPECT_TRUE(literal_ast != nullptr);
   Program literal_program;
   EXPECT_TRUE(
-      literal_program.Link(literal_ast.get(), fragment_ast.get(), {}, &log));
+      literal_program.Link(literal_ast.get(), fragment_ast.get(), {}, {}, &log));
   float literal_position[4] = {};
   literal_program.RunVertex(input, literal_position, nullptr, nullptr);
   EXPECT_NEAR(literal_position[0], 1.0f, 1e-6);

@@ -398,7 +398,7 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
                   float* output) const;
   void ProjectVertices(const float* polygon, int count);
   void Interpolate(const Fragment& fragment, float* out) const;
-  void StoreFragmentColor(size_t pixel, const float color[4]);
+  void StoreFragmentColor(size_t pixel, int location, const float color[4]);
   void ApplyStencilOp(GLenum op, size_t pixel, uint8_t reference);
 
   Context* context_;
@@ -1072,35 +1072,54 @@ void Pipeline::Shade(const Fragment& fragment) {
   if (state.depth.test && has_depth && state.depth.mask)
     target_.depth[pixel] = ToDepth16(depth);
 
-  StoreFragmentColor(pixel, output.color);
-  context_->stats.fragments_written++;
+  bool wrote_color = false;
+  for (int location = 0; location < glsl::kMaxFragmentOutputs; ++location) {
+    if (!output.written[location])
+      continue;
+    StoreFragmentColor(pixel, location, output.color[location]);
+    wrote_color = true;
+  }
+  if (wrote_color)
+    context_->stats.fragments_written++;
 }
 
-void Pipeline::StoreFragmentColor(size_t pixel, const float color[4]) {
+void Pipeline::StoreFragmentColor(size_t pixel,
+                                  int location,
+                                  const float color[4]) {
+  if (location < 0 || location >= target_.draw_buffer_count)
+    return;
+  const GLenum buffer = target_.draw_buffers[location];
+  if (buffer < GL_COLOR_ATTACHMENT0 ||
+      buffer >= GL_COLOR_ATTACHMENT0 + kMaxColorAttachments)
+    return;
+  uint8_t* const destination =
+      target_.colors[buffer - GL_COLOR_ATTACHMENT0];
+  if (!destination)
+    return;
   const State& state = this->state();
   if (state.blend.enabled) {
-    float destination[4];
+    float destination_color[4];
     uint32_t existing;
-    memcpy(&existing, target_.color + pixel * 4, sizeof(existing));
-    UnpackRgba(existing, destination);
+    memcpy(&existing, destination + pixel * 4, sizeof(existing));
+    UnpackRgba(existing, destination_color);
     float source[4];
     for (int i = 0; i < 4; ++i)
       source[i] = Clamp01(color[i]);
     float result[4];
     for (int i = 0; i < 3; ++i) {
       const float sf = BlendFactorValue(state.blend.src_rgb, source,
-                                        destination, state.blend.color, i);
+                                        destination_color, state.blend.color, i);
       const float df = BlendFactorValue(state.blend.dst_rgb, source,
-                                        destination, state.blend.color, i);
+                                        destination_color, state.blend.color, i);
       result[i] = BlendCombine(state.blend.equation_rgb, source[i],
-                               destination[i], sf, df);
+                               destination_color[i], sf, df);
     }
     const float sf = BlendFactorValue(state.blend.src_alpha, source,
-                                      destination, state.blend.color, 3);
+                                      destination_color, state.blend.color, 3);
     const float df = BlendFactorValue(state.blend.dst_alpha, source,
-                                      destination, state.blend.color, 3);
+                                      destination_color, state.blend.color, 3);
     result[3] = BlendCombine(state.blend.equation_alpha, source[3],
-                             destination[3], sf, df);
+                             destination_color[3], sf, df);
     uint8_t bytes[4];
     for (int i = 0; i < 4; ++i)
       bytes[i] = state.color_mask[i] ? FloatToUnorm8(result[i])
@@ -1109,7 +1128,7 @@ void Pipeline::StoreFragmentColor(size_t pixel, const float color[4]) {
                                         : i == 2 ? UnpackRgba(existing).b
                                                  : UnpackRgba(existing).a);
     const uint32_t packed = PackRgba(bytes[0], bytes[1], bytes[2], bytes[3]);
-    memcpy(target_.color + pixel * 4, &packed, sizeof(packed));
+    memcpy(destination + pixel * 4, &packed, sizeof(packed));
     return;
   }
   uint8_t bytes[4];
@@ -1118,7 +1137,7 @@ void Pipeline::StoreFragmentColor(size_t pixel, const float color[4]) {
   if (!(state.color_mask[0] && state.color_mask[1] && state.color_mask[2] &&
         state.color_mask[3])) {
     uint32_t existing;
-    memcpy(&existing, target_.color + pixel * 4, sizeof(existing));
+    memcpy(&existing, destination + pixel * 4, sizeof(existing));
     const Rgba previous = UnpackRgba(existing);
     const uint8_t values[4] = {bytes[0], bytes[1], bytes[2], bytes[3]};
     const uint8_t stored[4] = {previous.r, previous.g, previous.b, previous.a};
@@ -1127,11 +1146,11 @@ void Pipeline::StoreFragmentColor(size_t pixel, const float color[4]) {
       merged[i] = state.color_mask[i] ? values[i] : stored[i];
     const uint32_t packed =
         PackRgba(merged[0], merged[1], merged[2], merged[3]);
-    memcpy(target_.color + pixel * 4, &packed, sizeof(packed));
+    memcpy(destination + pixel * 4, &packed, sizeof(packed));
     return;
   }
   const uint32_t packed = PackRgba(bytes[0], bytes[1], bytes[2], bytes[3]);
-  memcpy(target_.color + pixel * 4, &packed, sizeof(packed));
+  memcpy(destination + pixel * 4, &packed, sizeof(packed));
 }
 
 void Pipeline::Sample2D(int unit,

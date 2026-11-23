@@ -198,9 +198,22 @@ void ClearColourBuffer(Context* context, GLint drawbuffer, uint32_t packed) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
+  const GLenum buffer = target.draw_buffers[drawbuffer];
+  if (buffer == GL_NONE)
+    return;
+  if (buffer < GL_COLOR_ATTACHMENT0 ||
+      buffer >= GL_COLOR_ATTACHMENT0 + kMaxColorAttachments) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  uint8_t* const color = target.colors[buffer - GL_COLOR_ATTACHMENT0];
+  if (!color) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   for (size_t index = 0;
        index < static_cast<size_t>(target.width) * target.height; ++index) {
-    memcpy(target.color + index * 4, &packed, sizeof(packed));
+    memcpy(color + index * 4, &packed, sizeof(packed));
   }
 }
 
@@ -522,6 +535,8 @@ void glDrawBuffers(GLsizei n, const GLenum* buffers) {
   }
   for (GLsizei i = 0; i < n; ++i)
     framebuffer->draw_buffers[i] = buffers[i];
+  for (int i = n; i < zgl::kMaxColorAttachments; ++i)
+    framebuffer->draw_buffers[i] = GL_NONE;
   framebuffer->draw_buffer_count = n;
 }
 
@@ -536,6 +551,8 @@ void glDrawBuffer(GLenum mode) {
     return;
   }
   framebuffer->draw_buffers[0] = mode;
+  for (int i = 1; i < zgl::kMaxColorAttachments; ++i)
+    framebuffer->draw_buffers[i] = GL_NONE;
   framebuffer->draw_buffer_count = 1;
 }
 

@@ -77,8 +77,17 @@ struct FragmentInput {
   TextureSampler* sampler = nullptr;
 };
 
+struct FragmentOutputInfo {
+  std::string name;
+  int location = -1;
+  int slot = -1;
+};
+
 struct FragmentOutput {
-  float color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  // Indexed by fragment output location.  |color[i]| is only meaningful when
+  // |written[i]| is true; outputs the shader does not declare stay untouched.
+  float color[kMaxFragmentOutputs][4] = {};
+  bool written[kMaxFragmentOutputs] = {};
   float depth = 0.0f;
   bool writes_depth = false;
   bool discarded = false;
@@ -94,15 +103,20 @@ class Program {
   bool Link(ShaderAst* vertex,
             ShaderAst* fragment,
             const std::vector<std::pair<std::string, int>>& bindings,
+            const std::vector<std::pair<std::string, int>>& frag_bindings,
             std::string* log);
   bool linked() const { return linked_; }
 
   const std::vector<AttributeInfo>& attributes() const { return attributes_; }
   const std::vector<UniformInfo>& uniforms() const { return uniforms_; }
   const std::vector<VaryingInfo>& varyings() const { return varyings_; }
+  const std::vector<FragmentOutputInfo>& fragment_outputs() const {
+    return fragment_outputs_;
+  }
 
   int AttributeLocation(const std::string& name) const;
   int UniformLocation(const std::string& name) const;
+  int FragDataLocation(const std::string& name) const;
   int VaryingFloats() const { return varying_floats_; }
 
   bool uses_frag_depth() const { return uses_frag_depth_; }
@@ -142,6 +156,7 @@ class Program {
   std::vector<AttributeInfo> attributes_;
   std::vector<UniformInfo> uniforms_;
   std::vector<VaryingInfo> varyings_;
+  std::vector<FragmentOutputInfo> fragment_outputs_;
   std::vector<Value> uniform_values_;
   std::vector<int> vertex_uniform_map_;
   std::vector<int> fragment_uniform_map_;

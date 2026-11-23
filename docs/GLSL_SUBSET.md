@@ -27,11 +27,13 @@ and avoids a second register file.
 - Vertex stage: `attribute` (ES 1.00) and `in` (ES 3.00) inputs.
 - Fragment stage: `varying` (ES 1.00) and `in` (ES 3.00) inputs.
 - Vertex outputs: `varying` and `out`.
-- Fragment outputs: `gl_FragColor`, `gl_FragData[0]`, or a single `out vec4`.
+- Fragment outputs: `gl_FragColor`, `gl_FragData[0..3]`, or up to four `out vec4`
+  variables with `layout(location = N)`; locations 0 to 3.
 - `uniform` declarations of scalar, vector, matrix and sampler types.
 
-Arrays, structures, interface blocks, uniform blocks and layout qualifiers are
-not part of the grammar.
+Arrays, structures, interface blocks and uniform blocks are not part of the
+grammar. `layout(location = ...)` is accepted on vertex inputs and fragment
+outputs.
 
 ## Statements
 

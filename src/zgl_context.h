@@ -46,6 +46,14 @@ struct Surface {
 struct RenderTarget {
   int width = 0;
   int height = 0;
+  // Storage for every colour attachment of the current framebuffer.
+  uint8_t* colors[kMaxColorAttachments] = {};
+  // draw_buffers[i] selects the attachment that fragment output i writes.
+  GLenum draw_buffers[kMaxColorAttachments] = {
+      GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2,
+      GL_COLOR_ATTACHMENT3};
+  int draw_buffer_count = 1;
+  // The colour buffer selected for reads, or draw buffer 0 for draws.
   uint8_t* color = nullptr;
   uint16_t* depth = nullptr;
   uint8_t* stencil = nullptr;
@@ -168,6 +176,7 @@ class ProgramObject {
   bool linked = false;
   std::string log;
   std::vector<std::pair<std::string, int>> bindings;
+  std::vector<std::pair<std::string, int>> frag_data_bindings;
 };
 
 class Query {

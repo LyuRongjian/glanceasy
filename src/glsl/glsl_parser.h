@@ -117,7 +117,6 @@ class Parser {
   int max_slot_count_ = 0;
   int loop_depth_ = 0;
   bool in_function_ = false;
-  int fragment_outputs_ = 0;
 
   // Name maps for the translation unit.
   std::vector<std::pair<std::string, int>> global_names_;

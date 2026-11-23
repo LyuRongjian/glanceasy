@@ -137,3 +137,51 @@ TEST(SljitFallsBackForLoopingShader) {
 }
 
 #endif  // ZGL_ENABLE_JIT
+
+TEST(SljitCompilesMultipleFragmentOutputs) {
+  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  zglResetJitStats();
+
+  const char* vertex =
+      "#version 300 es\n"
+      "in vec2 a_pos;\n"
+      "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+  const char* fragment =
+      "#version 300 es\n"
+      "precision mediump float;\n"
+      "layout(location = 0) out vec4 colour0;\n"
+      "layout(location = 1) out vec4 colour1;\n"
+      "void main() {\n"
+      "  colour0 = vec4(1.0, 0.0, 0.0, 1.0);\n"
+      "  colour1 = vec4(0.0, 0.0, 1.0, 1.0);\n"
+      "}\n";
+  const GLuint program = BuildProgram(vertex, fragment);
+  GLint linked = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &linked);
+  EXPECT_EQ(linked, GL_TRUE);
+  EXPECT_EQ(glGetFragDataLocation(program, "colour0"), 0);
+  EXPECT_EQ(glGetFragDataLocation(program, "colour1"), 1);
+
+  ZglJitStats stats = {};
+  if (!JitDisabled()) {
+    zglGetJitStats(&stats);
+    EXPECT_TRUE(stats.stages_compiled >= 2);
+    EXPECT_EQ(stats.fallback_stages, 0);
+  }
+
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  DrawFullscreen(program);
+  unsigned char rgba[4] = {};
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_EQ(rgba[0], 255);
+  EXPECT_EQ(rgba[1], 0);
+  EXPECT_EQ(rgba[2], 0);
+
+  if (!JitDisabled()) {
+    zglGetJitStats(&stats);
+    EXPECT_TRUE(stats.dispatches > 0);
+  }
+  glDeleteProgram(program);
+  zglDestroyContext();
+}
