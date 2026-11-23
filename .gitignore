@@ -1,0 +1,12 @@
+build/
+out/
+*.o
+*.a
+*.so
+*.gcda
+*.gcno
+*.gcov
+coverage/
+.cache/
+compile_commands.json
+*.user

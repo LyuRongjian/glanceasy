@@ -1,0 +1,12 @@
+# Chromium code style, with a hard 80 column limit.  The tree is formatted
+# with:
+#
+#   clang-format -i $(git ls-files '*.cpp' '*.h')
+#
+BasedOnStyle: Chromium
+Standard: c++17
+ColumnLimit: 80
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Regroup
+SortIncludes: CaseSensitive

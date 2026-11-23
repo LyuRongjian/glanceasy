@@ -1,0 +1,134 @@
+// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#ifndef ZGL_SRC_GLSL_GLSL_PARSER_H_
+#define ZGL_SRC_GLSL_GLSL_PARSER_H_
+
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "src/glsl/glsl_ast.h"
+#include "src/glsl/glsl_lexer.h"
+
+namespace zgl {
+namespace glsl {
+
+// Recursive descent parser for the GLSL ES 1.00 / 3.00 subset documented in
+// docs/GLSL_SUBSET.md.  Identifiers are resolved to slots while the AST is
+// built, so the interpreter never performs name lookups.
+class Parser {
+ public:
+  Parser(Stage stage, const std::string& source);
+  ~Parser();
+
+  // Returns the AST, or nullptr with |error()| describing the first failure.
+  std::unique_ptr<ShaderAst> Parse();
+  const std::string& error() const { return error_; }
+
+ private:
+  struct Qualifiers {
+    bool is_const = false;
+    bool is_uniform = false;
+    bool is_attribute = false;
+    bool is_varying = false;
+    bool is_in = false;
+    bool is_out = false;
+    bool is_inout = false;
+    bool is_invariant = false;
+    int location = -1;
+  };
+
+  // Token helpers.
+  void Advance();
+  bool CheckPunct(const char* text) const;
+  bool CheckIdent(const char* text) const;
+  bool AcceptPunct(const char* text);
+  bool AcceptIdent(const char* text);
+  bool ExpectPunct(const char* text);
+  bool Fail(const std::string& message);
+  bool FailAt(int line, const std::string& message);
+
+  // Declarations.
+  bool ParseQualifiers(Qualifiers* qualifiers);
+  bool ParseTypeSpec(Type* type);
+  bool ParseGlobalDeclaration();
+  bool ParseFunction(const std::string& name,
+                     const Type& return_type,
+                     const Qualifiers& qualifiers,
+                     int line);
+  bool ParseParameters(Function* function);
+  StmtPtr ParseDeclarationStatement();
+  bool AddGlobalVariable(const std::string& name,
+                         const Type& type,
+                         const Qualifiers& qualifiers,
+                         ExprPtr initializer,
+                         int line);
+  bool AddLocalVariable(const std::string& name,
+                        const Type& type,
+                        ExprPtr initializer,
+                        int line,
+                        StmtPtr* statement);
+  bool RegisterFunction(Function&& function, bool prototype);
+
+  // Statements.
+  StmtPtr ParseStatement();
+  StmtPtr ParseBlock();
+  StmtPtr ParseIf();
+  StmtPtr ParseFor();
+  StmtPtr ParseWhile();
+  StmtPtr ParseDoWhile();
+  StmtPtr ParseReturn();
+  StmtPtr ParseJump(const char* keyword, Statement::Kind kind);
+  StmtPtr ParseExpressionStatement();
+  bool IsDeclarationStart() const;
+
+  // Expressions.
+  ExprPtr ParseExpression(bool allow_comma);
+  ExprPtr ParseAssignment();
+  ExprPtr ParseConditional();
+  ExprPtr ParseBinary(int min_precedence);
+  ExprPtr ParseUnary();
+  ExprPtr ParsePostfix();
+  ExprPtr ParsePrimary();
+  ExprPtr ParseCall(const std::string& name, int line);
+  ExprPtr ParseConstructor(const Type& type, int line);
+  ExprPtr ParseVariable(const std::string& name, int line);
+
+  // Name resolution and types.
+  int EnsureBuiltin(BuiltinId id);
+  Type BuiltinResultType(BuiltinFunc function,
+                         const std::vector<ExprPtr>& args,
+                         int line);
+  Type BinaryResultType(Op op, const Type& left, const Type& right);
+
+  Stage stage_;
+  Lexer lexer_;
+  Token current_;
+  std::unique_ptr<ShaderAst> ast_;
+  std::string error_;
+
+  // Local scopes; the innermost scope is the current block.
+  std::vector<std::vector<std::pair<std::string, int>>> scopes_;
+  std::vector<Type> slot_types_;  // Declared type of each local slot.
+  int slot_count_ = 0;
+  int max_slot_count_ = 0;
+  int loop_depth_ = 0;
+  bool in_function_ = false;
+  int fragment_outputs_ = 0;
+
+  // Name maps for the translation unit.
+  std::vector<std::pair<std::string, int>> global_names_;
+  std::vector<std::pair<std::string, int>> uniform_names_;
+  std::vector<std::pair<std::string, int>> attribute_names_;
+  std::vector<std::pair<std::string, int>> varying_names_;
+  std::vector<std::pair<std::string, int>> function_names_;
+  int next_attribute_location_ = 0;
+};
+
+}  // namespace glsl
+}  // namespace zgl
+
+#endif  // ZGL_SRC_GLSL_GLSL_PARSER_H_
