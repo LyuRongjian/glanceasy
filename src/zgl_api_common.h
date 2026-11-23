@@ -17,20 +17,23 @@ Context* ApiContext();
 // The program object bound with glUseProgram(), or null.
 ProgramObject* CurrentProgramObject();
 
-// Binds |location| of the current program to |count| floats.  |integer| is
-// true for the glUniform*i* entry points; the interpreter keeps integers in
-// float registers.  Unknown locations are ignored, as the specification
-// requires.
+// Binds |location| of the current program to |element_count| elements of
+// |components| floats each.  |integer| is true for the glUniform*i* entry
+// points; the interpreter keeps integers in float registers.  Unknown
+// locations are ignored, as the specification requires.
 void SetUniformFloats(GLint location,
                       const float* values,
-                      int count,
+                      int components,
+                      int element_count,
                       bool integer);
 
-// Binds a matrix uniform.  |dimension| is 2, 3 or 4 and |transpose| selects
+// Binds a matrix uniform (or an array of matrices).  |transpose| selects
 // GL_FALSE row-major input; the interpreter stores matrices column major.
 void SetUniformMatrix(GLint location,
                       const float* values,
-                      int dimension,
+                      int rows,
+                      int columns,
+                      int element_count,
                       bool transpose);
 
 // Number of mip levels a texture of |width| x |height| needs.

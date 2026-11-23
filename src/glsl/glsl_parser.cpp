@@ -25,6 +25,7 @@ const TypeNameEntry kTypeNames[] = {
     {"void", Type::Void()},
     {"float", Type::Float()},
     {"int", Type::Int()},
+    {"uint", Type::UInt()},
     {"bool", Type::Bool()},
     {"vec2", Type::Vec(2)},
     {"vec3", Type::Vec(3)},
@@ -32,6 +33,9 @@ const TypeNameEntry kTypeNames[] = {
     {"ivec2", Type::IVec(2)},
     {"ivec3", Type::IVec(3)},
     {"ivec4", Type::IVec(4)},
+    {"uvec2", Type::UVec(2)},
+    {"uvec3", Type::UVec(3)},
+    {"uvec4", Type::UVec(4)},
     {"bvec2", Type::BVec(2)},
     {"bvec3", Type::BVec(3)},
     {"bvec4", Type::BVec(4)},
@@ -62,10 +66,6 @@ bool LookupTypeName(const std::string& name, Type* type) {
   return false;
 }
 
-bool IsTypeName(const std::string& name) {
-  Type unused;
-  return LookupTypeName(name, &unused);
-}
 
 bool IsQualifierKeyword(const std::string& text) {
   return text == "const" || text == "uniform" || text == "attribute" ||
@@ -87,6 +87,8 @@ const BuiltinVarEntry kBuiltinVars[] = {
     {"gl_PointSize", BuiltinId::kPointSize, Type::Float(), true},
     {"gl_VertexID", BuiltinId::kVertexId, Type::Int(), true},
     {"gl_InstanceID", BuiltinId::kInstanceId, Type::Int(), true},
+    {"gl_SampleID", BuiltinId::kSampleId, Type::Int(), false},
+    {"gl_SampleMaskIn", BuiltinId::kSampleMaskIn, Type::Int(), false},
     {"gl_FragCoord", BuiltinId::kFragCoord, Type::Vec(4), false},
     {"gl_FrontFacing", BuiltinId::kFrontFacing, Type::Bool(), false},
     {"gl_PointCoord", BuiltinId::kPointCoord, Type::Vec(2), false},
@@ -397,13 +399,56 @@ bool Parser::ParseQualifiers(Qualifiers* qualifiers) {
   }
 }
 
+bool Parser::LookupType(const std::string& name, Type* type) const {
+  if (LookupTypeName(name, type))
+    return true;
+  for (const auto& entry : struct_types_) {
+    if (entry.first == name) {
+      *type = entry.second;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Parser::IsKnownTypeName(const std::string& name) const {
+  Type unused;
+  return LookupType(name, &unused);
+}
+
+bool Parser::ParseConstantInt(int* value) {
+  if (current_.kind != Token::Kind::kIntLiteral) {
+    Fail("expected a constant integer expression");
+    return false;
+  }
+  *value = static_cast<int>(current_.number);
+  Advance();
+  if (*value <= 0) {
+    Fail("array size must be positive");
+    return false;
+  }
+  return true;
+}
+
+bool Parser::ParseArraySuffix(Type* type) {
+  while (AcceptPunct("[")) {
+    int count = 0;
+    if (!ParseConstantInt(&count))
+      return false;
+    if (!ExpectPunct("]"))
+      return false;
+    *type = Type::Array(*type, count);
+  }
+  return true;
+}
+
 bool Parser::ParseTypeSpec(Type* type) {
   if (current_.kind != Token::Kind::kIdentifier)
     return Fail("expected a type");
-  if (!LookupTypeName(current_.text, type))
+  if (!LookupType(current_.text, type))
     return Fail("unknown type '" + current_.text + "'");
   Advance();
-  return true;
+  return ParseArraySuffix(type);
 }
 
 bool Parser::AddGlobalVariable(const std::string& name,
@@ -600,8 +645,8 @@ bool Parser::ParseParameters(Function* function) {
       return Fail("expected a parameter name");
     const std::string name = current_.text;
     Advance();
-    if (CheckPunct("["))
-      return Fail("array parameters are not supported");
+    if (!ParseArraySuffix(&type))
+      return false;
     Variable variable;
     variable.name = name;
     variable.type = type;
@@ -672,17 +717,110 @@ bool Parser::ParseFunction(const std::string& name,
   return RegisterFunction(std::move(function), false);
 }
 
+bool Parser::ParseStructDefinition() {
+  const int line = current_.line;
+  Advance();  // 'struct'
+  if (current_.kind != Token::Kind::kIdentifier)
+    return Fail("expected a structure name");
+  const std::string name = current_.text;
+  Advance();
+  for (const auto& entry : struct_types_) {
+    if (entry.first == name)
+      return FailAt(line, "redefinition of struct '" + name + "'");
+  }
+  if (!ExpectPunct("{"))
+    return false;
+
+  std::shared_ptr<StructInfo> info = std::make_shared<StructInfo>();
+  info->name = name;
+  int component_offset = 0;
+  int byte_offset = 0;
+  while (!CheckPunct("}")) {
+    if (current_.kind == Token::Kind::kEnd) {
+      FailAt(line, "unexpected end of shader inside struct '" + name + "'");
+      return false;
+    }
+    Type member_type;
+    if (!ParseTypeSpec(&member_type))
+      return false;
+    if (member_type.is_void())
+      return FailAt(line, "a structure member cannot have type void");
+    if (member_type.is_sampler())
+      return FailAt(line, "a structure member cannot be a sampler");
+    if (current_.kind != Token::Kind::kIdentifier)
+      return FailAt(line, "expected a structure member name");
+    const std::string member_name = current_.text;
+    Advance();
+    if (!ParseArraySuffix(&member_type))
+      return false;
+    for (const StructMember& member : info->members) {
+      if (member.name == member_name)
+        return FailAt(line, "duplicate structure member '" + member_name + "'");
+    }
+    const int alignment = Std140Alignment(member_type);
+    byte_offset = (byte_offset + alignment - 1) / alignment * alignment;
+    StructMember member;
+    member.name = member_name;
+    member.type = member_type;
+    member.component_offset = component_offset;
+    member.byte_offset = byte_offset;
+    info->members.push_back(member);
+    component_offset += member_type.components();
+    byte_offset += Std140Size(member_type);
+    if (!ExpectPunct(";"))
+      return false;
+  }
+  if (!ExpectPunct("}"))
+    return false;
+  info->components = component_offset;
+  const int alignment = Std140Alignment(Type::Struct(info));
+  info->byte_size = (byte_offset + alignment - 1) / alignment * alignment;
+
+  const Type struct_type = Type::Struct(info);
+  struct_types_.push_back({name, struct_type});
+
+  // "struct S { ... } instance;" declares a variable of the new type.  A bare
+  // definition simply introduces the type name.
+  if (current_.kind == Token::Kind::kIdentifier) {
+    for (;;) {
+      const std::string instance_name = current_.text;
+      Advance();
+      Type instance_type = struct_type;
+      if (!ParseArraySuffix(&instance_type))
+        return false;
+      Qualifiers qualifiers;
+      ExprPtr initializer;
+      if (AcceptPunct("=")) {
+        initializer = ParseAssignment();
+        if (!initializer)
+          return false;
+      }
+      if (!AddGlobalVariable(instance_name, instance_type, qualifiers,
+                             std::move(initializer), line)) {
+        return false;
+      }
+      if (!AcceptPunct(","))
+        break;
+      if (current_.kind != Token::Kind::kIdentifier)
+        return Fail("expected an identifier");
+    }
+  }
+  return ExpectPunct(";");
+}
+
 bool Parser::ParseGlobalDeclaration() {
   Qualifiers qualifiers;
   if (!ParseQualifiers(&qualifiers))
     return false;
-  if (qualifiers.is_invariant && !IsTypeName(current_.text)) {
+  if (CheckIdent("struct"))
+    return ParseStructDefinition();
+  if (qualifiers.is_invariant && !IsKnownTypeName(current_.text)) {
     // "invariant gl_Position;" is accepted and ignored.
     Advance();
     return ExpectPunct(";");
   }
   if (qualifiers.is_uniform && current_.kind == Token::Kind::kIdentifier &&
-      !IsTypeName(current_.text) && !CheckIdent("true") &&
+      !IsKnownTypeName(current_.text) && !CheckIdent("true") &&
       !CheckIdent("false")) {
     return ParseUniformBlock(qualifiers, current_.line);
   }
@@ -696,18 +834,19 @@ bool Parser::ParseGlobalDeclaration() {
   Advance();
   if (CheckPunct("("))
     return ParseFunction(name, type, qualifiers, line);
-  if (CheckPunct("["))
-    return Fail("arrays are not supported");
 
   for (;;) {
+    Type declaration_type = type;
+    if (!ParseArraySuffix(&declaration_type))
+      return false;
     ExprPtr initializer;
     if (AcceptPunct("=")) {
       initializer = ParseAssignment();
       if (!initializer)
         return false;
     }
-    if (!AddGlobalVariable(name, type, qualifiers, std::move(initializer),
-                           line)) {
+    if (!AddGlobalVariable(name, declaration_type, qualifiers,
+                           std::move(initializer), line)) {
       return false;
     }
     if (!AcceptPunct(","))
@@ -716,8 +855,6 @@ bool Parser::ParseGlobalDeclaration() {
       return Fail("expected an identifier");
     name = current_.text;
     Advance();
-    if (CheckPunct("["))
-      return Fail("arrays are not supported");
   }
   return ExpectPunct(";");
 }
@@ -761,8 +898,8 @@ bool Parser::ParseUniformBlock(const Qualifiers& qualifiers, int line) {
       return FailAt(line, "expected a uniform block member name");
     const std::string member_name = current_.text;
     Advance();
-    if (CheckPunct("["))
-      return FailAt(line, "uniform block arrays are not supported");
+    if (!ParseArraySuffix(&member_type))
+      return false;
     if (AcceptPunct("="))
       return FailAt(line, "a uniform block member cannot be initialised");
     for (const UniformBlockMember& member : block.members) {
@@ -834,13 +971,13 @@ StmtPtr Parser::ParseDeclarationStatement() {
     Fail("uniform/attribute/varying declarations must be global");
     return nullptr;
   }
+  if (CheckIdent("struct")) {
+    Fail("local struct definitions are not supported");
+    return nullptr;
+  }
   Type type;
   if (!ParseTypeSpec(&type))
     return nullptr;
-  if (CheckPunct("[")) {
-    Fail("arrays are not supported");
-    return nullptr;
-  }
   const int line = current_.line;
 
   StmtPtr statement(new Statement());
@@ -853,18 +990,19 @@ StmtPtr Parser::ParseDeclarationStatement() {
     }
     const std::string name = current_.text;
     Advance();
-    if (CheckPunct("[")) {
-      Fail("arrays are not supported");
+    Type declaration_type = type;
+    if (!ParseArraySuffix(&declaration_type))
       return nullptr;
-    }
     ExprPtr initializer;
     if (AcceptPunct("=")) {
       initializer = ParseAssignment();
       if (!initializer)
         return nullptr;
     }
-    if (!AddLocalVariable(name, type, std::move(initializer), line, &statement))
+    if (!AddLocalVariable(name, declaration_type, std::move(initializer), line,
+                          &statement)) {
       return nullptr;
+    }
     if (!AcceptPunct(","))
       break;
   }
@@ -877,7 +1015,7 @@ bool Parser::IsDeclarationStart() const {
   if (current_.kind != Token::Kind::kIdentifier)
     return false;
   const std::string& text = current_.text;
-  return IsTypeName(text) || IsQualifierKeyword(text) || text == "struct" ||
+  return IsKnownTypeName(text) || IsQualifierKeyword(text) || text == "struct" ||
          text == "precision";
 }
 
@@ -1266,7 +1404,7 @@ ExprPtr Parser::ParseUnary() {
       if (op == Op::kNot)
         unary->type = Type::Bool();
       else if (op == Op::kBitNot)
-        unary->type = Type::Int();
+        unary->type = operand->type.is_uint() ? Type::UInt() : Type::Int();
       else
         unary->type = operand->type;
       unary->args.push_back(std::move(operand));
@@ -1288,7 +1426,9 @@ ExprPtr Parser::ParsePostfix() {
         return nullptr;
       ExprPtr indexed = MakeExpr(Expr::Kind::kIndex, line);
       const Type& base = expression->type;
-      if (base.is_matrix())
+      if (base.is_array())
+        indexed->type = base.array_element();
+      else if (base.is_matrix())
         indexed->type = base.Column();
       else if (base.is_vector() || base.is_scalar())
         indexed->type = base.Element();
@@ -1307,6 +1447,17 @@ ExprPtr Parser::ParsePostfix() {
       }
       const std::string field = current_.text;
       Advance();
+      if (field == "length" && expression->type.is_array() &&
+          CheckPunct("(")) {
+        Advance();
+        if (!ExpectPunct(")"))
+          return nullptr;
+        ExprPtr length = MakeExpr(Expr::Kind::kLiteral, line);
+        length->type = Type::Int();
+        length->literal = static_cast<float>(expression->type.array_size());
+        expression = std::move(length);
+        continue;
+      }
       if (expression->kind == Expr::Kind::kVariable &&
           expression->ubo_block >= 0) {
         const UniformBlock& block =
@@ -1328,6 +1479,30 @@ ExprPtr Parser::ParsePostfix() {
         variable->index = found->uniform_index;
         variable->type = found->type;
         expression = std::move(variable);
+        continue;
+      }
+      if (expression->type.is_struct()) {
+        const StructInfo* info = expression->type.struct_info();
+        const StructMember* found = nullptr;
+        if (info) {
+          for (const StructMember& member : info->members) {
+            if (member.name == field) {
+              found = &member;
+              break;
+            }
+          }
+        }
+        if (!found) {
+          Fail("structure '" + expression->type.Name() + "' has no member '" +
+               field + "'");
+          return nullptr;
+        }
+        ExprPtr member = MakeExpr(Expr::Kind::kField, line);
+        member->text = field;
+        member->type = found->type;
+        member->field_offset = found->component_offset;
+        member->base = std::move(expression);
+        expression = std::move(member);
         continue;
       }
       int swizzle_set = -1;
@@ -1407,7 +1582,7 @@ ExprPtr Parser::ParseConstructor(const Type& type, int line) {
 
 ExprPtr Parser::ParseCall(const std::string& name, int line) {
   Type constructed;
-  if (LookupTypeName(name, &constructed) && !constructed.is_void())
+  if (LookupType(name, &constructed) && !constructed.is_void())
     return ParseConstructor(constructed, line);
 
   BuiltinFunc function = BuiltinFunc::kNone;
@@ -1567,8 +1742,11 @@ ExprPtr Parser::ParsePrimary() {
       current_.kind == Token::Kind::kIntLiteral) {
     ExprPtr literal = MakeExpr(Expr::Kind::kLiteral, line);
     literal->literal = static_cast<float>(current_.number);
-    literal->type = current_.kind == Token::Kind::kFloatLiteral ? Type::Float()
-                                                                : Type::Int();
+    if (current_.kind == Token::Kind::kFloatLiteral) {
+      literal->type = Type::Float();
+    } else {
+      literal->type = current_.is_unsigned ? Type::UInt() : Type::Int();
+    }
     Advance();
     return literal;
   }
@@ -1588,6 +1766,15 @@ ExprPtr Parser::ParsePrimary() {
       return literal;
     }
     Advance();
+    if (IsKnownTypeName(name) && CheckPunct("[")) {
+      Type constructed;
+      LookupType(name, &constructed);
+      if (!ParseArraySuffix(&constructed) || !CheckPunct("(")) {
+        FailAt(line, "expected a constructor call after an array type");
+        return nullptr;
+      }
+      return ParseConstructor(constructed, line);
+    }
     if (CheckPunct("("))
       return ParseCall(name, line);
     if (name == "gl_FragData") {
@@ -1709,7 +1896,11 @@ Type Parser::BinaryResultType(Op op, const Type& left, const Type& right) {
     case Op::kShiftLeft:
     case Op::kShiftRight: {
       const int rows = std::max(left.rows(), right.rows());
-      return rows > 1 ? Type::IVec(rows) : Type::Int();
+      const BaseType base = (left.base() == BaseType::kUInt ||
+                             right.base() == BaseType::kUInt)
+                                ? BaseType::kUInt
+                                : BaseType::kInt;
+      return Type(base, rows, 1);
     }
     case Op::kMultiply: {
       if (left.is_matrix() && right.is_matrix())
@@ -1726,11 +1917,12 @@ Type Parser::BinaryResultType(Op op, const Type& left, const Type& right) {
   if (left.is_matrix() || right.is_matrix())
     return left.is_matrix() ? left : right;
   const int rows = std::max(left.rows(), right.rows());
-  const bool is_int =
-      left.base() == BaseType::kInt && right.base() == BaseType::kInt;
-  if (rows <= 1)
-    return is_int ? Type::Int() : Type::Float();
-  return Type(is_int ? BaseType::kInt : BaseType::kFloat, rows, 1);
+  BaseType base = BaseType::kFloat;
+  if (left.base() == BaseType::kUInt || right.base() == BaseType::kUInt)
+    base = BaseType::kUInt;
+  else if (left.base() == BaseType::kInt && right.base() == BaseType::kInt)
+    base = BaseType::kInt;
+  return Type(base, std::max(rows, 1), 1);
 }
 
 Type Parser::BuiltinResultType(BuiltinFunc function,
@@ -1805,8 +1997,9 @@ std::unique_ptr<ShaderAst> Parser::Parse() {
     if (AcceptPunct(";"))
       continue;
     if (CheckIdent("struct")) {
-      Fail("struct is not supported");
-      return nullptr;
+      if (!ParseStructDefinition())
+        return nullptr;
+      continue;
     }
     if (!ParseGlobalDeclaration())
       return nullptr;

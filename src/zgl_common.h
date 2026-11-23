@@ -28,6 +28,7 @@ constexpr int kMaxDrawBuffers = 4;
 constexpr int kMaxUniformBufferBindings = 24;
 constexpr int kMaxTransformFeedbackBuffers = 4;
 constexpr int kMaxColorAttachments = 4;
+constexpr int kMaxSamples = 4;
 
 // Number of floats reserved for a single uniform / varying slot.  A mat4 is
 // the widest value the interpreter can produce, so sixteen floats cover it.

@@ -289,7 +289,9 @@ bool ShaderJit::Impl::Check(sljit_s32 result, std::string* reason) {
 }
 
 bool ShaderJit::Impl::IsSupportedType(const Type& type) const {
-  if (type.base() == BaseType::kInt)
+  if (type.is_aggregate())
+    return false;
+  if (type.base() == BaseType::kInt || type.base() == BaseType::kUInt)
     return false;
   if (type.base() == BaseType::kVoid)
     return false;

@@ -12,6 +12,7 @@
 #include "GLES3/gl32.h"
 #include "src/zgl_api_common.h"
 #include "src/zgl_texture.h"
+#include "src/zgl_texture_compressed.h"
 
 namespace zgl {
 namespace {
@@ -40,6 +41,55 @@ GLenum TextureFamily(GLenum target, int* face) {
   }
 }
 
+bool IsCompressedFormat(GLenum format) {
+  switch (format) {
+    case GL_COMPRESSED_R11_EAC:
+    case GL_COMPRESSED_SIGNED_R11_EAC:
+    case GL_COMPRESSED_RG11_EAC:
+    case GL_COMPRESSED_SIGNED_RG11_EAC:
+    case GL_COMPRESSED_RGB8_ETC2:
+    case GL_COMPRESSED_SRGB8_ETC2:
+    case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+    case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+    case GL_COMPRESSED_RGBA8_ETC2_EAC:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsFloatInternalFormat(GLenum format) {
+  switch (format) {
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+    case GL_RGB16F:
+    case GL_RGB32F:
+    case GL_R16F:
+    case GL_R32F:
+    case GL_RG16F:
+    case GL_RG32F:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsFloatFormat(GLenum format) {
+  switch (format) {
+    case GL_RED:
+    case GL_RG:
+    case GL_RGB:
+    case GL_RGBA:
+    case GL_ALPHA:
+    case GL_LUMINANCE:
+    case GL_LUMINANCE_ALPHA:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool ValidInternalFormat(GLenum format) {
   switch (format) {
     case GL_RGBA:
@@ -59,9 +109,17 @@ bool ValidInternalFormat(GLenum format) {
     case GL_DEPTH_COMPONENT16:
     case GL_DEPTH_COMPONENT24:
     case GL_DEPTH24_STENCIL8:
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+    case GL_RGB16F:
+    case GL_RGB32F:
+    case GL_R16F:
+    case GL_R32F:
+    case GL_RG16F:
+    case GL_RG32F:
       return true;
     default:
-      return false;
+      return IsCompressedFormat(format);
   }
 }
 
@@ -76,6 +134,8 @@ bool ValidFormatType(GLenum format, GLenum type) {
     return format == GL_RGBA || format == GL_RGB || format == GL_ALPHA ||
            format == GL_LUMINANCE || format == GL_LUMINANCE_ALPHA ||
            format == GL_RED || format == GL_RG;
+  if (type == GL_FLOAT || type == GL_HALF_FLOAT)
+    return IsFloatFormat(format);
   if (type == GL_UNSIGNED_SHORT_5_6_5)
     return format == GL_RGB;
   if (type == GL_UNSIGNED_SHORT_4_4_4_4 || type == GL_UNSIGNED_SHORT_5_5_5_1)
@@ -141,6 +201,89 @@ void UploadSlice(TextureImage* destination,
         static_cast<size_t>(y + yoffset) * destination_stride +
         static_cast<size_t>(xoffset);
     memcpy(destination_row, source_row, sizeof(uint32_t) * source_stride);
+  }
+}
+
+bool DecodeCompressedImage(GLenum format,
+                           int width,
+                           int height,
+                           int image_size,
+                           const void* data,
+                           TextureImage* image) {
+  const int block_bytes = CompressedBlockBytes(format);
+  if (!image || block_bytes == 0 || !data || width <= 0 || height <= 0)
+    return false;
+  const int blocks_x = (width + 3) / 4;
+  const int blocks_y = (height + 3) / 4;
+  const int expected = blocks_x * blocks_y * block_bytes;
+  if (image_size < expected)
+    return false;
+  image->width = width;
+  image->height = height;
+  image->depth = 1;
+  image->float_rgba.clear();
+  image->rgba.assign(static_cast<size_t>(width) * height,
+                     PackRgba(0, 0, 0, 0));
+  const uint8_t* source = static_cast<const uint8_t*>(data);
+  uint8_t block_rgba[16 * 4];
+  for (int by = 0; by < blocks_y; ++by) {
+    for (int bx = 0; bx < blocks_x; ++bx) {
+      if (!DecodeEtc2Block(format, source, block_rgba))
+        return false;
+      source += block_bytes;
+      for (int y = 0; y < 4; ++y) {
+        const int destination_y = by * 4 + y;
+        if (destination_y >= height)
+          continue;
+        for (int x = 0; x < 4; ++x) {
+          const int destination_x = bx * 4 + x;
+          if (destination_x >= width)
+            continue;
+          const uint8_t* texel = block_rgba + (y * 4 + x) * 4;
+          image->rgba[static_cast<size_t>(destination_y) * width +
+                      destination_x] =
+              PackRgba(texel[0], texel[1], texel[2], texel[3]);
+        }
+      }
+    }
+  }
+  return true;
+}
+
+void UploadFloatSlice(TextureImage* destination,
+                      int xoffset,
+                      int yoffset,
+                      int zoffset,
+                      int width,
+                      int height,
+                      GLenum format,
+                      GLenum type,
+                      int row_length,
+                      int skip_rows,
+                      int skip_pixels,
+                      const void* pixels) {
+  TextureImage source;
+  if (!UploadTextureImageFloat(&source, width, height, format, type,
+                               row_length, skip_rows, skip_pixels, pixels)) {
+    return;
+  }
+  if (!destination || destination->float_rgba.empty() ||
+      destination->width < xoffset + width ||
+      destination->height < yoffset + height || destination->depth <= zoffset) {
+    return;
+  }
+  const size_t destination_stride = static_cast<size_t>(destination->width);
+  const size_t slice = destination_stride * destination->height;
+  for (int y = 0; y < height; ++y) {
+    const float* source_row =
+        source.float_rgba.data() + static_cast<size_t>(y) * width * 4;
+    float* destination_row =
+        destination->float_rgba.data() +
+        (static_cast<size_t>(zoffset) * slice +
+         static_cast<size_t>(y + yoffset) * destination_stride +
+         static_cast<size_t>(xoffset)) *
+            4;
+    memcpy(destination_row, source_row, sizeof(float) * width * 4);
   }
 }
 
@@ -272,7 +415,8 @@ void SetTextureImage(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!ValidInternalFormat(internal_format)) {
+  if (!ValidInternalFormat(internal_format) ||
+      IsCompressedFormat(internal_format)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -317,6 +461,21 @@ void SetTextureImage(GLenum target,
     image->rgba.clear();
     return;
   }
+  if (IsFloatInternalFormat(internal_format)) {
+    image->width = width;
+    image->height = height;
+    image->depth = texture->target == GL_TEXTURE_3D ? depth : 1;
+    const size_t texels = static_cast<size_t>(width) * height * image->depth;
+    image->rgba.clear();
+    image->float_rgba.assign(texels * 4, 0.0f);
+    if (pixels && texture->target != GL_TEXTURE_3D) {
+      const PixelStoreState& store = context->state.pixel_store;
+      UploadTextureImageFloat(image, width, height, format, type,
+                              store.unpack_row_length, store.unpack_skip_rows,
+                              store.unpack_skip_pixels, pixels);
+    }
+    return;
+  }
   if (internal_format == GL_DEPTH_COMPONENT16 ||
       internal_format == GL_DEPTH_COMPONENT24 ||
       internal_format == GL_DEPTH24_STENCIL8) {
@@ -353,6 +512,63 @@ void SetTextureImage(GLenum target,
                   store.unpack_row_length, store.unpack_skip_rows,
                   store.unpack_skip_pixels, pixels);
     }
+  }
+}
+
+
+void SetMultisampleTextureStorage(GLenum target,
+                                  GLsizei samples,
+                                  GLenum internal_format,
+                                  GLsizei width,
+                                  GLsizei height,
+                                  GLboolean fixed_sample_locations) {
+  Context* context = ApiContext();
+  if (!context)
+    return;
+  if (target != GL_TEXTURE_2D && target != GL_TEXTURE_CUBE_MAP) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  int face = 0;
+  Texture* texture = BindTargetTexture(context, target, &face);
+  if (!texture)
+    return;
+  if (samples < 0 || samples > kMaxSamples) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (width < 1 || height < 1 || width > kMaxTextureSize ||
+      height > kMaxTextureSize) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!ValidInternalFormat(internal_format)) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (texture->immutable) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  texture->immutable = true;
+  texture->samples = samples;
+  texture->fixed_sample_locations = fixed_sample_locations != GL_FALSE;
+  texture->width = width;
+  texture->height = height;
+  texture->depth = 1;
+  texture->internal_format = internal_format;
+  texture->Resize(1, texture->faces());
+  const size_t texels = static_cast<size_t>(width) * height;
+  const size_t sample_texels = texels * static_cast<size_t>(std::max(1, samples));
+  for (int face_index = 0; face_index < texture->faces(); ++face_index) {
+    TextureImage* image = texture->mutable_image(0, face_index);
+    image->width = width;
+    image->height = height;
+    image->depth = 1;
+    image->samples = std::max(1, samples);
+    image->rgba.assign(texels, 0u);
+    if (samples > 0)
+      image->sample_rgba.assign(sample_texels, 0u);
   }
 }
 
@@ -400,8 +616,15 @@ void SetTextureStorage(GLenum target,
       image->width = level_width;
       image->height = level_height;
       image->depth = texture->target == GL_TEXTURE_3D ? depth : 1;
-      image->rgba.assign(
-          static_cast<size_t>(level_width) * level_height * image->depth, 0u);
+      const size_t texels =
+          static_cast<size_t>(level_width) * level_height * image->depth;
+      if (IsFloatInternalFormat(internal_format)) {
+        image->rgba.clear();
+        image->float_rgba.assign(texels * 4, 0.0f);
+      } else {
+        image->float_rgba.clear();
+        image->rgba.assign(texels, 0u);
+      }
     }
     level_width = std::max(1, level_width / 2);
     level_height = std::max(1, level_height / 2);
@@ -687,6 +910,13 @@ void glTexSubImage2D(GLenum target,
     return;
   }
   const zgl::PixelStoreState& store = context->state.pixel_store;
+  if (!image->float_rgba.empty()) {
+    zgl::UploadFloatSlice(image, xoffset, yoffset, 0, width, height, format,
+                          type, store.unpack_row_length,
+                          store.unpack_skip_rows, store.unpack_skip_pixels,
+                          pixels);
+    return;
+  }
   zgl::UploadSlice(image, xoffset, yoffset, 0, width, height, format, type,
                    store.unpack_row_length, store.unpack_skip_rows,
                    store.unpack_skip_pixels, pixels);
@@ -797,17 +1027,65 @@ void glCompressedTexImage2D(GLenum target,
                             GLint border,
                             GLsizei image_size,
                             const void* data) {
-  (void)target;
-  (void)level;
-  (void)internal_format;
-  (void)width;
-  (void)height;
-  (void)border;
-  (void)image_size;
-  (void)data;
   zgl::Context* context = zgl::ApiContext();
-  if (context)
+  if (!context)
+    return;
+  int face = 0;
+  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  if (!texture)
+    return;
+  if (level < 0 || width < 0 || height < 0 || border != 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (width > zgl::kMaxTextureSize || height > zgl::kMaxTextureSize) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!zgl::IsCompressedFormat(internal_format)) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (texture->immutable) {
     context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (level > texture->levels) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (!data || width == 0 || height == 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const int extent = texture->target == GL_TEXTURE_3D
+                         ? std::max(width, height)
+                         : std::max(width, height);
+  if (level >= zgl::MipLevelCount(extent, extent) && extent > 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const int expected = ((width + 3) / 4) * ((height + 3) / 4) *
+                       zgl::CompressedBlockBytes(internal_format);
+  if (image_size < expected) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (level == 0) {
+    texture->width = width;
+    texture->height = height;
+    texture->depth = 1;
+    texture->internal_format = internal_format;
+  }
+  const int levels = std::max(texture->levels, level + 1);
+  texture->Resize(levels, texture->faces());
+  zgl::TextureImage* image = texture->mutable_image(level, face);
+  if (!image)
+    return;
+  if (!zgl::DecodeCompressedImage(internal_format, width, height, image_size,
+                                  data, image)) {
+    context->SetError(GL_INVALID_VALUE);
+  }
 }
 
 void glCompressedTexSubImage2D(GLenum target,
@@ -819,18 +1097,48 @@ void glCompressedTexSubImage2D(GLenum target,
                                GLenum format,
                                GLsizei image_size,
                                const void* data) {
-  (void)target;
-  (void)level;
-  (void)xoffset;
-  (void)yoffset;
-  (void)width;
-  (void)height;
-  (void)format;
-  (void)image_size;
-  (void)data;
   zgl::Context* context = zgl::ApiContext();
-  if (context)
+  if (!context)
+    return;
+  int face = 0;
+  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  if (!texture)
+    return;
+  if (level < 0 || level >= texture->levels || xoffset < 0 || yoffset < 0 ||
+      width < 0 || height < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  zgl::TextureImage* image = texture->mutable_image(level, face);
+  if (!image || image->rgba.empty()) {
     context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (xoffset + width > image->width || yoffset + height > image->height) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (format != texture->internal_format) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (!data || width == 0 || height == 0) {
+    return;
+  }
+  zgl::TextureImage decoded;
+  if (!zgl::DecodeCompressedImage(format, width, height, image_size, data,
+                                  &decoded)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  for (int y = 0; y < height; ++y) {
+    const uint32_t* source =
+        decoded.rgba.data() + static_cast<size_t>(y) * width;
+    uint32_t* destination =
+        image->rgba.data() + static_cast<size_t>(y + yoffset) * image->width +
+        xoffset;
+    memcpy(destination, source, sizeof(uint32_t) * width);
+  }
 }
 
 void glCopyTexImage2D(GLenum target,
@@ -1100,6 +1408,23 @@ static void InternalFormatSizes(GLenum format,
       sizes[2] = 8;
       sizes[3] = 8;
       return;
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+      sizes[0] = sizes[1] = sizes[2] = sizes[3] =
+          format == GL_RGBA16F ? 16 : 32;
+      return;
+    case GL_RGB16F:
+    case GL_RGB32F:
+      sizes[0] = sizes[1] = sizes[2] = format == GL_RGB16F ? 16 : 32;
+      return;
+    case GL_R16F:
+    case GL_R32F:
+      sizes[0] = format == GL_R16F ? 16 : 32;
+      return;
+    case GL_RG16F:
+    case GL_RG32F:
+      sizes[0] = sizes[1] = format == GL_RG16F ? 16 : 32;
+      return;
     case GL_RGB:
     case GL_RGB8:
     case GL_SRGB8:
@@ -1217,12 +1542,28 @@ void glGetTexLevelParameteriv(GLenum target,
       params[0] = stencil_bits;
       return;
     case GL_TEXTURE_COMPRESSED:
-      params[0] = 0;
+      params[0] = zgl::IsCompressedFormat(texture->internal_format) ? 1 : 0;
+      return;
+    case GL_TEXTURE_SAMPLES:
+      params[0] = image->samples > 1 ? image->samples : 0;
+      return;
+    case GL_TEXTURE_FIXED_SAMPLE_LOCATIONS:
+      params[0] = texture->fixed_sample_locations ? 1 : 0;
       return;
     default:
       context->SetError(GL_INVALID_ENUM);
       return;
   }
+}
+
+void glTexStorage2DMultisample(GLenum target,
+                               GLsizei samples,
+                               GLenum internal_format,
+                               GLsizei width,
+                               GLsizei height,
+                               GLboolean fixed_sample_locations) {
+  zgl::SetMultisampleTextureStorage(target, samples, internal_format, width,
+                                   height, fixed_sample_locations);
 }
 
 void glGetSamplerParameteriv(GLuint sampler, GLenum pname, GLint* params) {

@@ -35,7 +35,7 @@ the host build within one 8-bit LSB, which is the regression guarantee the
 suite provides.
 
 These fifteen cases are the complete visual set, one screenshot per case. The
-API-level suite has 173 cases; many of them exercise state transitions, invalid
+API-level suite has 181 cases; many of them exercise state transitions, invalid
 enums and error paths that never touch a framebuffer, so those are asserted in
 code instead of captured as images.
 
@@ -71,8 +71,8 @@ The second argument is the output directory; one PPM per case is written there.
 | Area | State |
 | --- | --- |
 | GLES 2.0 API | Complete: buffers, vertex arrays, textures, framebuffers, shaders, state, draws |
-| GLES 3.0 API | Core subset: VAOs, instancing, primitive restart, queries, fences, sampler objects, blit, invalidate, uniform blocks, transform feedback. Still missing: MSAA and compressed/float texture formats |
-| Uniform blocks | `layout(std140)` blocks with scalar, vector and matrix members, optional instance names, per-program binding points and ranged `GL_UNIFORM_BUFFER` bindings. Arrays and structs inside blocks are not supported yet |
+| GLES 3.0 API | Core subset: VAOs, instancing, primitive restart, queries, fences, sampler objects, blit, invalidate, uniform blocks, transform feedback, 4x MSAA, ETC2/EAC compressed textures and floating-point texture sampling |
+| Uniform blocks | `layout(std140)` blocks with scalar, vector, matrix, array and structure members, optional instance names, per-program binding points and ranged `GL_UNIFORM_BUFFER` bindings |
 | Transform feedback | Named feedback objects, interleaved and separate varyings, base and ranged `GL_TRANSFORM_FEEDBACK_BUFFER` bindings, begin/end/pause/resume, primitive queries and `glDrawTransformFeedback`. Varyings must be float scalars or vectors; instanced feedback draws are not implemented |
 | GLSL | Interpreter and SLJIT tier for ES 1.00 / 3.00 shaders; unsupported constructs fall back per stage, see [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
 | Shader math | Transcendental built-ins use minimax approximations; `sin` / `cos` evaluate four lanes at a time with NEON on ARMv7. Integer, depth, stencil and blend paths stay exact |
@@ -175,7 +175,7 @@ tools/coverage.sh build-cov
 ```
 
 The script configures a gcov build, runs the tests, and prints per-file line
-coverage into `build-cov/coverage/summary.txt`. The current tree executes 173
+coverage into `build-cov/coverage/summary.txt`. The current tree executes 181
 API tests with zero failed checks; `tools/coverage.sh` reports line coverage for
 the host build. The uncovered remainder is dominated by defensive error
 branches, unsupported-format rejection paths and the GPU-only stubs, which are
@@ -221,14 +221,22 @@ image, draw statistics or the last shader log.
 
 - A fragment shader may write up to four colour outputs, at locations 0 to 3.
   More than four outputs, or two outputs at the same location, fail to link.
-- Arrays, structures, arrays or structures inside uniform blocks, `out`/`inout`
-  parameters and recursive functions are outside the interpreted GLSL subset.
-  Uniform blocks themselves accept scalar, vector and matrix members.
+- `out`/`inout` parameters, function overloading and recursion are outside the
+  interpreted GLSL subset.  Arrays, structures and arrays of structures inside
+  uniform blocks are supported; local structure definitions are not.
+- Structures and array elements in the interpreter use a separate aggregate
+  value buffer; the SLJIT tier only compiles scalar, vector and matrix types and
+  falls back to the interpreter for aggregates and unsigned integers.
 - Transform feedback varyings are limited to float scalars and vectors, and
   instanced feedback draws are not implemented. When feedback is active without
   rasterizer discard, the vertex shader runs once for capture and again for
   rasterisation.
-- MSAA and compressed/float texture formats are not implemented.
+- MSAA uses up to four samples for renderbuffers and textures.  The default
+  framebuffer remains single-sampled; `gl_SampleMask` output and
+  `glMinSampleShading` are not implemented.
+- Compressed textures are software-decoded ETC2/EAC blocks (ETC1-compatible RGB,
+  ETC2 RGBA and R11/RG11 EAC).  ASTC, DXT and vendor formats remain unsupported.
+  Floating-point textures are sampleable but not colour-renderable.
 - Texture images are stored top-down; `v = 0` addresses the first stored row.
 - `dFdx`, `dFdy` and `fwidth` return zero, and implicit LOD selection is not
   computed; `textureLod` selects mip levels explicitly.

@@ -39,6 +39,8 @@ enum class BuiltinId {
   kPointCoord,   // gl_PointCoord, vec2
   kVertexId,     // gl_VertexID, int
   kInstanceId,   // gl_InstanceID, int
+  kSampleId,     // gl_SampleID, int
+  kSampleMaskIn, // gl_SampleMaskIn, int
   kFragColor,    // gl_FragColor, vec4
   kFragData,     // gl_FragData[0], vec4
   kFragDepth,    // gl_FragDepth, float
@@ -222,6 +224,8 @@ struct Expr {
   // Set when this variable is a uniform block instance; field access resolves
   // the member to its uniform slot.
   int ubo_block = -1;
+  // kField: flattened component offset of a structure member.
+  int field_offset = 0;
 
   // kField: |text| is the swizzle or field name.
   // kCall: |text| is the function name; |builtin_func| is kNone for user

@@ -12,15 +12,19 @@ storage qualifiers are accepted; the evaluator semantics are identical.
 
 ## Types
 
-- Scalars: `float`, `int`, `bool`.
-- Vectors: `vec2`-`vec4`, `ivec2`-`ivec4`, `bvec2`-`bvec4`.
-- Matrices: `mat2`-`mat4`; square matrices only, stored column major.
+- Scalars: `float`, `int`, `uint`, `bool`.
+- Vectors: `vec2`-`vec4`, `ivec2`-`ivec4`, `uvec2`-`uvec4`, `bvec2`-`bvec4`.
+- Matrices: `mat2`-`mat4` plus the non-square `matCxR` forms, stored column
+  major.
 - Samplers: `sampler2D`, `samplerCube`, `sampler3D`.
+- Arrays and structures, including arrays of structures, with `std140` layout
+  metadata for uniform blocks.
 - `void` for function returns.
 
 Integer and boolean values live in float registers. The interpreter truncates
 on read; this is exact for the 24-bit integer range that shaders normally use
-and avoids a second register file.
+and avoids a second register file.  Unsigned integer literals use the `u`
+suffix and integer bit operations are evaluated with unsigned semantics.
 
 ## Qualifiers and declarations
 
@@ -29,17 +33,22 @@ and avoids a second register file.
 - Vertex outputs: `varying` and `out`.
 - Fragment outputs: `gl_FragColor`, `gl_FragData[0..3]`, or up to four `out vec4`
   variables with `layout(location = N)`; locations 0 to 3.
-- `uniform` declarations of scalar, vector, matrix and sampler types.
+- `uniform` declarations of scalar, vector, matrix, sampler, array and
+  structure types.
+- Global and local array declarations, global structure definitions and
+  structure instance declarations.  Constructor syntax covers arrays
+  (`Type[N](...)`) and structures.
+- Array indexing, structure field selection and `array.length()` are
+  available in expressions.
 
-Arrays and structures are not part of the grammar. `layout(std140) uniform`
-interface blocks are the exception described below.
 `layout(location = ...)` is accepted on vertex inputs and fragment outputs.
 
 ## Uniform blocks
 
-A `layout(std140) uniform` block may contain scalar, vector and matrix members.
-Block members cannot be samplers, arrays or structures. Both spellings are
-accepted:
+A `layout(std140) uniform` block may contain scalar, vector, matrix, array and
+structure members.  Arrays use a 16-byte aligned stride and structures use
+recursive member offsets.  Block members cannot be samplers. Both spellings
+are accepted:
 
 ```
 layout(std140) uniform Tint { vec4 color; };             // color is global
@@ -143,11 +152,10 @@ Matrices are received in column-major order unless the `transpose` flag is set.
 
 ## Deliberate omissions
 
-- Arrays, structures, and `const` arrays.
+- Local structure definitions.
 - `out` and `inout` parameters.
 - Function overloading and recursion.
-- Arrays or structures inside uniform blocks, and shader storage blocks.
+- Shader storage blocks.
 - Implicit LOD selection: `texture2D` samples level zero, `textureLod` selects a
   level explicitly. `dFdx`, `dFdy` and `fwidth` return zero.
-- Integer bit operations, packing functions and precision qualifiers are
-  parsed but have no effect.
+- Packing functions and precision qualifiers are parsed but have no effect.

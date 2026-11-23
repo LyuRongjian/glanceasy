@@ -64,7 +64,7 @@ TEST(ImplementationLimitsAreAdvertised) {
   glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &value);
   EXPECT_EQ(value, 4);
   glGetIntegerv(GL_MAX_SAMPLES, &value);
-  EXPECT_EQ(value, 0);
+  EXPECT_EQ(value, 4);
   glGetIntegerv(GL_SUBPIXEL_BITS, &value);
   EXPECT_EQ(value, 8);
   glGetIntegerv(GL_RED_BITS, &value);

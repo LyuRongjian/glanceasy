@@ -384,6 +384,9 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
            const void* indices,
            GLsizei instance_count);
 
+  // Averages multisample attachments into their resolved planes.
+  void Resolve();
+
   // FragmentSink implementation.
   void Shade(const Fragment& fragment) override;
 
@@ -741,6 +744,17 @@ bool Pipeline::Prepare() {
   }
   empty_clip_ = clip.IsEmpty();
   rasterizer_.SetClip(clip);
+  static const float kSamplePositions4[4][2] = {
+      {-0.375f, -0.125f}, {0.125f, -0.375f},
+      {0.375f, 0.125f},   {-0.125f, 0.375f}};
+  static const float kSamplePositions2[2][2] = {
+      {-0.375f, -0.125f}, {0.375f, 0.125f}};
+  if (target_.samples >= 4)
+    rasterizer_.SetSamples(4, kSamplePositions4);
+  else if (target_.samples == 2)
+    rasterizer_.SetSamples(2, kSamplePositions2);
+  else
+    rasterizer_.SetSamples(1, nullptr);
   return true;
 }
 
@@ -1156,8 +1170,11 @@ void Pipeline::Shade(const Fragment& fragment) {
   const int gl_y = target_.height - 1 - fragment.y;
   if (state.scissor_test && !state.scissor.Contains(fragment.x, gl_y))
     return;
+  const size_t sample_offset =
+      static_cast<size_t>(fragment.sample) * target_.sample_texels;
   const size_t pixel =
-      static_cast<size_t>(fragment.y) * target_.width + fragment.x;
+      static_cast<size_t>(fragment.y) * target_.width + fragment.x +
+      sample_offset;
   context_->stats.fragments_shaded++;
 
   const float interpolated_depth =
@@ -1191,13 +1208,16 @@ void Pipeline::Shade(const Fragment& fragment) {
   Interpolate(fragment, varying_values_.data());
   glsl::FragmentInput input;
   input.varyings = varying_values_.data();
-  input.frag_coord[0] = static_cast<float>(fragment.x) + 0.5f;
-  input.frag_coord[1] = static_cast<float>(gl_y) + 0.5f;
+  input.frag_coord[0] =
+      static_cast<float>(fragment.x) + 0.5f + fragment.sample_dx;
+  input.frag_coord[1] =
+      static_cast<float>(gl_y) + 0.5f + fragment.sample_dy;
   input.frag_coord[2] = interpolated_depth;
   input.frag_coord[3] = 1.0f;
   input.front_facing = current_front_;
   input.point_coord[0] = fragment.point_coord[0];
   input.point_coord[1] = fragment.point_coord[1];
+  input.sample_id = fragment.sample;
   input.uniforms = uniforms_;
   input.sampler = this;
   glsl::FragmentOutput output;
@@ -1233,6 +1253,44 @@ void Pipeline::Shade(const Fragment& fragment) {
   }
   if (wrote_color)
     context_->stats.fragments_written++;
+}
+
+void Pipeline::Resolve() {
+  if (target_.samples <= 1 || target_.sample_texels == 0)
+    return;
+  const size_t texels = target_.sample_texels;
+  for (int attachment = 0; attachment < kMaxColorAttachments; ++attachment) {
+    uint32_t* const destination = target_.resolved_colors[attachment];
+    if (!destination || !target_.colors[attachment])
+      continue;
+    const uint32_t* const samples =
+        reinterpret_cast<const uint32_t*>(target_.colors[attachment]);
+    for (size_t texel = 0; texel < texels; ++texel) {
+      uint32_t r = 0;
+      uint32_t g = 0;
+      uint32_t b = 0;
+      uint32_t a = 0;
+      for (int sample = 0; sample < target_.samples; ++sample) {
+        const Rgba rgba = UnpackRgba(samples[sample * texels + texel]);
+        r += rgba.r;
+        g += rgba.g;
+        b += rgba.b;
+        a += rgba.a;
+      }
+      const int count = target_.samples;
+      destination[texel] = PackRgba(static_cast<uint8_t>(r / count),
+                                    static_cast<uint8_t>(g / count),
+                                    static_cast<uint8_t>(b / count),
+                                    static_cast<uint8_t>(a / count));
+    }
+  }
+  if (target_.resolved_depth && target_.depth) {
+    memcpy(target_.resolved_depth, target_.depth,
+           sizeof(uint16_t) * texels);
+  }
+  if (target_.resolved_stencil && target_.stencil) {
+    memcpy(target_.resolved_stencil, target_.stencil, texels);
+  }
 }
 
 void Pipeline::StoreFragmentColor(size_t pixel,
@@ -1403,6 +1461,7 @@ void Draw(GLenum mode,
     return;
   Pipeline pipeline(context);
   pipeline.Run(mode, first, count, index_type, indices, instance_count);
+  pipeline.Resolve();
 }
 
 }  // namespace zgl

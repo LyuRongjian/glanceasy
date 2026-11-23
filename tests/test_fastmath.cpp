@@ -103,3 +103,4 @@ TEST(FastMathEdgeCases) {
   EXPECT_TRUE(Pow(0.0f, 0.0f) == 1.0f);
   EXPECT_TRUE(std::isnan(Pow(-2.0f, 3.0f)));
 }
+

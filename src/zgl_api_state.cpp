@@ -89,9 +89,13 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = kMaxColorAttachments;
       return true;
     case GL_MAX_SAMPLES:
+      *first = kMaxSamples;
+      return true;
     case GL_SAMPLES:
     case GL_SAMPLE_BUFFERS:
     case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
+      *first = 10;
+      return true;
     case GL_NUM_SHADER_BINARY_FORMATS:
     case GL_NUM_EXTENSIONS:
       *first = 0;
@@ -696,10 +700,16 @@ void glClear(GLbitfield mask) {
           target.colors[buffer - GL_COLOR_ATTACHMENT0];
       if (!color_buffer)
         continue;
+      const int sample_planes = target.multisampled() ? target.samples : 1;
+      const size_t plane_bytes =
+          target.multisampled() ? target.sample_texels * 4 : 0;
+      for (int sample = 0; sample < sample_planes; ++sample) {
+        uint8_t* const plane =
+            color_buffer + static_cast<size_t>(sample) * plane_bytes;
       if (writes_all_channels) {
         for (int y = area.y; y < area.bottom(); ++y) {
           uint8_t* row =
-              color_buffer + static_cast<size_t>(y) * target.width * 4;
+              plane + static_cast<size_t>(y) * target.width * 4;
           zgl::simd::FillRgba(
               row + static_cast<size_t>(area.x) * 4, area.width, packed);
         }
@@ -707,7 +717,7 @@ void glClear(GLbitfield mask) {
       }
       for (int y = area.y; y < area.bottom(); ++y) {
         uint8_t* row =
-            color_buffer + static_cast<size_t>(y) * target.width * 4;
+            plane + static_cast<size_t>(y) * target.width * 4;
         for (int x = area.x; x < area.right(); ++x) {
           uint32_t previous;
           memcpy(&previous, row + static_cast<size_t>(x) * 4,
@@ -721,28 +731,67 @@ void glClear(GLbitfield mask) {
           memcpy(row + static_cast<size_t>(x) * 4, &value, sizeof(value));
         }
       }
+      }
+      if (target.multisampled() &&
+          target.resolved_colors[buffer - GL_COLOR_ATTACHMENT0]) {
+        uint32_t* const resolved =
+            target.resolved_colors[buffer - GL_COLOR_ATTACHMENT0];
+        for (int y = area.y; y < area.bottom(); ++y) {
+          for (int x = area.x; x < area.right(); ++x)
+            resolved[static_cast<size_t>(y) * target.width + x] = packed;
+        }
+      }
     }
   }
   if ((mask & GL_DEPTH_BUFFER_BIT) && target.depth && state.depth.mask) {
     const uint16_t depth = static_cast<uint16_t>(
         zgl::Clamp01(state.clear_depth) * 65535.0f + 0.5f);
-    for (int y = area.y; y < area.bottom(); ++y) {
-      uint16_t* row = target.depth + static_cast<size_t>(y) * target.width;
-      zgl::simd::FillU16(row + area.x, area.width, depth);
+    const int sample_planes = target.multisampled() ? target.samples : 1;
+    const size_t plane_texels =
+        target.multisampled() ? target.sample_texels : 0;
+    for (int sample = 0; sample < sample_planes; ++sample) {
+      uint16_t* const plane =
+          target.depth + static_cast<size_t>(sample) * plane_texels;
+      for (int y = area.y; y < area.bottom(); ++y) {
+        uint16_t* row = plane + static_cast<size_t>(y) * target.width;
+        zgl::simd::FillU16(row + area.x, area.width, depth);
+      }
+    }
+    if (target.resolved_depth) {
+      for (int y = area.y; y < area.bottom(); ++y) {
+        uint16_t* row =
+            target.resolved_depth + static_cast<size_t>(y) * target.width;
+        zgl::simd::FillU16(row + area.x, area.width, depth);
+      }
     }
   }
   if ((mask & GL_STENCIL_BUFFER_BIT) && target.stencil) {
     const uint8_t value = static_cast<uint8_t>(state.clear_stencil);
     const uint8_t write_mask = static_cast<uint8_t>(state.stencil.write_mask);
-    for (int y = area.y; y < area.bottom(); ++y) {
-      uint8_t* row = target.stencil + static_cast<size_t>(y) * target.width;
-      if (write_mask == 0xFF) {
-        zgl::simd::FillU8(row + area.x, area.width, value);
-        continue;
+    const int sample_planes = target.multisampled() ? target.samples : 1;
+    const size_t plane_texels =
+        target.multisampled() ? target.sample_texels : 0;
+    for (int sample = 0; sample < sample_planes; ++sample) {
+      uint8_t* const plane =
+          target.stencil + static_cast<size_t>(sample) * plane_texels;
+      for (int y = area.y; y < area.bottom(); ++y) {
+        uint8_t* row = plane + static_cast<size_t>(y) * target.width;
+        if (write_mask == 0xFF) {
+          zgl::simd::FillU8(row + area.x, area.width, value);
+          continue;
+        }
+        for (int x = area.x; x < area.right(); ++x) {
+          row[x] = static_cast<uint8_t>((value & write_mask) |
+                                        (row[x] & ~write_mask));
+        }
       }
-      for (int x = area.x; x < area.right(); ++x) {
-        row[x] =
-            static_cast<uint8_t>((value & write_mask) | (row[x] & ~write_mask));
+    }
+    if (target.resolved_stencil) {
+      for (int y = area.y; y < area.bottom(); ++y) {
+        uint8_t* row =
+            target.resolved_stencil + static_cast<size_t>(y) * target.width;
+        for (int x = area.x; x < area.right(); ++x)
+          row[x] = value;
       }
     }
   }

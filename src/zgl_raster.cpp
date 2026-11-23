@@ -30,6 +30,11 @@ bool IncludesWeight(float weight, bool top_left) {
 
 }  // namespace
 
+void Rasterizer::SetSamples(int count, const float (*positions)[2]) {
+  samples_ = count > 1 ? count : 1;
+  sample_positions_ = samples_ > 1 ? positions : nullptr;
+}
+
 void Rasterizer::DrawTriangle(const RasterVertex& a,
                               const RasterVertex& b,
                               const RasterVertex& c,
@@ -91,8 +96,41 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
     const float step1 = dw1_dx;
 
     for (int x = x0; x <= x1; ++x) {
-      if (IncludesWeight(w0, top_left0) && IncludesWeight(w1, top_left1) &&
-          IncludesWeight(1.0f - w0 - w1, top_left2)) {
+      if (samples_ > 1 && sample_positions_) {
+        for (int sample = 0; sample < samples_; ++sample) {
+          const float sx = static_cast<float>(x) + 0.5f +
+                           sample_positions_[sample][0];
+          const float sy = py + sample_positions_[sample][1];
+          const float s0 =
+              ((v1->y - v2->y) * (sx - v2->x) +
+               (v2->x - v1->x) * (sy - v2->y)) *
+              inv_det;
+          const float s1 =
+              ((v2->y - v0->y) * (sx - v2->x) +
+               (v0->x - v2->x) * (sy - v2->y)) *
+              inv_det;
+          if (!IncludesWeight(s0, top_left0) || !IncludesWeight(s1, top_left1) ||
+              !IncludesWeight(1.0f - s0 - s1, top_left2)) {
+            continue;
+          }
+          Fragment fragment;
+          fragment.x = x;
+          fragment.y = y;
+          fragment.sample = sample;
+          fragment.sample_dx = sample_positions_[sample][0];
+          fragment.sample_dy = sample_positions_[sample][1];
+          fragment.depth = v2->z + s0 * z0 + s1 * z1;
+          fragment.bary[0] = s0;
+          fragment.bary[1] = s1;
+          fragment.bary[2] = 1.0f - s0 - s1;
+          fragment.vertex[0] = i0;
+          fragment.vertex[1] = i1;
+          fragment.vertex[2] = i2;
+          sink->Shade(fragment);
+        }
+      } else if (IncludesWeight(w0, top_left0) &&
+                 IncludesWeight(w1, top_left1) &&
+                 IncludesWeight(1.0f - w0 - w1, top_left2)) {
         Fragment fragment;
         fragment.x = x;
         fragment.y = y;

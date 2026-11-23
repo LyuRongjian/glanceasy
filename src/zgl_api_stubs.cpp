@@ -685,21 +685,6 @@ void glProgramParameteri(GLuint program, GLenum pname, GLint value) {
 
 // ---- Multisampling --------------------------------------------------------
 
-void glTexStorage2DMultisample(GLenum target,
-                               GLsizei samples,
-                               GLenum internal_format,
-                               GLsizei width,
-                               GLsizei height,
-                               GLboolean fixed_sample_locations) {
-  (void)target;
-  (void)samples;
-  (void)internal_format;
-  (void)width;
-  (void)height;
-  (void)fixed_sample_locations;
-  zgl::Reject();
-}
-
 void glTexStorage3DMultisample(GLenum target,
                                GLsizei samples,
                                GLenum internal_format,
@@ -718,10 +703,24 @@ void glTexStorage3DMultisample(GLenum target,
 }
 
 void glGetMultisamplefv(GLenum pname, GLuint index, GLfloat* value) {
-  (void)pname;
-  (void)index;
-  if (value)
-    value[0] = 0.5f;
+  zgl::Context* context = zgl::ApiContext();
+  if (!value)
+    return;
+  if (pname != GL_SAMPLE_POSITION) {
+    if (context)
+      context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (index >= static_cast<GLuint>(zgl::kMaxSamples)) {
+    if (context)
+      context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  static const float kPositions[4][2] = {
+      {0.125f, 0.375f}, {0.625f, 0.125f},
+      {0.875f, 0.625f}, {0.375f, 0.875f}};
+  value[0] = kPositions[index][0];
+  value[1] = kPositions[index][1];
 }
 
 void glSampleMaski(GLuint mask_number, GLbitfield mask) {

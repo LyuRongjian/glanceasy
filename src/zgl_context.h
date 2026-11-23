@@ -28,6 +28,7 @@ struct Surface {
   int width = 0;
   int height = 0;
   int depth = 0;  // Slice count for 3D textures, otherwise 1.
+  int samples = 1;
   std::vector<uint8_t> rgba;
   std::vector<uint16_t> depth16;
   std::vector<uint8_t> stencil8;
@@ -59,7 +60,19 @@ struct RenderTarget {
   uint16_t* depth = nullptr;
   uint8_t* stencil = nullptr;
 
+  // Multisample storage.  |samples| is 1 for ordinary surfaces; when it is
+  // greater, the colour/depth/stencil pointers above address |samples| planes
+  // of width * height texels each.
+  int samples = 1;
+  size_t sample_texels = 0;
+  // Resolved planes written at the end of a draw so that reads and texture
+  // sampling see a normal single-sample image.
+  uint32_t* resolved_colors[kMaxColorAttachments] = {};
+  uint16_t* resolved_depth = nullptr;
+  uint8_t* resolved_stencil = nullptr;
+
   bool valid() const { return color != nullptr && width > 0 && height > 0; }
+  bool multisampled() const { return samples > 1; }
 };
 
 // ---------------------------------------------------------------------------
@@ -98,10 +111,18 @@ struct TextureImage {
   int width = 0;
   int height = 0;
   int depth = 1;
-  // 0xAABBGGRR per texel, one 32-bit word per pixel.
+  int samples = 1;
+  // 0xAABBGGRR per texel, one 32-bit word per pixel.  A multisample image
+  // keeps the resolved plane here and the sample planes in |sample_rgba|.
   std::vector<uint32_t> rgba;
   std::vector<uint16_t> depth16;
   std::vector<uint8_t> stencil8;
+  std::vector<uint32_t> sample_rgba;
+  std::vector<uint16_t> sample_depth16;
+  std::vector<uint8_t> sample_stencil8;
+  // Floating point colour storage (RGBA, four floats per texel).  Non-empty
+  // only for float internal formats.
+  std::vector<float> float_rgba;
 };
 
 class Texture {
@@ -121,6 +142,8 @@ class Texture {
   int height = 0;
   int depth = 0;
   int levels = 0;
+  int samples = 0;  // Zero for ordinary textures, otherwise the sample count.
+  bool fixed_sample_locations = true;
   bool immutable = false;
   std::vector<TextureImage> images;  // level * faces + face
 
@@ -136,6 +159,7 @@ class Renderbuffer {
  public:
   int width = 0;
   int height = 0;
+  int samples = 0;
   GLenum format = GL_RGBA8;
   TextureImage image;
 };

@@ -745,19 +745,63 @@ void glGetActiveUniformsiv(GLuint program,
 
 // ---- Uniform values -------------------------------------------------------
 
+namespace {
+
+void SetFloatArray(GLint location, GLsizei count, int components,
+                   const GLfloat* value) {
+  if (!value || count < 1)
+    return;
+  zgl::SetUniformFloats(location, value, components, count, false);
+}
+
+void SetIntArray(GLint location, GLsizei count, int components,
+                 const GLint* value) {
+  if (!value || count < 1)
+    return;
+  std::vector<GLfloat> converted(static_cast<size_t>(components) *
+                                 static_cast<size_t>(count));
+  for (size_t i = 0; i < converted.size(); ++i)
+    converted[i] = static_cast<GLfloat>(value[i]);
+  zgl::SetUniformFloats(location, converted.data(), components, count, true);
+}
+
+void SetUIntArray(GLint location, GLsizei count, int components,
+                  const GLuint* value) {
+  if (!value || count < 1)
+    return;
+  std::vector<GLfloat> converted(static_cast<size_t>(components) *
+                                 static_cast<size_t>(count));
+  for (size_t i = 0; i < converted.size(); ++i)
+    converted[i] = static_cast<GLfloat>(value[i]);
+  zgl::SetUniformFloats(location, converted.data(), components, count, true);
+}
+
+void SetMatrixArray(GLint location,
+                    GLsizei count,
+                    int rows,
+                    int columns,
+                    GLboolean transpose,
+                    const GLfloat* value) {
+  if (!value || count < 1)
+    return;
+  zgl::SetUniformMatrix(location, value, rows, columns, count,
+                        transpose != GL_FALSE);
+}
+
+}  // namespace
+
 void glUniform1f(GLint location, GLfloat v0) {
-  const GLfloat values[1] = {v0};
-  zgl::SetUniformFloats(location, values, 1, false);
+  SetFloatArray(location, 1, 1, &v0);
 }
 
 void glUniform2f(GLint location, GLfloat v0, GLfloat v1) {
   const GLfloat values[2] = {v0, v1};
-  zgl::SetUniformFloats(location, values, 2, false);
+  SetFloatArray(location, 1, 2, values);
 }
 
 void glUniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2) {
   const GLfloat values[3] = {v0, v1, v2};
-  zgl::SetUniformFloats(location, values, 3, false);
+  SetFloatArray(location, 1, 3, values);
 }
 
 void glUniform4f(GLint location,
@@ -766,242 +810,158 @@ void glUniform4f(GLint location,
                  GLfloat v2,
                  GLfloat v3) {
   const GLfloat values[4] = {v0, v1, v2, v3};
-  zgl::SetUniformFloats(location, values, 4, false);
+  SetFloatArray(location, 1, 4, values);
 }
 
 void glUniform1i(GLint location, GLint v0) {
-  const GLfloat values[1] = {static_cast<GLfloat>(v0)};
-  zgl::SetUniformFloats(location, values, 1, true);
+  const GLint values[1] = {v0};
+  SetIntArray(location, 1, 1, values);
 }
 
 void glUniform2i(GLint location, GLint v0, GLint v1) {
-  const GLfloat values[2] = {static_cast<GLfloat>(v0),
-                             static_cast<GLfloat>(v1)};
-  zgl::SetUniformFloats(location, values, 2, true);
+  const GLint values[2] = {v0, v1};
+  SetIntArray(location, 1, 2, values);
 }
 
 void glUniform3i(GLint location, GLint v0, GLint v1, GLint v2) {
-  const GLfloat values[3] = {static_cast<GLfloat>(v0), static_cast<GLfloat>(v1),
-                             static_cast<GLfloat>(v2)};
-  zgl::SetUniformFloats(location, values, 3, true);
+  const GLint values[3] = {v0, v1, v2};
+  SetIntArray(location, 1, 3, values);
 }
 
 void glUniform4i(GLint location, GLint v0, GLint v1, GLint v2, GLint v3) {
-  const GLfloat values[4] = {static_cast<GLfloat>(v0), static_cast<GLfloat>(v1),
-                             static_cast<GLfloat>(v2),
-                             static_cast<GLfloat>(v3)};
-  zgl::SetUniformFloats(location, values, 4, true);
+  const GLint values[4] = {v0, v1, v2, v3};
+  SetIntArray(location, 1, 4, values);
 }
 
 void glUniform1fv(GLint location, GLsizei count, const GLfloat* value) {
-  if (!value || count < 1)
-    return;
-  zgl::SetUniformFloats(location, value, 1, false);
+  SetFloatArray(location, count, 1, value);
 }
 
 void glUniform2fv(GLint location, GLsizei count, const GLfloat* value) {
-  if (!value || count < 1)
-    return;
-  zgl::SetUniformFloats(location, value, 2, false);
+  SetFloatArray(location, count, 2, value);
 }
 
 void glUniform3fv(GLint location, GLsizei count, const GLfloat* value) {
-  if (!value || count < 1)
-    return;
-  zgl::SetUniformFloats(location, value, 3, false);
+  SetFloatArray(location, count, 3, value);
 }
 
 void glUniform4fv(GLint location, GLsizei count, const GLfloat* value) {
-  if (!value || count < 1)
-    return;
-  zgl::SetUniformFloats(location, value, 4, false);
+  SetFloatArray(location, count, 4, value);
 }
 
 void glUniform1iv(GLint location, GLsizei count, const GLint* value) {
-  // Array uniforms are outside the interpreted subset; |count| is ignored.
-  (void)count;
-  if (!value)
-    return;
-  const GLfloat converted[1] = {static_cast<GLfloat>(value[0])};
-  zgl::SetUniformFloats(location, converted, 1, true);
+  SetIntArray(location, count, 1, value);
 }
 
 void glUniform2iv(GLint location, GLsizei count, const GLint* value) {
-  // Array uniforms are outside the interpreted subset; |count| is ignored.
-  (void)count;
-  if (!value)
-    return;
-  const GLfloat converted[2] = {static_cast<GLfloat>(value[0]),
-                                static_cast<GLfloat>(value[1])};
-  zgl::SetUniformFloats(location, converted, 2, true);
+  SetIntArray(location, count, 2, value);
 }
 
 void glUniform3iv(GLint location, GLsizei count, const GLint* value) {
-  // Array uniforms are outside the interpreted subset; |count| is ignored.
-  (void)count;
-  if (!value)
-    return;
-  const GLfloat converted[3] = {static_cast<GLfloat>(value[0]),
-                                static_cast<GLfloat>(value[1]),
-                                static_cast<GLfloat>(value[2])};
-  zgl::SetUniformFloats(location, converted, 3, true);
+  SetIntArray(location, count, 3, value);
 }
 
 void glUniform4iv(GLint location, GLsizei count, const GLint* value) {
-  // Array uniforms are outside the interpreted subset; |count| is ignored.
-  (void)count;
-  if (!value)
-    return;
-  const GLfloat converted[4] = {
-      static_cast<GLfloat>(value[0]), static_cast<GLfloat>(value[1]),
-      static_cast<GLfloat>(value[2]), static_cast<GLfloat>(value[3])};
-  zgl::SetUniformFloats(location, converted, 4, true);
+  SetIntArray(location, count, 4, value);
 }
 
 void glUniformMatrix2fv(GLint location,
                         GLsizei count,
                         GLboolean transpose,
                         const GLfloat* value) {
-  if (!value || count < 1)
-    return;
-  zgl::SetUniformMatrix(location, value, 2, transpose != GL_FALSE);
+  SetMatrixArray(location, count, 2, 2, transpose, value);
 }
 
 void glUniformMatrix3fv(GLint location,
                         GLsizei count,
                         GLboolean transpose,
                         const GLfloat* value) {
-  if (!value || count < 1)
-    return;
-  zgl::SetUniformMatrix(location, value, 3, transpose != GL_FALSE);
+  SetMatrixArray(location, count, 3, 3, transpose, value);
 }
 
 void glUniformMatrix4fv(GLint location,
                         GLsizei count,
                         GLboolean transpose,
                         const GLfloat* value) {
-  if (!value || count < 1)
-    return;
-  zgl::SetUniformMatrix(location, value, 4, transpose != GL_FALSE);
+  SetMatrixArray(location, count, 4, 4, transpose, value);
 }
 
 void glUniformMatrix2x3fv(GLint location,
                           GLsizei count,
                           GLboolean transpose,
                           const GLfloat* value) {
-  (void)location;
-  (void)count;
-  (void)transpose;
-  (void)value;
+  SetMatrixArray(location, count, 3, 2, transpose, value);
 }
 
 void glUniformMatrix3x2fv(GLint location,
                           GLsizei count,
                           GLboolean transpose,
                           const GLfloat* value) {
-  (void)location;
-  (void)count;
-  (void)transpose;
-  (void)value;
+  SetMatrixArray(location, count, 2, 3, transpose, value);
 }
 
 void glUniformMatrix2x4fv(GLint location,
                           GLsizei count,
                           GLboolean transpose,
                           const GLfloat* value) {
-  (void)location;
-  (void)count;
-  (void)transpose;
-  (void)value;
+  SetMatrixArray(location, count, 4, 2, transpose, value);
 }
 
 void glUniformMatrix4x2fv(GLint location,
                           GLsizei count,
                           GLboolean transpose,
                           const GLfloat* value) {
-  (void)location;
-  (void)count;
-  (void)transpose;
-  (void)value;
+  SetMatrixArray(location, count, 2, 4, transpose, value);
 }
 
 void glUniformMatrix3x4fv(GLint location,
                           GLsizei count,
                           GLboolean transpose,
                           const GLfloat* value) {
-  (void)location;
-  (void)count;
-  (void)transpose;
-  (void)value;
+  SetMatrixArray(location, count, 4, 3, transpose, value);
 }
 
 void glUniformMatrix4x3fv(GLint location,
                           GLsizei count,
                           GLboolean transpose,
                           const GLfloat* value) {
-  (void)location;
-  (void)count;
-  (void)transpose;
-  (void)value;
+  SetMatrixArray(location, count, 3, 4, transpose, value);
 }
 
 void glUniform1ui(GLint location, GLuint v0) {
-  glUniform1i(location, static_cast<GLint>(v0));
+  const GLuint values[1] = {v0};
+  SetUIntArray(location, 1, 1, values);
 }
 
 void glUniform2ui(GLint location, GLuint v0, GLuint v1) {
-  glUniform2i(location, static_cast<GLint>(v0), static_cast<GLint>(v1));
+  const GLuint values[2] = {v0, v1};
+  SetUIntArray(location, 1, 2, values);
 }
 
 void glUniform3ui(GLint location, GLuint v0, GLuint v1, GLuint v2) {
-  glUniform3i(location, static_cast<GLint>(v0), static_cast<GLint>(v1),
-              static_cast<GLint>(v2));
+  const GLuint values[3] = {v0, v1, v2};
+  SetUIntArray(location, 1, 3, values);
 }
 
 void glUniform4ui(GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3) {
-  glUniform4i(location, static_cast<GLint>(v0), static_cast<GLint>(v1),
-              static_cast<GLint>(v2), static_cast<GLint>(v3));
+  const GLuint values[4] = {v0, v1, v2, v3};
+  SetUIntArray(location, 1, 4, values);
 }
 
 void glUniform1uiv(GLint location, GLsizei count, const GLuint* value) {
-  // Array uniforms are outside the interpreted subset; |count| is ignored.
-  (void)count;
-  if (!value)
-    return;
-  const GLfloat converted[1] = {static_cast<GLfloat>(value[0])};
-  zgl::SetUniformFloats(location, converted, 1, true);
+  SetUIntArray(location, count, 1, value);
 }
 
 void glUniform2uiv(GLint location, GLsizei count, const GLuint* value) {
-  // Array uniforms are outside the interpreted subset; |count| is ignored.
-  (void)count;
-  if (!value)
-    return;
-  const GLfloat converted[2] = {static_cast<GLfloat>(value[0]),
-                                static_cast<GLfloat>(value[1])};
-  zgl::SetUniformFloats(location, converted, 2, true);
+  SetUIntArray(location, count, 2, value);
 }
 
 void glUniform3uiv(GLint location, GLsizei count, const GLuint* value) {
-  // Array uniforms are outside the interpreted subset; |count| is ignored.
-  (void)count;
-  if (!value)
-    return;
-  const GLfloat converted[3] = {static_cast<GLfloat>(value[0]),
-                                static_cast<GLfloat>(value[1]),
-                                static_cast<GLfloat>(value[2])};
-  zgl::SetUniformFloats(location, converted, 3, true);
+  SetUIntArray(location, count, 3, value);
 }
 
 void glUniform4uiv(GLint location, GLsizei count, const GLuint* value) {
-  // Array uniforms are outside the interpreted subset; |count| is ignored.
-  (void)count;
-  if (!value)
-    return;
-  const GLfloat converted[4] = {
-      static_cast<GLfloat>(value[0]), static_cast<GLfloat>(value[1]),
-      static_cast<GLfloat>(value[2]), static_cast<GLfloat>(value[3])};
-  zgl::SetUniformFloats(location, converted, 4, true);
+  SetUIntArray(location, count, 4, value);
 }
 
 void glGetUniformfv(GLuint program, GLint location, GLfloat* params) {
@@ -1017,7 +977,7 @@ void glGetUniformfv(GLuint program, GLint location, GLfloat* params) {
   if (!value)
     return;
   for (int i = 0; i < value->type.components(); ++i)
-    params[i] = value->data[i];
+    params[i] = value->Data()[i];
 }
 
 void glGetUniformiv(GLuint program, GLint location, GLint* params) {
@@ -1033,7 +993,7 @@ void glGetUniformiv(GLuint program, GLint location, GLint* params) {
   if (!value)
     return;
   for (int i = 0; i < value->type.components(); ++i)
-    params[i] = static_cast<GLint>(value->data[i]);
+    params[i] = static_cast<GLint>(value->Data()[i]);
 }
 
 void glGetUniformuiv(GLuint program, GLint location, GLuint* params) {

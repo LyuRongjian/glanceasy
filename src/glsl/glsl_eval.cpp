@@ -32,11 +32,27 @@ constexpr int kMaxSteps = 1 << 21;
 constexpr float kPi = 3.14159265358979323846f;
 
 float ComponentAt(const Value& value, int index) {
-  if (index < 0 || index >= kValueFloats)
+  if (index < 0)
     return 0.0f;
   if (value.type.is_scalar())
     return value.data[0];
-  return value.data[index];
+  if (index >= value.size())
+    return 0.0f;
+  return value.Data()[index];
+}
+
+// Copies |count| components starting at |offset| into a new value of |type|.
+Value Slice(const Value& value, int offset, const Type& type, int count) {
+  Value out(type);
+  for (int i = 0; i < count && i < out.size(); ++i)
+    out.Data()[i] = ComponentAt(value, offset + i);
+  return out;
+}
+
+// Writes the components of |value| into |out| starting at |offset|.
+void WriteSlice(Value* out, int offset, const Value& value, int count) {
+  for (int i = 0; i < count && offset + i < out->size(); ++i)
+    out->Data()[offset + i] = ComponentAt(value, i);
 }
 
 template <typename F>
@@ -238,6 +254,8 @@ class Evaluator {
     point_coord_[0] = coord[0];
     point_coord_[1] = coord[1];
   }
+  void set_sample_id(int sample_id) { sample_id_ = sample_id; }
+  void set_sample_mask(uint32_t mask) { sample_mask_ = mask; }
 
   bool discarded() const { return discarded_; }
   const std::string& error() const { return error_; }
@@ -310,6 +328,8 @@ class Evaluator {
   float* varyings_out_ = nullptr;
   TextureSampler* sampler_ = nullptr;
   float fragment_coord_[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  int sample_id_ = 0;
+  uint32_t sample_mask_ = 0xFFFFFFFFu;
   bool front_facing_ = true;
   float point_coord_[2] = {0.0f, 0.0f};
 
@@ -364,6 +384,8 @@ void Evaluator::PrepareBuiltins() {
   point.data[0] = point_coord_[0];
   point.data[1] = point_coord_[1];
   StoreBuiltin(BuiltinId::kPointCoord, point);
+  StoreBuiltin(BuiltinId::kSampleId, MakeInt(sample_id_));
+  StoreBuiltin(BuiltinId::kSampleMaskIn, MakeInt(static_cast<int>(sample_mask_)));
 }
 
 bool Evaluator::RunMain() {
@@ -579,7 +601,7 @@ Value Evaluator::ReadVariable(const Expr& expr) {
       const int program_index = uniform_map_ ? uniform_map_[expr.index] : -1;
       const Value* value =
           program_ ? program_->uniform_value(program_index) : nullptr;
-      return value ? *value : Value(expr.type);
+      return value ? Convert(*value, expr.type) : Value(expr.type);
     }
     case Storage::kAttribute: {
       Value value(expr.type);
@@ -655,6 +677,14 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
   }
   if (target.kind == Expr::Kind::kField) {
     Value base = Eval(*target.base);
+    if (base.type.is_struct()) {
+      const Type& field_type = target.type;
+      const int count = field_type.components();
+      const Value converted = Convert(value, field_type);
+      WriteSlice(&base, target.field_offset, converted, count);
+      Assign(*target.base, base);
+      return;
+    }
     const int length = static_cast<int>(target.text.size());
     const char* sets[] = {"xyzw", "rgba", "stpq"};
     const std::string& field = target.text;
@@ -680,7 +710,17 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
   if (target.kind == Expr::Kind::kIndex) {
     Value base = Eval(*target.base);
     const Value index_value = Eval(*target.args[0]);
-    const int index = static_cast<int>(index_value.data[0]);
+    const int index = static_cast<int>(ComponentAt(index_value, 0));
+    if (base.type.is_array()) {
+      if (index < 0 || index >= base.type.array_size())
+        return;
+      const Type& element_type = base.type.array_element();
+      const int count = element_type.components();
+      const Value converted = Convert(value, element_type);
+      WriteSlice(&base, index * count, converted, count);
+      Assign(*target.base, base);
+      return;
+    }
     if (base.type.is_matrix()) {
       if (index < 0 || index >= base.type.columns())
         return;
@@ -700,6 +740,9 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
 
 Value Evaluator::EvalField(const Expr& expr) {
   const Value base = Eval(*expr.base);
+  if (base.type.is_struct()) {
+    return Slice(base, expr.field_offset, expr.type, expr.type.components());
+  }
   const std::string& field = expr.text;
   const int length = static_cast<int>(field.size());
   const char* sets[] = {"xyzw", "rgba", "stpq"};
@@ -721,7 +764,14 @@ Value Evaluator::EvalField(const Expr& expr) {
 Value Evaluator::EvalIndex(const Expr& expr) {
   const Value base = Eval(*expr.base);
   const Value index_value = Eval(*expr.args[0]);
-  const int index = static_cast<int>(index_value.data[0]);
+  const int index = static_cast<int>(ComponentAt(index_value, 0));
+  if (base.type.is_array()) {
+    if (index < 0 || index >= base.type.array_size())
+      return Value(expr.type);
+    const Type& element_type = base.type.array_element();
+    return Slice(base, index * element_type.components(), element_type,
+                 element_type.components());
+  }
   if (base.type.is_matrix()) {
     Value column(expr.type);
     if (index >= 0 && index < base.type.columns()) {
@@ -738,6 +788,51 @@ Value Evaluator::EvalIndex(const Expr& expr) {
 }
 
 Value Evaluator::EvalConstructor(const Expr& expr) {
+  if (expr.type.is_struct()) {
+    Value out(expr.type);
+    const StructInfo* info = expr.type.struct_info();
+    if (!info)
+      return out;
+    if (expr.args.size() == 1 && expr.args[0]->type == expr.type)
+      return Convert(Eval(*expr.args[0]), expr.type);
+    if (expr.args.size() != info->members.size()) {
+      Fail("constructor for structure '" + info->name +
+           "' expects one argument per member");
+      return out;
+    }
+    for (size_t i = 0; i < info->members.size(); ++i) {
+      const StructMember& member = info->members[i];
+      const Value value = Convert(Eval(*expr.args[i]), member.type);
+      WriteSlice(&out, member.component_offset, value,
+                 member.type.components());
+    }
+    return out;
+  }
+  if (expr.type.is_array()) {
+    Value out(expr.type);
+    const Type& element_type = expr.type.array_element();
+    const int element_components = element_type.components();
+    if (expr.args.size() == 1 && expr.args[0]->type == expr.type)
+      return Convert(Eval(*expr.args[0]), expr.type);
+    int offset = 0;
+    for (const ExprPtr& argument : expr.args) {
+      const Value value = Eval(*argument);
+      if (offset + element_components > out.size())
+        break;
+      if (value.type == element_type) {
+        WriteSlice(&out, offset, value, element_components);
+      } else if (value.type.is_aggregate()) {
+        WriteSlice(&out, offset, value,
+                   std::min(element_components, value.size()));
+      } else {
+        const int count = value.type.is_scalar() ? 1 : value.size();
+        for (int i = 0; i < count && i < element_components; ++i)
+          out.Data()[offset + i] = ComponentAt(value, i);
+      }
+      offset += element_components;
+    }
+    return out;
+  }
   float components[kValueFloats] = {0.0f};
   int count = 0;
   for (const ExprPtr& argument : expr.args) {
@@ -879,6 +974,18 @@ Value Evaluator::Multiply(const Value& left,
                           const Value& right,
                           const Type& type) {
   if (!type.is_matrix() && left.type == type && right.type == type) {
+    if (type.base() == BaseType::kUInt) {
+      return MapPairs(left, right, type, [](float a, float b) {
+        return static_cast<float>(static_cast<uint32_t>(a) *
+                                  static_cast<uint32_t>(b));
+      });
+    }
+    if (type.base() == BaseType::kInt) {
+      return MapPairs(left, right, type, [](float a, float b) {
+        return static_cast<float>(static_cast<int32_t>(a) *
+                                  static_cast<int32_t>(b));
+      });
+    }
     return MapPairs(left, right, type, [](float a, float b) { return a * b; });
   }
   if (left.type.is_matrix() && right.type.is_matrix()) {
@@ -931,55 +1038,75 @@ Value Evaluator::BinaryOp(Op op,
                           const Value& left,
                           const Value& right,
                           const Type& result_type) {
+  const bool is_uint = result_type.base() == BaseType::kUInt;
+  const bool is_int = result_type.is_integer();
   switch (op) {
     case Op::kAdd:
-      return MapPairs(left, right, result_type,
-                      [](float a, float b) { return a + b; });
+      return MapPairs(left, right, result_type, [is_int](float a, float b) {
+        return is_int ? static_cast<float>(static_cast<int32_t>(a) +
+                                           static_cast<int32_t>(b))
+                      : a + b;
+      });
     case Op::kSubtract:
-      return MapPairs(left, right, result_type,
-                      [](float a, float b) { return a - b; });
+      return MapPairs(left, right, result_type, [is_int](float a, float b) {
+        return is_int ? static_cast<float>(static_cast<int32_t>(a) -
+                                           static_cast<int32_t>(b))
+                      : a - b;
+      });
     case Op::kMultiply:
       return Multiply(left, right, result_type);
     case Op::kDivide:
-      return MapPairs(left, right, result_type,
-                      [](float a, float b) { return a / b; });
+      return MapPairs(left, right, result_type, [is_int](float a, float b) {
+        if (!is_int)
+          return b == 0.0f ? 0.0f : a / b;
+        const int32_t divisor = static_cast<int32_t>(b);
+        return divisor == 0 ? 0.0f
+                            : static_cast<float>(static_cast<int32_t>(a) /
+                                                 divisor);
+      });
     case Op::kModulo:
-      return MapPairs(left, right, result_type, [](float a, float b) {
-        const float divisor = static_cast<float>(static_cast<int32_t>(b));
-        return divisor == 0.0f
-                   ? 0.0f
-                   : static_cast<float>(static_cast<int32_t>(a) %
-                                        static_cast<int32_t>(divisor));
+      return MapPairs(left, right, result_type, [is_int](float a, float b) {
+        if (!is_int)
+          return a - b * std::floor(a / b);
+        const int32_t divisor = static_cast<int32_t>(b);
+        return divisor == 0 ? 0.0f
+                            : static_cast<float>(static_cast<int32_t>(a) %
+                                                 divisor);
       });
     case Op::kShiftLeft:
     case Op::kShiftRight:
     case Op::kBitAnd:
     case Op::kBitXor:
     case Op::kBitOr:
-      return MapPairs(left, right, result_type, [op](float a, float b) {
-        const int32_t x = static_cast<int32_t>(a);
-        const int32_t y = static_cast<int32_t>(b);
-        int32_t value = 0;
+      return MapPairs(left, right, result_type, [op, is_uint](float a, float b) {
+        uint32_t x = is_uint ? static_cast<uint32_t>(a)
+                             : static_cast<uint32_t>(static_cast<int32_t>(a));
+        const uint32_t y = static_cast<uint32_t>(b) & 31u;
+        uint32_t value = 0;
         switch (op) {
           case Op::kShiftLeft:
             value = x << y;
             break;
           case Op::kShiftRight:
-            value = x >> y;
+            value = is_uint ? x >> y
+                            : static_cast<uint32_t>(
+                                  static_cast<int32_t>(x) >> y);
             break;
           case Op::kBitAnd:
-            value = x & y;
+            value = x & static_cast<uint32_t>(b);
             break;
           case Op::kBitXor:
-            value = x ^ y;
+            value = x ^ static_cast<uint32_t>(b);
             break;
           case Op::kBitOr:
-            value = x | y;
+            value = x | static_cast<uint32_t>(b);
             break;
           default:
             break;
         }
-        return static_cast<float>(value);
+        if (is_uint)
+          return static_cast<float>(value);
+        return static_cast<float>(static_cast<int32_t>(value));
       });
     case Op::kLess:
       return MakeBool(ComponentAt(left, 0) < ComponentAt(right, 0));
@@ -1500,6 +1627,8 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
   evaluator.set_fragment_coord(input.frag_coord);
   evaluator.set_front_facing(input.front_facing);
   evaluator.set_point_coord(input.point_coord);
+  evaluator.set_sample_id(input.sample_id);
+  evaluator.set_sample_mask(input.sample_mask);
 
   bool used_jit = false;
 #if defined(ZGL_ENABLE_JIT)

@@ -14,6 +14,7 @@
 #include "GLES3/gl32.h"
 #include "src/zgl_context.h"
 #include "src/zgl_texture.h"
+#include "src/zgl_texture_compressed.h"
 #include "tests/zgl_test.h"
 
 namespace {
@@ -388,4 +389,50 @@ TEST(GenerateMipmapAveragesTwoByTwoBlocks) {
   Texture empty;
   GenerateMipmap(&empty);
   EXPECT_EQ(empty.levels, 0);
+}
+
+TEST(FloatTextureStoragePreservesValues) {
+  Texture texture;
+  Make2D(&texture, 1, 1, 1);
+  texture.min_filter = GL_NEAREST;
+  texture.mag_filter = GL_NEAREST;
+  TextureImage* image = texture.mutable_image(0, 0);
+  image->width = 1;
+  image->height = 1;
+  image->depth = 1;
+  image->float_rgba.assign(4, 0.0f);
+  const float source[4] = {2.0f, -1.0f, 0.25f, 0.5f};
+  EXPECT_TRUE(UploadTextureImageFloat(image, 1, 1, GL_RGBA, GL_FLOAT, 0, 0,
+                                      0, source));
+  float sampled[4] = {};
+  SampleTexture2D(texture, 0.5f, 0.5f, 0.0f, texture.min_filter,
+                  texture.mag_filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE,
+                  sampled);
+  EXPECT_NEAR(sampled[0], 2.0f, 0.001f);
+  EXPECT_NEAR(sampled[1], -1.0f, 0.001f);
+  EXPECT_NEAR(sampled[2], 0.25f, 0.001f);
+  EXPECT_NEAR(sampled[3], 0.5f, 0.001f);
+}
+
+TEST(Etc2DecoderProducesExpectedColours) {
+  // ETC1 individual mode: both subblocks use 4-bit base colour 0xF for red,
+  // zero for green/blue, table zero and zero pixel indices.
+  uint8_t block[16] = {0xFF, 0x00, 0x00, 0x00, 0, 0, 0, 0,
+                       0x00, 0x00, 0, 0, 0, 0, 0, 0};
+  uint8_t rgba[16 * 4] = {};
+  EXPECT_TRUE(zgl::DecodeEtc2Block(GL_COMPRESSED_RGB8_ETC2, block, rgba));
+  for (int i = 0; i < 16; ++i) {
+    EXPECT_EQ(rgba[i * 4 + 0], 255);
+    EXPECT_TRUE(rgba[i * 4 + 1] <= 2);
+    EXPECT_TRUE(rgba[i * 4 + 2] <= 2);
+    EXPECT_EQ(rgba[i * 4 + 3], 255);
+  }
+
+  // The EAC alpha half stores base 255, table zero and zero indices.
+  block[8] = 255;
+  block[9] = 0;
+  EXPECT_TRUE(zgl::DecodeEtc2Block(GL_COMPRESSED_RGBA8_ETC2_EAC, block,
+                                   rgba));
+  for (int i = 0; i < 16; ++i)
+    EXPECT_EQ(rgba[i * 4 + 3], 255);
 }

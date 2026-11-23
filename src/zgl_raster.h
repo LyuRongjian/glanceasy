@@ -24,6 +24,9 @@ struct Fragment {
   int x = 0;
   int y = 0;
   float depth = 0.0f;
+  int sample = 0;      // Sample index for multisample targets.
+  float sample_dx = 0.0f;
+  float sample_dy = 0.0f;
   // Barycentric weights of the three vertices of the sub-triangle; weights
   // 1 and 2 are zero for lines and points.
   float bary[3] = {0.0f, 0.0f, 0.0f};
@@ -47,6 +50,8 @@ class FragmentSink {
 class Rasterizer {
  public:
   void SetClip(const Rect& clip) { clip_ = clip; }
+  // |count| sample positions per pixel, in pixel units relative to the centre.
+  void SetSamples(int count, const float (*positions)[2]);
 
   void DrawTriangle(const RasterVertex& a,
                     const RasterVertex& b,
@@ -67,6 +72,8 @@ class Rasterizer {
 
  private:
   Rect clip_;
+  int samples_ = 1;
+  const float (*sample_positions_)[2] = nullptr;
 };
 
 }  // namespace zgl

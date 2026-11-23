@@ -101,6 +101,8 @@ struct FragmentInput {
   float frag_coord[4] = {0.0f, 0.0f, 0.0f, 1.0f};
   bool front_facing = true;
   float point_coord[2] = {0.0f, 0.0f};
+  int sample_id = 0;
+  uint32_t sample_mask = 0xFFFFFFFFu;
   const Value* uniforms = nullptr;
   const int* uniform_map = nullptr;
   TextureSampler* sampler = nullptr;

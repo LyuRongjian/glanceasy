@@ -253,7 +253,8 @@ TEST(TextureObjectsRejectInvalidInput) {
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, -1, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                nullptr);
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_FLOAT, nullptr);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, static_cast<GLenum>(0x1234),
+               nullptr);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   glTexImage3D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                nullptr);
@@ -412,5 +413,77 @@ TEST(SamplerObjectsOverrideTextureState) {
   glDeleteSamplers(1, &sampler);
   EXPECT_EQ(glIsSampler(sampler), GL_FALSE);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
+  zglDestroyContext();
+}
+
+TEST(FloatTextureSamplingPreservesHdrValues) {
+  EXPECT_EQ(zglCreateContext(8, 8), 1);
+  const float texels[4] = {2.0f, -1.0f, 0.25f, 0.5f};
+  GLuint texture = 0;
+  glGenTextures(1, &texture);
+  glBindTexture(GL_TEXTURE_2D, texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 1, 1, 0, GL_RGBA, GL_FLOAT,
+               texels);
+  const char* fragment =
+      "#version 100\n"
+      "precision mediump float;\n"
+      "varying vec2 v_uv;\n"
+      "uniform sampler2D u_texture;\n"
+      "void main() {\n"
+      "  gl_FragColor = vec4(texture2D(u_texture, v_uv).r * 0.25, 0.0, 0.0,"
+      " 1.0);\n"
+      "}\n";
+  const GLuint program = MakeProgram(kTexturedVertex, fragment);
+  glUseProgram(program);
+  glUniform1i(glGetUniformLocation(program, "u_texture"), 0);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  DrawQuad(program);
+  unsigned char rgba[4] = {};
+  ReadPixel(4, 4, rgba);
+  // A quantised RGBA8 upload would clamp 2.0 to 1.0 and resolve to 64.
+  EXPECT_TRUE(rgba[0] > 120 && rgba[0] < 136);
+  EXPECT_EQ(glGetError(), GL_NO_ERROR);
+  glDeleteProgram(program);
+  glDeleteTextures(1, &texture);
+  zglDestroyContext();
+}
+
+TEST(CompressedEtc2TextureUploadsAndSamples) {
+  EXPECT_EQ(zglCreateContext(8, 8), 1);
+  // Solid red in ETC2 individual mode.
+  const unsigned char block[8] = {0xFF, 0x00, 0x00, 0x00, 0, 0, 0, 0};
+  GLuint texture = 0;
+  glGenTextures(1, &texture);
+  glBindTexture(GL_TEXTURE_2D, texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGB8_ETC2, 4, 4, 0,
+                         8, block);
+  GLint compressed = 0;
+  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_COMPRESSED, &compressed);
+  EXPECT_EQ(compressed, 1);
+  const char* fragment =
+      "#version 100\n"
+      "precision mediump float;\n"
+      "varying vec2 v_uv;\n"
+      "uniform sampler2D u_texture;\n"
+      "void main() { gl_FragColor = texture2D(u_texture, v_uv); }\n";
+  const GLuint program = MakeProgram(kTexturedVertex, fragment);
+  glUseProgram(program);
+  glUniform1i(glGetUniformLocation(program, "u_texture"), 0);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  DrawQuad(program);
+  unsigned char rgba[4] = {};
+  ReadPixel(4, 4, rgba);
+  EXPECT_TRUE(rgba[0] > 240);
+  EXPECT_TRUE(rgba[1] < 16);
+  EXPECT_TRUE(rgba[2] < 16);
+  EXPECT_EQ(glGetError(), GL_NO_ERROR);
+  glDeleteProgram(program);
+  glDeleteTextures(1, &texture);
   zglDestroyContext();
 }

@@ -24,6 +24,7 @@ struct Token {
   Kind kind = Kind::kEnd;
   std::string text;
   double number = 0.0;
+  bool is_unsigned = false;  // Integer literal with a trailing 'u'.
   int line = 1;
 
   bool IsPunct(const char* p) const {

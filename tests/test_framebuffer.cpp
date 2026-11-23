@@ -137,11 +137,11 @@ TEST(RenderbuffersBackDepthAndStencilAttachments) {
                                &value);
   EXPECT_EQ(value, 0);
 
-  // The CPU backend is single sampled: multisample storage is refused, while
-  // a request for zero samples behaves like glRenderbufferStorage.
+  // Multisample storage is backed by four per-sample planes.
   glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_RGBA8, 16, 16);
-  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
-  glRenderbufferStorageMultisample(GL_RENDERBUFFER, 0, GL_RGBA8, 16, 16);
+  glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_SAMPLES,
+                               &value);
+  EXPECT_EQ(value, 4);
   glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &value);
   EXPECT_EQ(value, 16);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
@@ -328,6 +328,120 @@ TEST(DefaultFramebufferPixelsAreReadable) {
   EXPECT_TRUE(pixels != nullptr);
   EXPECT_EQ(width, 64);
   EXPECT_EQ(height, 48);
+  glDeleteProgram(program);
+  zglDestroyContext();
+}
+
+TEST(MultisampleFramebufferResolvesCoverage) {
+  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  GLuint color_buffer = 0;
+  GLuint depth_buffer = 0;
+  GLuint framebuffer = 0;
+  glGenRenderbuffers(1, &color_buffer);
+  glBindRenderbuffer(GL_RENDERBUFFER, color_buffer);
+  glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_RGBA8, 32, 32);
+  glGenRenderbuffers(1, &depth_buffer);
+  glBindRenderbuffer(GL_RENDERBUFFER, depth_buffer);
+  glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_DEPTH24_STENCIL8, 32,
+                                    32);
+  glGenFramebuffers(1, &framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                            GL_RENDERBUFFER, color_buffer);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                            GL_RENDERBUFFER, depth_buffer);
+  EXPECT_EQ(glCheckFramebufferStatus(GL_FRAMEBUFFER), GL_FRAMEBUFFER_COMPLETE);
+
+  GLint samples = 0;
+  glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_SAMPLES,
+                               &samples);
+  EXPECT_EQ(samples, 4);
+
+  glViewport(0, 0, 32, 32);
+  glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+  // A right triangle covers the lower-left half of the target.  Pixels straddle
+  // the diagonal, so the resolved image contains intermediate coverage values.
+  const GLuint program = MakeSolidProgram(0.0f, 1.0f, 0.0f, 1.0f);
+  glUseProgram(program);
+  const float triangle[6] = {-1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f};
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, triangle);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+
+  unsigned char inside[4] = {};
+  unsigned char outside[4] = {};
+  unsigned char edge[4] = {};
+  glReadPixels(4, 28, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, inside);
+  glReadPixels(28, 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, outside);
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, edge);
+  EXPECT_EQ(inside[0], 0);
+  EXPECT_EQ(inside[1], 255);
+  EXPECT_EQ(outside[0], 255);
+  EXPECT_EQ(outside[1], 0);
+  // The centre pixel is split by the diagonal; resolving four samples leaves
+  // both red and green present.
+  EXPECT_TRUE(edge[0] > 0 && edge[0] < 255);
+  EXPECT_TRUE(edge[1] > 0 && edge[1] < 255);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteFramebuffers(1, &framebuffer);
+  glDeleteRenderbuffers(1, &color_buffer);
+  glDeleteRenderbuffers(1, &depth_buffer);
+  glDeleteProgram(program);
+  zglDestroyContext();
+}
+
+TEST(MultisampleShaderReadsSampleId) {
+  EXPECT_EQ(zglCreateContext(8, 8), 1);
+  GLuint color_buffer = 0;
+  GLuint framebuffer = 0;
+  glGenRenderbuffers(1, &color_buffer);
+  glBindRenderbuffer(GL_RENDERBUFFER, color_buffer);
+  glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_RGBA8, 8, 8);
+  glGenFramebuffers(1, &framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                            GL_RENDERBUFFER, color_buffer);
+  EXPECT_EQ(glCheckFramebufferStatus(GL_FRAMEBUFFER), GL_FRAMEBUFFER_COMPLETE);
+  glViewport(0, 0, 8, 8);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+
+  const char* vertex =
+      "#version 100\n"
+      "attribute vec2 a_pos;\n"
+      "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+  const char* fragment =
+      "#version 100\n"
+      "precision mediump float;\n"
+      "void main() {\n"
+      "  gl_FragColor = vec4(float(gl_SampleID) * 0.25, 0.0, 0.0, 1.0);\n"
+      "}\n";
+  const GLuint vs = CompileShader(GL_VERTEX_SHADER, vertex);
+  const GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fragment);
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vs);
+  glAttachShader(program, fs);
+  glBindAttribLocation(program, 0, "a_pos");
+  glLinkProgram(program);
+  glDeleteShader(vs);
+  glDeleteShader(fs);
+  glUseProgram(program);
+  const float triangle[6] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, triangle);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+  unsigned char rgba[4] = {};
+  glReadPixels(4, 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  // Samples 0..3 average to 0.375 red.
+  EXPECT_TRUE(rgba[0] > 88 && rgba[0] < 104);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glDeleteFramebuffers(1, &framebuffer);
+  glDeleteRenderbuffers(1, &color_buffer);
   glDeleteProgram(program);
   zglDestroyContext();
 }

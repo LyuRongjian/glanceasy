@@ -57,6 +57,18 @@ bool UploadTextureImage(TextureImage* image,
                         int skip_pixels,
                         const void* pixels);
 
+// Copies client pixels into a floating-point texture image.  The destination
+// must already have |float_rgba| sized for |width| by |height| texels.
+bool UploadTextureImageFloat(TextureImage* image,
+                             int width,
+                             int height,
+                             GLenum format,
+                             GLenum type,
+                             int row_length,
+                             int skip_rows,
+                             int skip_pixels,
+                             const void* pixels);
+
 // Fills the mip chain below level 0 with box-filtered copies of level 0.
 void GenerateMipmap(Texture* texture);
 

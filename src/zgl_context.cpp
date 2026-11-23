@@ -56,13 +56,23 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
   if (!framebuffer)
     return target;
   const TextureImage* color = nullptr;
+  int samples = 1;
   for (int i = 0; i < kMaxColorAttachments; ++i) {
     const TextureImage* image = AttachmentImage(*context, framebuffer->colors[i]);
     if (image) {
-      target.colors[i] =
-          reinterpret_cast<uint8_t*>(const_cast<uint32_t*>(image->rgba.data()));
-      if (!color)
+      if (!color) {
         color = image;
+        samples = std::max(1, image->samples);
+      }
+      if (image->samples > 1) {
+        target.colors[i] = reinterpret_cast<uint8_t*>(
+            const_cast<uint32_t*>(image->sample_rgba.data()));
+        target.resolved_colors[i] =
+            const_cast<uint32_t*>(image->rgba.data());
+      } else {
+        target.colors[i] = reinterpret_cast<uint8_t*>(
+            const_cast<uint32_t*>(image->rgba.data()));
+      }
     }
   }
   const TextureImage* depth = AttachmentImage(*context, framebuffer->depth);
@@ -71,6 +81,9 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
     return target;
   target.width = color->width;
   target.height = color->height;
+  target.samples = samples;
+  target.sample_texels =
+      static_cast<size_t>(target.width) * static_cast<size_t>(target.height);
   for (int i = 0; i < kMaxColorAttachments; ++i) {
     target.draw_buffers[i] = framebuffer->draw_buffers[i];
   }
@@ -87,11 +100,20 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
   }
   if (first >= 0 && target.colors[first])
     target.color = target.colors[first];
-  if (depth && depth->width == target.width && depth->height == target.height)
+  if (depth && depth->width == target.width && depth->height == target.height) {
     target.depth = const_cast<uint16_t*>(depth->depth16.data());
+    if (depth->samples > 1) {
+      target.depth = const_cast<uint16_t*>(depth->sample_depth16.data());
+      target.resolved_depth = const_cast<uint16_t*>(depth->depth16.data());
+    }
+  }
   if (stencil && stencil->width == target.width &&
       stencil->height == target.height) {
     target.stencil = const_cast<uint8_t*>(stencil->stencil8.data());
+    if (stencil->samples > 1) {
+      target.stencil = const_cast<uint8_t*>(stencil->sample_stencil8.data());
+      target.resolved_stencil = const_cast<uint8_t*>(stencil->stencil8.data());
+    }
   }
   return target;
 }
@@ -222,6 +244,9 @@ RenderTarget Context::GetReadTarget() {
       const int index =
           static_cast<int>(framebuffer->read_buffer - GL_COLOR_ATTACHMENT0);
       target.color = target.colors[index];
+      if (target.multisampled() && target.resolved_colors[index])
+        target.color =
+            reinterpret_cast<uint8_t*>(target.resolved_colors[index]);
     }
   }
   return target;

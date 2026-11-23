@@ -221,16 +221,21 @@ TEST(TextureStorageValidatesLevelsAndTargets) {
   zglDestroyContext();
 }
 
-TEST(CompressedFormatsAreRejected) {
+TEST(CompressedFormatsDecodeAndRejectUnknownEncodings) {
   EXPECT_EQ(zglCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
-  const unsigned char block[8] = {};
+  const unsigned char block[8] = {0xFF, 0x00, 0x00, 0x00, 0, 0, 0, 0};
+  glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGB8_ETC2, 4, 4, 0,
+                         8, block);
+  EXPECT_EQ(glGetError(), GL_NO_ERROR);
+  GLint compressed = 0;
+  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_COMPRESSED, &compressed);
+  EXPECT_EQ(compressed, 1);
+  // DXT1 is not part of the supported ETC2/EAC subset.
   glCompressedTexImage2D(GL_TEXTURE_2D, 0, 0x83F0, 4, 4, 0, 8, block);
-  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
-  glCompressedTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 4, 4, 0x83F0, 8, block);
-  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   glDeleteTextures(1, &texture);
   zglDestroyContext();
 }

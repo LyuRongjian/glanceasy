@@ -55,6 +55,11 @@ class Parser {
   // Declarations.
   bool ParseQualifiers(Qualifiers* qualifiers);
   bool ParseTypeSpec(Type* type);
+  bool ParseArraySuffix(Type* type);
+  bool ParseStructDefinition();
+  bool LookupType(const std::string& name, Type* type) const;
+  bool IsKnownTypeName(const std::string& name) const;
+  bool ParseConstantInt(int* value);
   bool ParseGlobalDeclaration();
   bool ParseUniformBlock(const Qualifiers& qualifiers, int line);
   bool ParseFunction(const std::string& name,
@@ -128,6 +133,7 @@ class Parser {
   std::vector<std::pair<std::string, int>> function_names_;
   std::vector<std::pair<std::string, int>> block_instances_;
   std::vector<std::string> block_names_;
+  std::vector<std::pair<std::string, Type>> struct_types_;
   int next_attribute_location_ = 0;
 };
 

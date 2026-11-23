@@ -152,6 +152,22 @@ uint16_t FloatToDepth16(float value) {
   return static_cast<uint16_t>(Clamp01(value) * 65535.0f + 0.5f);
 }
 
+bool ImageHasTexels(const TextureImage& image) {
+  return !image.rgba.empty() || !image.float_rgba.empty();
+}
+
+void FetchTexel(const TextureImage& image, size_t index, float rgba[4]) {
+  if (!image.float_rgba.empty()) {
+    const float* source = image.float_rgba.data() + index * 4;
+    rgba[0] = source[0];
+    rgba[1] = source[1];
+    rgba[2] = source[2];
+    rgba[3] = source[3];
+    return;
+  }
+  UnpackRgba(image.rgba[index], rgba);
+}
+
 }  // namespace
 
 GLenum BaseFilter(GLenum filter) {
@@ -206,7 +222,8 @@ void SampleTexture2D(const Texture& texture,
       level = 0;
   }
   const TextureImage* image = texture.image(level, 0);
-  if (!image || image->width <= 0 || image->height <= 0 || image->rgba.empty())
+  if (!image || image->width <= 0 || image->height <= 0 ||
+      !ImageHasTexels(*image))
     return;
   const GLenum filter = lod > 0.0f ? BaseFilter(min_filter) : mag_filter;
   const float s = WrapCoordinate(u, wrap_s);
@@ -218,7 +235,7 @@ void SampleTexture2D(const Texture& texture,
         std::min(image->width - 1, static_cast<int>(s * image->width));
     const int y =
         std::min(image->height - 1, static_cast<int>(t * image->height));
-    UnpackRgba(image->rgba[static_cast<size_t>(y) * image->width + x], out);
+    FetchTexel(*image, static_cast<size_t>(y) * image->width + x, out);
     return;
   }
   const float px = s * image->width - 0.5f;
@@ -234,7 +251,7 @@ void SampleTexture2D(const Texture& texture,
   const auto fetch = [&](int x, int y, float rgba[4]) {
     const int cx = ClampInt(x, 0, image->width - 1);
     const int cy = ClampInt(y, 0, image->height - 1);
-    UnpackRgba(image->rgba[static_cast<size_t>(cy) * image->width + cx], rgba);
+    FetchTexel(*image, static_cast<size_t>(cy) * image->width + cx, rgba);
   };
   fetch(x0, y0, c00);
   fetch(x0 + 1, y0, c10);
@@ -300,7 +317,7 @@ void SampleTextureCube(const Texture& texture,
   if (lod > 0.0f)
     level = std::min(static_cast<int>(std::floor(lod)), texture.levels - 1);
   const TextureImage* image = texture.image(level, face);
-  if (!image || image->width <= 0 || image->rgba.empty())
+  if (!image || image->width <= 0 || !ImageHasTexels(*image))
     return;
   const GLenum filter = lod > 0.0f ? BaseFilter(min_filter) : mag_filter;
   const float s = Clamp01((u * 0.5f) + 0.5f);
@@ -310,7 +327,7 @@ void SampleTextureCube(const Texture& texture,
         std::min(image->width - 1, static_cast<int>(s * image->width));
     const int y =
         std::min(image->height - 1, static_cast<int>(t * image->height));
-    UnpackRgba(image->rgba[static_cast<size_t>(y) * image->width + x], out);
+    FetchTexel(*image, static_cast<size_t>(y) * image->width + x, out);
     return;
   }
   const float px = s * image->width - 0.5f;
@@ -326,7 +343,7 @@ void SampleTextureCube(const Texture& texture,
   const auto fetch = [&](int x, int y, float rgba[4]) {
     const int cx = ClampInt(x, 0, image->width - 1);
     const int cy = ClampInt(y, 0, image->height - 1);
-    UnpackRgba(image->rgba[static_cast<size_t>(cy) * image->width + cx], rgba);
+    FetchTexel(*image, static_cast<size_t>(cy) * image->width + cx, rgba);
   };
   fetch(x0, y0, c00);
   fetch(x0 + 1, y0, c10);
@@ -358,7 +375,7 @@ void SampleTexture3D(const Texture& texture,
   if (lod > 0.0f)
     level = std::min(static_cast<int>(std::floor(lod)), texture.levels - 1);
   const TextureImage* image = texture.image(level, 0);
-  if (!image || image->width <= 0 || image->rgba.empty())
+  if (!image || image->width <= 0 || !ImageHasTexels(*image))
     return;
   const int depth = std::max(1, image->depth);
   const float s = WrapCoordinate(position[0], wrap_s);
@@ -378,9 +395,9 @@ void SampleTexture3D(const Texture& texture,
           std::min(image->width - 1, static_cast<int>(s * image->width));
       const int y =
           std::min(image->height - 1, static_cast<int>(t * image->height));
-      UnpackRgba(
-          image->rgba[z * slice + static_cast<size_t>(y) * image->width + x],
-          rgba);
+      FetchTexel(*image,
+                 z * slice + static_cast<size_t>(y) * image->width + x,
+                 rgba);
       return;
     }
     const float px = s * image->width - 0.5f;
@@ -396,9 +413,9 @@ void SampleTexture3D(const Texture& texture,
     const auto fetch = [&](int x, int y, float out_rgba[4]) {
       const int cx = ClampInt(x, 0, image->width - 1);
       const int cy = ClampInt(y, 0, image->height - 1);
-      UnpackRgba(
-          image->rgba[z * slice + static_cast<size_t>(cy) * image->width + cx],
-          out_rgba);
+      FetchTexel(*image,
+                 z * slice + static_cast<size_t>(cy) * image->width + cx,
+                 out_rgba);
     };
     fetch(x0, y0, c00);
     fetch(x0 + 1, y0, c10);
@@ -550,6 +567,79 @@ bool UploadTextureImage(TextureImage* image,
   return true;
 }
 
+
+bool UploadTextureImageFloat(TextureImage* image,
+                             int width,
+                             int height,
+                             GLenum format,
+                             GLenum type,
+                             int row_length,
+                             int skip_rows,
+                             int skip_pixels,
+                             const void* pixels) {
+  if (!image || width <= 0 || height <= 0 || !pixels)
+    return false;
+  const int components = ComponentCount(format);
+  const int bytes = BytesPerComponent(type);
+  if (components == 0 || bytes == 0 || IsPackedType(type))
+    return false;
+  const size_t texels = static_cast<size_t>(width) * height;
+  if (image->float_rgba.size() < texels * 4)
+    image->float_rgba.assign(texels * 4, 0.0f);
+  const int source_stride =
+      row_length > 0 ? row_length * components * bytes
+                     : width * components * bytes;
+  const uint8_t* source = static_cast<const uint8_t*>(pixels);
+  for (int y = 0; y < height; ++y) {
+    const uint8_t* row = source +
+                         static_cast<size_t>(skip_rows + y) * source_stride +
+                         static_cast<size_t>(skip_pixels) * components * bytes;
+    for (int x = 0; x < width; ++x) {
+      const uint8_t* texel =
+          row + static_cast<size_t>(x) * components * bytes;
+      float values[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+      for (int c = 0; c < components; ++c)
+        values[c] = ReadComponent(texel, c, type);
+      float rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+      switch (format) {
+        case GL_RED:
+          rgba[0] = values[0];
+          break;
+        case GL_RG:
+          rgba[0] = values[0];
+          rgba[1] = values[1];
+          break;
+        case GL_RGB:
+          rgba[0] = values[0];
+          rgba[1] = values[1];
+          rgba[2] = values[2];
+          break;
+        case GL_ALPHA:
+          rgba[3] = values[0];
+          break;
+        case GL_LUMINANCE:
+          rgba[0] = rgba[1] = rgba[2] = values[0];
+          break;
+        case GL_LUMINANCE_ALPHA:
+          rgba[0] = rgba[1] = rgba[2] = values[0];
+          rgba[3] = values[1];
+          break;
+        case GL_RGBA:
+        default:
+          rgba[0] = values[0];
+          rgba[1] = values[1];
+          rgba[2] = values[2];
+          rgba[3] = values[3];
+          break;
+      }
+      float* destination =
+          image->float_rgba.data() + (static_cast<size_t>(y) * width + x) * 4;
+      memcpy(destination, rgba, sizeof(rgba));
+    }
+  }
+  return true;
+}
+
 void GenerateMipmap(Texture* texture) {
   if (!texture || texture->width <= 0 || texture->height <= 0)
     return;
@@ -562,7 +652,7 @@ void GenerateMipmap(Texture* texture) {
       const int next_height = std::max(1, height / 2);
       const TextureImage* source = texture->image(level - 1, face);
       TextureImage* destination = texture->mutable_image(level, face);
-      if (!source || !destination || source->rgba.empty()) {
+      if (!source || !destination || !ImageHasTexels(*source)) {
         width = next_width;
         height = next_height;
         continue;
@@ -570,8 +660,16 @@ void GenerateMipmap(Texture* texture) {
       destination->width = next_width;
       destination->height = next_height;
       destination->depth = 1;
-      destination->rgba.assign(static_cast<size_t>(next_width) * next_height,
-                               0u);
+      const size_t destination_texels =
+          static_cast<size_t>(next_width) * next_height;
+      const bool is_float = !source->float_rgba.empty();
+      if (is_float) {
+        destination->rgba.clear();
+        destination->float_rgba.assign(destination_texels * 4, 0.0f);
+      } else {
+        destination->float_rgba.clear();
+        destination->rgba.assign(destination_texels, 0u);
+      }
       for (int y = 0; y < next_height; ++y) {
         for (int x = 0; x < next_width; ++x) {
           float accum[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -581,18 +679,27 @@ void GenerateMipmap(Texture* texture) {
               const int sx = ClampInt(x * 2 + dx, 0, width - 1);
               const int sy = ClampInt(y * 2 + dy, 0, height - 1);
               float rgba[4];
-              UnpackRgba(source->rgba[static_cast<size_t>(sy) * width + sx],
+              FetchTexel(*source, static_cast<size_t>(sy) * width + sx,
                          rgba);
               for (int c = 0; c < 4; ++c)
                 accum[c] += rgba[c];
               ++count;
             }
           }
-          uint8_t bytes[4];
-          for (int c = 0; c < 4; ++c)
-            bytes[c] = FloatToUnorm8(accum[c] / static_cast<float>(count));
-          destination->rgba[static_cast<size_t>(y) * next_width + x] =
-              PackRgba(bytes[0], bytes[1], bytes[2], bytes[3]);
+          const size_t destination_index =
+              static_cast<size_t>(y) * next_width + x;
+          if (is_float) {
+            float* float_destination =
+                destination->float_rgba.data() + destination_index * 4;
+            for (int c = 0; c < 4; ++c)
+              float_destination[c] = accum[c] / static_cast<float>(count);
+          } else {
+            uint8_t bytes[4];
+            for (int c = 0; c < 4; ++c)
+              bytes[c] = FloatToUnorm8(accum[c] / static_cast<float>(count));
+            destination->rgba[destination_index] =
+                PackRgba(bytes[0], bytes[1], bytes[2], bytes[3]);
+          }
         }
       }
       width = next_width;

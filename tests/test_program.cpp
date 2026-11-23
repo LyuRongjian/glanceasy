@@ -273,6 +273,7 @@ TEST(UnsignedUniformsAndMatricesRoundTrip) {
   glAttachShader(program, vs);
   glAttachShader(program, fs);
   glLinkProgram(program);
+  glUseProgram(program);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
 
   GLint location = glGetUniformLocation(program, "u_u");
@@ -296,7 +297,7 @@ TEST(UnsignedUniformsAndMatricesRoundTrip) {
   zglDestroyContext();
 }
 
-TEST(UniformArraysAreOutsideTheSupportedSubset) {
+TEST(UniformArraysRoundTrip) {
   EXPECT_EQ(zglCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
@@ -315,12 +316,19 @@ TEST(UniformArraysAreOutsideTheSupportedSubset) {
   glLinkProgram(program);
   glUseProgram(program);
 
-  // Array declarations are outside the supported subset, so linking fails and
-  // the location lookup reports -1 rather than crashing.
   GLint linked = GL_FALSE;
   glGetProgramiv(program, GL_LINK_STATUS, &linked);
-  EXPECT_EQ(linked, GL_FALSE);
-  EXPECT_EQ(glGetUniformLocation(program, "u_values"), -1);
+  EXPECT_EQ(linked, GL_TRUE);
+  const GLint location = glGetUniformLocation(program, "u_values");
+  EXPECT_TRUE(location >= 0);
+  if (location >= 0) {
+    const GLfloat values[2] = {1.5f, 2.5f};
+    glUniform1fv(location, 2, values);
+    GLfloat read_back[2] = {};
+    glGetUniformfv(program, location, read_back);
+    EXPECT_NEAR(read_back[0], 1.5f, 0.001f);
+    EXPECT_NEAR(read_back[1], 2.5f, 0.001f);
+  }
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);

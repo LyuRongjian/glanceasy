@@ -22,8 +22,10 @@ ProgramObject* CurrentProgramObject() {
 
 void SetUniformFloats(GLint location,
                       const float* values,
-                      int count,
+                      int components,
+                      int element_count,
                       bool integer) {
+  (void)integer;
   Context* context = ApiContext();
   if (!context || !values)
     return;
@@ -36,22 +38,36 @@ void SetUniformFloats(GLint location,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  if (components < 1 || element_count < 1 || location < 0)
+    return;
   glsl::Value* value = object->program->uniform_value(location);
   if (!value)
     return;
-  if (value->type.components() != count) {
+  if (value->type.is_array()) {
+    const glsl::Type& element = value->type.array_element();
+    if (element.components() != components ||
+        element_count > value->type.array_size()) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    const int total = components * element_count;
+    for (int i = 0; i < total; ++i)
+      value->Data()[i] = values[i];
+    return;
+  }
+  if (element_count != 1 || value->type.components() != components) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  for (int i = 0; i < count; ++i) {
-    value->data[i] =
-        integer ? static_cast<float>(static_cast<int>(values[i])) : values[i];
-  }
+  for (int i = 0; i < components; ++i)
+    value->Data()[i] = values[i];
 }
 
 void SetUniformMatrix(GLint location,
                       const float* values,
-                      int dimension,
+                      int rows,
+                      int columns,
+                      int element_count,
                       bool transpose) {
   Context* context = ApiContext();
   if (!context || !values)
@@ -63,21 +79,36 @@ void SetUniformMatrix(GLint location,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  if (rows < 1 || columns < 1 || element_count < 1 || location < 0)
+    return;
   glsl::Value* value = object->program->uniform_value(location);
   if (!value)
     return;
-  if (!value->type.is_matrix() || value->type.rows() != dimension ||
-      value->type.columns() != dimension) {
+  const glsl::Type* matrix_type = &value->type;
+  if (value->type.is_array()) {
+    if (element_count > value->type.array_size())
+      return;
+    matrix_type = &value->type.array_element();
+  } else if (element_count != 1) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  for (int column = 0; column < dimension; ++column) {
-    for (int row = 0; row < dimension; ++row) {
-      // GL passes matrices in column major order, so the element at row |row|
-      // of column |column| lives at values[column * dimension + row].
-      const int source =
-          transpose ? row * dimension + column : column * dimension + row;
-      value->data[column * dimension + row] = values[source];
+  if (!matrix_type->is_matrix() || matrix_type->rows() != rows ||
+      matrix_type->columns() != columns) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const int elements = matrix_type->components();
+  for (int element = 0; element < element_count; ++element) {
+    for (int column = 0; column < columns; ++column) {
+      for (int row = 0; row < rows; ++row) {
+        // GL passes matrices in column major order, so the element at row
+        // |row| of column |column| lives at values[column * rows + row].
+        const int source = transpose ? row * columns + column
+                                     : column * rows + row;
+        value->Data()[element * elements + column * rows + row] =
+            values[element * elements + source];
+      }
     }
   }
 }

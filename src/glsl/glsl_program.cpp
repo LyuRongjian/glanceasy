@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <utility>
 
@@ -331,7 +332,7 @@ bool Program::Link(
     uniforms_ = merged;
     uniform_values_.assign(uniforms_.size(), Value());
     for (size_t i = 0; i < uniforms_.size(); ++i)
-      uniform_values_[i].type = uniforms_[i].type;
+      uniform_values_[i].ResetType(uniforms_[i].type);
   }
 
   for (size_t b = 0; b < uniform_blocks_.size(); ++b) {
@@ -351,18 +352,18 @@ bool Program::Link(
   vertex_globals_.assign(vertex->global_slots, Value());
   fragment_globals_.assign(fragment->global_slots, Value());
   for (int i = 0; i < vertex->global_slots; ++i)
-    vertex_globals_[i].type = Type::Float();
+    vertex_globals_[i].ResetType(Type::Float());
   for (int i = 0; i < fragment->global_slots; ++i)
-    fragment_globals_[i].type = Type::Float();
+    fragment_globals_[i].ResetType(Type::Float());
   for (const Variable& global : vertex->globals) {
     if (global.index >= 0 &&
         global.index < static_cast<int>(vertex_globals_.size()))
-      vertex_globals_[global.index].type = global.type;
+      vertex_globals_[global.index].ResetType(global.type);
   }
   for (const Variable& global : fragment->globals) {
     if (global.index >= 0 &&
         global.index < static_cast<int>(fragment_globals_.size())) {
-      fragment_globals_[global.index].type = global.type;
+      fragment_globals_[global.index].ResetType(global.type);
     }
   }
 
@@ -412,6 +413,23 @@ int Program::UniformLocation(const std::string& name) const {
     if (info.name == name && info.block_index < 0)
       return info.location;
   }
+  // "values[0]" names the first element of an array uniform.  Locations are
+  // element-granular in GL, but the interpreted subset stores the whole array
+  // at one location, so only element zero can be addressed.
+  const size_t bracket = name.find('[');
+  if (bracket != std::string::npos && name.back() == ']') {
+    const std::string base = name.substr(0, bracket);
+    const std::string index =
+        name.substr(bracket + 1, name.size() - bracket - 2);
+    if (index == "0") {
+      for (const UniformInfo& info : uniforms_) {
+        if (info.name == base && info.block_index < 0 &&
+            info.type.is_array()) {
+          return info.location;
+        }
+      }
+    }
+  }
   return -1;
 }
 
@@ -440,46 +458,76 @@ void Program::UploadUniformBlock(int block_index,
     return;
   }
   const UniformBlockInfo& block = uniform_blocks_[block_index];
+
+  std::function<void(int, const Type&, Value*, int)> read_member;
+  read_member = [&](int byte_offset, const Type& type, Value* value,
+                    int component_offset) {
+    if (!value)
+      return;
+    if (type.is_array()) {
+      const Type& element = type.array_element();
+      const int stride = Std140ArrayStride(element);
+      const int element_components = element.components();
+      for (int i = 0; i < type.array_size(); ++i) {
+        read_member(byte_offset + i * stride, element, value,
+                    component_offset + i * element_components);
+      }
+      return;
+    }
+    if (type.is_struct()) {
+      const StructInfo* info = type.struct_info();
+      if (!info)
+        return;
+      for (const StructMember& member : info->members) {
+        read_member(byte_offset + member.byte_offset, member.type, value,
+                    component_offset + member.component_offset);
+      }
+      return;
+    }
+    if (type.is_matrix()) {
+      const int rows = type.rows();
+      const int columns = type.columns();
+      for (int c = 0; c < columns; ++c) {
+        for (int r = 0; r < rows; ++r) {
+          const size_t position =
+              static_cast<size_t>(byte_offset) + static_cast<size_t>(c) * 16 +
+              static_cast<size_t>(r) * 4;
+          const int index = component_offset + c * rows + r;
+          float* destination = value->Data() + index;
+          if (position + sizeof(float) <= byte_count)
+            memcpy(destination, bytes + position, sizeof(float));
+          else
+            *destination = 0.0f;
+        }
+      }
+      return;
+    }
+    const int components = type.components();
+    for (int i = 0; i < components; ++i) {
+      const size_t position =
+          static_cast<size_t>(byte_offset) + static_cast<size_t>(i) * 4;
+      float* destination = value->Data() + component_offset + i;
+      if (position + sizeof(int32_t) > byte_count) {
+        *destination = 0.0f;
+        continue;
+      }
+      if (type.base() == BaseType::kFloat) {
+        memcpy(destination, bytes + position, sizeof(float));
+      } else {
+        int32_t integer = 0;
+        memcpy(&integer, bytes + position, sizeof(int32_t));
+        *destination = type.base() == BaseType::kBool
+                           ? (integer != 0 ? 1.0f : 0.0f)
+                           : static_cast<float>(integer);
+      }
+    }
+  };
+
   for (const UniformBlockMemberInfo& member : block.members) {
     Value* value = uniform_value(member.uniform_index);
     if (!value)
       continue;
-    const auto read_float = [&](size_t offset, float* out) {
-      const size_t position = static_cast<size_t>(member.offset) + offset;
-      if (position + sizeof(float) <= byte_count)
-        memcpy(out, bytes + position, sizeof(float));
-      else
-        *out = 0.0f;
-    };
-    const auto read_int = [&](size_t offset, int32_t* out) {
-      const size_t position = static_cast<size_t>(member.offset) + offset;
-      if (position + sizeof(int32_t) <= byte_count)
-        memcpy(out, bytes + position, sizeof(int32_t));
-      else
-        *out = 0;
-    };
-
-    if (member.type.is_matrix()) {
-      const int rows = member.type.rows();
-      const int columns = member.type.columns();
-      for (int c = 0; c < columns; ++c) {
-        for (int r = 0; r < rows; ++r) {
-          read_float(static_cast<size_t>(c) * 16 + static_cast<size_t>(r) * 4,
-                     &value->data[c * rows + r]);
-        }
-      }
-    } else if (member.type.base() == BaseType::kFloat) {
-      const int components = member.type.components();
-      for (int i = 0; i < components; ++i)
-        read_float(static_cast<size_t>(i) * 4, &value->data[i]);
-    } else {
-      int32_t integer = 0;
-      read_int(0, &integer);
-      value->data[0] =
-          member.type.base() == BaseType::kBool
-              ? (integer != 0 ? 1.0f : 0.0f)
-              : static_cast<float>(integer);
-    }
+    read_member(member.offset, member.type, value, 0);
   }
 }
 

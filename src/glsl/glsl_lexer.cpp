@@ -108,6 +108,11 @@ Token Lexer::ScanNumber() {
     token.text = source_.substr(start, pos_ - start);
     token.number =
         static_cast<double>(std::strtol(token.text.c_str(), nullptr, 16));
+    if (pos_ < source_.size() &&
+        (source_[pos_] == 'u' || source_[pos_] == 'U')) {
+      token.is_unsigned = true;
+      ++pos_;
+    }
     return token;
   }
   bool is_float = false;
@@ -139,8 +144,15 @@ Token Lexer::ScanNumber() {
     is_float = true;
     ++pos_;
   }
+  bool is_unsigned = false;
+  if (!is_float && pos_ < source_.size() &&
+      (source_[pos_] == 'u' || source_[pos_] == 'U')) {
+    is_unsigned = true;
+    ++pos_;
+  }
   token.text = source_.substr(start, pos_ - start);
   token.kind = is_float ? Token::Kind::kFloatLiteral : Token::Kind::kIntLiteral;
+  token.is_unsigned = is_unsigned;
   token.number = std::strtod(token.text.c_str(), nullptr);
   return token;
 }

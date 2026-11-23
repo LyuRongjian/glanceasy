@@ -36,6 +36,7 @@ set(ZGL_SOURCES
     src/zgl_context.cpp
     src/zgl_raster.cpp
     src/zgl_texture.cpp
+    src/zgl_texture_compressed.cpp
     src/zgl_draw.cpp
     src/zgl_fastmath.cpp
     src/zgl_simd.cpp

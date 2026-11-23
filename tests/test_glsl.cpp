@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "GLES3/gl32.h"
@@ -427,15 +428,6 @@ TEST(GeometryFunctionsHandleDegenerateInput) {
 TEST(UnsupportedConstructsFailToCompile) {
   EXPECT_EQ(zglCreateContext(32, 32), 1);
   const char* constructs[] = {
-      // Arrays are outside the supported subset.
-      "#version 100\nprecision mediump float;\n"
-      "void main() { float values[2]; values[0] = 1.0; "
-      "gl_FragColor = vec4(values[0]); }\n",
-      // Structures are not implemented.
-      "#version 100\nprecision mediump float;\n"
-      "struct Light { vec3 colour; };\n"
-      "void main() { Light l; l.colour = vec3(1.0); "
-      "gl_FragColor = vec4(l.colour, 1.0); }\n",
       // Unknown builtins must be rejected.
       "#version 100\nprecision mediump float;\n"
       "void main() { gl_FragColor = vec4(no_such_function(1.0)); }\n",
@@ -451,5 +443,95 @@ TEST(UnsupportedConstructsFailToCompile) {
     glDeleteShader(shader);
   }
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
+  zglDestroyContext();
+}
+
+TEST(ArrayAndStructTypesEvaluate) {
+  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  const char* fragment =
+      "#version 300 es\n"
+      "precision mediump float;\n"
+      "struct Light { vec3 colour; float power; };\n"
+      "out vec4 o_colour;\n"
+      "void main() {\n"
+      "  Light lights[2];\n"
+      "  lights[0] = Light(vec3(1.0, 0.5, 0.0), 1.0);\n"
+      "  lights[1] = Light(vec3(0.0, 0.5, 1.0), 0.8);\n"
+      "  float weights[3];\n"
+      "  weights[0] = 0.2;\n"
+      "  weights[1] = 0.3;\n"
+      "  weights[2] = 0.5;\n"
+      "  Light sum = Light(vec3(0.0), 0.0);\n"
+      "  for (int i = 0; i < 2; ++i)\n"
+      "    sum.colour += lights[i].colour * weights[i];\n"
+      "  o_colour = vec4(sum.colour, 1.0);\n"
+      "}\n";
+  const GLuint program = BuildProgram(kFullscreenVertex, fragment);
+  EXPECT_TRUE(LinkSucceeded(program));
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  DrawFullscreen(program);
+  unsigned char rgba[4] = {};
+  ReadCentre(rgba);
+  EXPECT_NEAR(static_cast<float>(rgba[0]) / 255.0f, 0.2f, 0.01f);
+  EXPECT_NEAR(static_cast<float>(rgba[1]) / 255.0f, 0.25f, 0.01f);
+  EXPECT_NEAR(static_cast<float>(rgba[2]) / 255.0f, 0.30f, 0.01f);
+  glDeleteProgram(program);
+  zglDestroyContext();
+}
+
+TEST(UniformBlockArraysOfStructures) {
+  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  const char* vertex =
+      "#version 300 es\n"
+      "in vec2 a_pos;\n"
+      "struct Pair { vec3 colour; float weight; };\n"
+      "layout(std140) uniform Data { Pair pairs[2]; float extra; } data;\n"
+      "void main() {\n"
+      "  gl_Position = vec4(a_pos + data.pairs[1].colour.xy * 0.01, 0.0, 1.0);\n"
+      "}\n";
+  const char* fragment =
+      "#version 300 es\n"
+      "precision mediump float;\n"
+      "struct Pair { vec3 colour; float weight; };\n"
+      "layout(std140) uniform Data { Pair pairs[2]; float extra; } data;\n"
+      "out vec4 o_colour;\n"
+      "void main() {\n"
+      "  vec3 c = data.pairs[0].colour * data.pairs[0].weight +\n"
+      "           data.pairs[1].colour * data.extra;\n"
+      "  o_colour = vec4(c, 1.0);\n"
+      "}\n";
+  const GLuint program = BuildProgram(vertex, fragment);
+  EXPECT_TRUE(LinkSucceeded(program));
+  const GLuint block_index = glGetUniformBlockIndex(program, "Data");
+  EXPECT_TRUE(block_index != GL_INVALID_INDEX);
+
+  // Pair is a vec3 followed by a float: 16 bytes per std140 element.  The
+  // second pair starts at 16 and |extra| follows the 32-byte array.
+  uint8_t bytes[48] = {};
+  float pair0[4] = {1.0f, 0.25f, 0.0f, 0.5f};
+  float pair1[4] = {0.0f, 0.5f, 1.0f, 0.25f};
+  float extra = 0.5f;
+  memcpy(bytes + 0, pair0, sizeof(pair0));
+  memcpy(bytes + 16, pair1, sizeof(pair1));
+  memcpy(bytes + 32, &extra, sizeof(extra));
+  GLuint buffer = 0;
+  glGenBuffers(1, &buffer);
+  glBindBuffer(GL_UNIFORM_BUFFER, buffer);
+  glBufferData(GL_UNIFORM_BUFFER, sizeof(bytes), bytes, GL_STATIC_DRAW);
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, buffer);
+  glUniformBlockBinding(program, block_index, 0);
+
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  DrawFullscreen(program);
+  unsigned char rgba[4] = {};
+  ReadCentre(rgba);
+  // 0.5*(1.0,0.25,0.0) + 0.5*(0.0,0.5,1.0) = (0.5, 0.375, 0.5).
+  EXPECT_NEAR(static_cast<float>(rgba[0]) / 255.0f, 0.5f, 0.01f);
+  EXPECT_NEAR(static_cast<float>(rgba[1]) / 255.0f, 0.375f, 0.01f);
+  EXPECT_NEAR(static_cast<float>(rgba[2]) / 255.0f, 0.5f, 0.01f);
+  glDeleteBuffers(1, &buffer);
+  glDeleteProgram(program);
   zglDestroyContext();
 }

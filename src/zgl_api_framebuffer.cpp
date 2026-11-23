@@ -55,29 +55,38 @@ GLenum CheckCompleteness(Context* context, const Framebuffer& framebuffer) {
   if (!any_attachment)
     return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
   const TextureImage* color = AttachmentImageOf(context, framebuffer.colors[0]);
-  if (!color)
+  if (!color || !color->float_rgba.empty())
     return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
   if (color->width <= 0 || color->height <= 0)
     return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
   const int width = color->width;
   const int height = color->height;
+  const int samples = std::max(1, color->samples);
   for (int i = 1; i < kMaxColorAttachments; ++i) {
     if (!framebuffer.colors[i].bound())
       continue;
     const TextureImage* image =
         AttachmentImageOf(context, framebuffer.colors[i]);
-    if (!image || image->width != width || image->height != height)
+    if (!image || !image->float_rgba.empty() || image->width != width ||
+        image->height != height)
       return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+    if (std::max(1, image->samples) != samples)
+      return GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;
   }
   if (framebuffer.depth.bound()) {
     const TextureImage* image = AttachmentImageOf(context, framebuffer.depth);
-    if (!image || image->width != width || image->height != height)
+    if (!image || !image->float_rgba.empty() || image->width != width ||
+        image->height != height)
       return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+    if (std::max(1, image->samples) != samples)
+      return GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;
   }
   if (framebuffer.stencil.bound()) {
     const TextureImage* image = AttachmentImageOf(context, framebuffer.stencil);
     if (!image || image->width != width || image->height != height)
       return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+    if (std::max(1, image->samples) != samples)
+      return GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;
   }
   return GL_FRAMEBUFFER_COMPLETE;
 }
@@ -212,8 +221,18 @@ void ClearColourBuffer(Context* context, GLint drawbuffer, uint32_t packed) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  simd::FillRgba(color, static_cast<size_t>(target.width) * target.height,
-                 packed);
+  const size_t texels = static_cast<size_t>(target.width) * target.height;
+  const int planes = target.multisampled() ? target.samples : 1;
+  for (int sample = 0; sample < planes; ++sample)
+    simd::FillRgba(color + static_cast<size_t>(sample) * texels, texels,
+                   packed);
+  if (target.multisampled()) {
+    uint32_t* resolved = target.resolved_colors[buffer - GL_COLOR_ATTACHMENT0];
+    if (resolved) {
+      for (size_t i = 0; i < texels; ++i)
+        resolved[i] = packed;
+    }
+  }
 }
 
 // Validates the attachment list passed to glInvalidate* and reports whether
@@ -622,10 +641,99 @@ void glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
   context->state.renderbuffer = renderbuffer;
 }
 
+namespace {
+
+bool RenderbufferFormatSupported(GLenum internal_format) {
+  switch (internal_format) {
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGB565:
+    case GL_RGBA8:
+    case GL_RGB8:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGB:
+    case GL_RGBA:
+    case GL_DEPTH_COMPONENT16:
+    case GL_DEPTH_COMPONENT24:
+    case GL_DEPTH_COMPONENT32F:
+    case GL_STENCIL_INDEX8:
+    case GL_DEPTH24_STENCIL8:
+    case GL_DEPTH32F_STENCIL8:
+      return true;
+    default:
+      return false;
+  }
+}
+
+void AllocateRenderbufferStorage(zgl::Renderbuffer* renderbuffer,
+                                 int samples,
+                                 GLenum internal_format,
+                                 int width,
+                                 int height) {
+  renderbuffer->width = width;
+  renderbuffer->height = height;
+  renderbuffer->samples = samples;
+  renderbuffer->format = internal_format;
+  zgl::TextureImage& image = renderbuffer->image;
+  image.width = width;
+  image.height = height;
+  image.depth = 1;
+  image.samples = samples > 0 ? samples : 1;
+  image.rgba.clear();
+  image.depth16.clear();
+  image.stencil8.clear();
+  image.sample_rgba.clear();
+  image.sample_depth16.clear();
+  image.sample_stencil8.clear();
+  const size_t texels =
+      static_cast<size_t>(std::max(0, width)) *
+      static_cast<size_t>(std::max(0, height));
+  const size_t sample_texels =
+      texels * static_cast<size_t>(image.samples);
+  switch (internal_format) {
+    case GL_DEPTH_COMPONENT16:
+    case GL_DEPTH_COMPONENT24:
+    case GL_DEPTH_COMPONENT32F:
+      image.depth16.assign(texels, 0xFFFFu);
+      if (image.samples > 1)
+        image.sample_depth16.assign(sample_texels, 0xFFFFu);
+      break;
+    case GL_STENCIL_INDEX8:
+      image.stencil8.assign(texels, 0u);
+      if (image.samples > 1)
+        image.sample_stencil8.assign(sample_texels, 0u);
+      break;
+    case GL_DEPTH24_STENCIL8:
+    case GL_DEPTH32F_STENCIL8:
+      image.depth16.assign(texels, 0xFFFFu);
+      image.stencil8.assign(texels, 0u);
+      if (image.samples > 1) {
+        image.sample_depth16.assign(sample_texels, 0xFFFFu);
+        image.sample_stencil8.assign(sample_texels, 0u);
+      }
+      break;
+    default:
+      image.rgba.assign(texels, zgl::PackRgba(0, 0, 0, 0));
+      if (image.samples > 1)
+        image.sample_rgba.assign(sample_texels, zgl::PackRgba(0, 0, 0, 0));
+      break;
+  }
+}
+
+}  // namespace
+
 void glRenderbufferStorage(GLenum target,
                            GLenum internal_format,
                            GLsizei width,
                            GLsizei height) {
+  glRenderbufferStorageMultisample(target, 0, internal_format, width, height);
+}
+
+void glRenderbufferStorageMultisample(GLenum target,
+                                      GLsizei samples,
+                                      GLenum internal_format,
+                                      GLsizei width,
+                                      GLsizei height) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
@@ -639,74 +747,21 @@ void glRenderbufferStorage(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  if (samples < 0 || samples > zgl::kMaxSamples) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   if (width < 0 || height < 0 || width > zgl::kMaxRenderbufferSize ||
       height > zgl::kMaxRenderbufferSize) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  switch (internal_format) {
-    case GL_RGBA4:
-    case GL_RGB5_A1:
-    case GL_RGB565:
-    case GL_RGBA8:
-    case GL_RGB8:
-    case GL_SRGB8_ALPHA8:
-    case GL_RGB:
-    case GL_RGBA:
-      break;
-    case GL_DEPTH_COMPONENT16:
-    case GL_DEPTH_COMPONENT24:
-    case GL_DEPTH_COMPONENT32F:
-    case GL_STENCIL_INDEX8:
-    case GL_DEPTH24_STENCIL8:
-    case GL_DEPTH32F_STENCIL8:
-      break;
-    default:
-      context->SetError(GL_INVALID_ENUM);
-      return;
-  }
-  renderbuffer->width = width;
-  renderbuffer->height = height;
-  renderbuffer->format = internal_format;
-  renderbuffer->image.width = width;
-  renderbuffer->image.height = height;
-  renderbuffer->image.depth = 1;
-  renderbuffer->image.rgba.clear();
-  renderbuffer->image.depth16.clear();
-  renderbuffer->image.stencil8.clear();
-  const size_t texels = static_cast<size_t>(width) * height;
-  switch (internal_format) {
-    case GL_DEPTH_COMPONENT16:
-    case GL_DEPTH_COMPONENT24:
-    case GL_DEPTH_COMPONENT32F:
-      renderbuffer->image.depth16.assign(texels, 0xFFFFu);
-      break;
-    case GL_STENCIL_INDEX8:
-      renderbuffer->image.stencil8.assign(texels, 0u);
-      break;
-    case GL_DEPTH24_STENCIL8:
-    case GL_DEPTH32F_STENCIL8:
-      renderbuffer->image.depth16.assign(texels, 0xFFFFu);
-      renderbuffer->image.stencil8.assign(texels, 0u);
-      break;
-    default:
-      renderbuffer->image.rgba.assign(texels, zgl::PackRgba(0, 0, 0, 0));
-      break;
-  }
-}
-
-void glRenderbufferStorageMultisample(GLenum target,
-                                      GLsizei samples,
-                                      GLenum internal_format,
-                                      GLsizei width,
-                                      GLsizei height) {
-  if (samples != 0) {
-    zgl::Context* context = zgl::ApiContext();
-    if (context)
-      context->SetError(GL_INVALID_OPERATION);
+  if (!RenderbufferFormatSupported(internal_format)) {
+    context->SetError(GL_INVALID_ENUM);
     return;
   }
-  glRenderbufferStorage(target, internal_format, width, height);
+  AllocateRenderbufferStorage(renderbuffer, samples, internal_format, width,
+                              height);
 }
 
 void glGetRenderbufferParameteriv(GLenum target, GLenum pname, GLint* params) {
@@ -746,7 +801,7 @@ void glGetRenderbufferParameteriv(GLenum target, GLenum pname, GLint* params) {
       params[0] = renderbuffer->image.stencil8.empty() ? 0 : 8;
       return;
     case GL_RENDERBUFFER_SAMPLES:
-      params[0] = 0;
+      params[0] = renderbuffer->samples;
       return;
     default:
       context->SetError(GL_INVALID_ENUM);
@@ -997,8 +1052,15 @@ void glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint* value) {
     }
     zgl::RenderTarget target = context->GetDrawTarget();
     if (target.valid() && target.stencil) {
-      std::fill(target.stencil, target.stencil + target.width * target.height,
-                static_cast<uint8_t>(value[0]));
+      const size_t texels = static_cast<size_t>(target.width) * target.height;
+      const int planes = target.multisampled() ? target.samples : 1;
+      for (int sample = 0; sample < planes; ++sample)
+        std::fill(target.stencil + static_cast<size_t>(sample) * texels,
+                  target.stencil + static_cast<size_t>(sample + 1) * texels,
+                  static_cast<uint8_t>(value[0]));
+      if (target.multisampled() && target.resolved_stencil)
+        std::fill(target.resolved_stencil, target.resolved_stencil + texels,
+                  static_cast<uint8_t>(value[0]));
     }
     return;
   }
@@ -1038,10 +1100,15 @@ void glClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat* value) {
     if (target.valid() && target.depth) {
       const uint16_t depth =
           static_cast<uint16_t>(zgl::Clamp01(value[0]) * 65535.0f + 0.5f);
-      std::fill(
-          target.depth,
-          target.depth + static_cast<size_t>(target.width) * target.height,
-          depth);
+      const size_t texels = static_cast<size_t>(target.width) * target.height;
+      const int planes = target.multisampled() ? target.samples : 1;
+      for (int sample = 0; sample < planes; ++sample)
+        std::fill(target.depth + static_cast<size_t>(sample) * texels,
+                  target.depth + static_cast<size_t>(sample + 1) * texels,
+                  depth);
+      if (target.multisampled() && target.resolved_depth)
+        std::fill(target.resolved_depth, target.resolved_depth + texels,
+                  depth);
     }
     return;
   }
@@ -1066,13 +1133,26 @@ void glClearBufferfi(GLenum buffer,
     return;
   }
   const size_t texels = static_cast<size_t>(target.width) * target.height;
+  const int planes = target.multisampled() ? target.samples : 1;
   if (target.depth) {
-    std::fill(target.depth, target.depth + texels,
-              static_cast<uint16_t>(zgl::Clamp01(depth) * 65535.0f + 0.5f));
+    const uint16_t clear_depth =
+        static_cast<uint16_t>(zgl::Clamp01(depth) * 65535.0f + 0.5f);
+    for (int sample = 0; sample < planes; ++sample)
+      std::fill(target.depth + static_cast<size_t>(sample) * texels,
+                target.depth + static_cast<size_t>(sample + 1) * texels,
+                clear_depth);
+    if (target.multisampled() && target.resolved_depth)
+      std::fill(target.resolved_depth, target.resolved_depth + texels,
+                clear_depth);
   }
   if (target.stencil) {
-    std::fill(target.stencil, target.stencil + texels,
-              static_cast<uint8_t>(stencil));
+    for (int sample = 0; sample < planes; ++sample)
+      std::fill(target.stencil + static_cast<size_t>(sample) * texels,
+                target.stencil + static_cast<size_t>(sample + 1) * texels,
+                static_cast<uint8_t>(stencil));
+    if (target.multisampled() && target.resolved_stencil)
+      std::fill(target.resolved_stencil, target.resolved_stencil + texels,
+                static_cast<uint8_t>(stencil));
   }
 }
 

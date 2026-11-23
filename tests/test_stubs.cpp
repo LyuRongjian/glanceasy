@@ -230,9 +230,10 @@ TEST(MultisampleAndTextureViewEntryPointsAreStubs) {
   glTexStorage3DMultisample(GL_TEXTURE_3D, 4, GL_RGBA8, 8, 8, 8, GL_TRUE);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
 
-  GLfloat sample_position = 0.0f;
-  glGetMultisamplefv(GL_SAMPLE_POSITION, 0, &sample_position);
-  EXPECT_NEAR(sample_position, 0.5f, 0.001f);
+  GLfloat sample_position[2] = {};
+  glGetMultisamplefv(GL_SAMPLE_POSITION, 0, sample_position);
+  EXPECT_NEAR(sample_position[0], 0.125f, 0.001f);
+  EXPECT_NEAR(sample_position[1], 0.375f, 0.001f);
   glGetMultisamplefv(GL_SAMPLE_POSITION, 0, nullptr);
   glSampleMaski(0, 0xFF);
   glMinSampleShading(1.0f);
