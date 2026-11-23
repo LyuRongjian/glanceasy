@@ -39,6 +39,7 @@ class Parser {
     bool is_inout = false;
     bool is_invariant = false;
     bool is_std140 = false;
+    bool flat = false;
     int location = -1;
   };
 

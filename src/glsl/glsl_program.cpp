@@ -81,25 +81,64 @@ bool Program::Link(
   vertex_ = vertex;
   fragment_ = fragment;
 
-  // Attributes.  glBindAttribLocation() overrides the declaration order.
+  // Attributes.  Explicit locations and glBindAttribLocation() are fixed;
+  // remaining attributes take the lowest free slots in declaration order.
   {
-    std::vector<int> used;
-    for (const Variable& attribute : vertex->attributes) {
-      int location = attribute.index;
-      if (!attribute.explicit_location) {
+    std::vector<bool> occupied(kMaxVertexAttribs, false);
+    std::vector<int> locations(vertex->attributes.size(), -1);
+    for (size_t i = 0; i < vertex->attributes.size(); ++i) {
+      const Variable& attribute = vertex->attributes[i];
+      int location = attribute.explicit_location ? attribute.index : -1;
+      if (location < 0) {
         for (const auto& binding : bindings) {
-          if (binding.first == attribute.name)
+          if (binding.first == attribute.name) {
             location = binding.second;
+            break;
+          }
         }
       }
-      if (location < 0 || location >= kMaxVertexAttribs)
+      if (location < 0)
+        continue;
+      const int slots = attribute.type.is_matrix() ? attribute.type.columns()
+                       : attribute.type.is_array() ? attribute.type.array_size()
+                                                   : 1;
+      if (location + slots > kMaxVertexAttribs)
         return fail("attribute '" + attribute.name +
                     "' has an invalid location");
-      used.push_back(location);
+      locations[i] = location;
+      for (int slot = 0; slot < slots; ++slot)
+        occupied[location + slot] = true;
+    }
+    for (size_t i = 0; i < vertex->attributes.size(); ++i) {
+      if (locations[i] >= 0)
+        continue;
+      const Variable& attribute = vertex->attributes[i];
+      const int slots = attribute.type.is_matrix() ? attribute.type.columns()
+                       : attribute.type.is_array() ? attribute.type.array_size()
+                                                   : 1;
+      int location = 0;
+      for (; location + slots <= kMaxVertexAttribs; ++location) {
+        bool free = true;
+        for (int slot = 0; slot < slots; ++slot) {
+          if (occupied[location + slot]) {
+            free = false;
+            break;
+          }
+        }
+        if (free)
+          break;
+      }
+      if (location + slots > kMaxVertexAttribs)
+        return fail("too many vertex attributes");
+      locations[i] = location;
+      for (int slot = 0; slot < slots; ++slot)
+        occupied[location + slot] = true;
+    }
+    for (size_t i = 0; i < vertex->attributes.size(); ++i) {
       AttributeInfo info;
-      info.name = attribute.name;
-      info.type = attribute.type;
-      info.location = location;
+      info.name = vertex->attributes[i].name;
+      info.type = vertex->attributes[i].type;
+      info.location = locations[i];
       attributes_.push_back(info);
     }
   }
@@ -113,6 +152,7 @@ bool Program::Link(
       info.type = varying.type;
       info.offset = varying_floats_;
       info.components = varying.type.components();
+      info.flat = varying.flat;
       varying.varying_offset = info.offset;
       varying_floats_ += info.components;
       varyings_.push_back(info);
@@ -217,6 +257,8 @@ bool Program::Link(
       info.name = output.name;
       info.location = location;
       info.slot = output.slot;
+      info.element = output.element;
+      info.components = output.components;
       info.base = output.base;
       fragment_outputs_.push_back(info);
     }

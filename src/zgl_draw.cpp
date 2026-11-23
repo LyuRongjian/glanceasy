@@ -54,9 +54,47 @@ int TypeSize(GLenum type) {
   }
 }
 
+bool IsPacked2101010(GLenum type) {
+  return type == GL_INT_2_10_10_10_REV ||
+         type == GL_UNSIGNED_INT_2_10_10_10_REV;
+}
+
+int Packed2101010Bits(int component) {
+  return component < 3 ? 10 : 2;
+}
+
+float ReadPacked2101010(const uint8_t* data, int component, GLenum type,
+                        bool normalized) {
+  uint32_t word;
+  memcpy(&word, data, sizeof(word));
+  const int bits = Packed2101010Bits(component);
+  int shift = 0;
+  for (int i = 0; i < component; ++i)
+    shift += Packed2101010Bits(i);
+  const uint32_t mask = (1u << bits) - 1u;
+  const int raw = static_cast<int>((word >> shift) & mask);
+  if (normalized) {
+    if (type == GL_INT_2_10_10_10_REV) {
+      const int sign_bit = 1 << (bits - 1);
+      const int signed_value =
+          (raw & sign_bit) ? raw - (1 << bits) : raw;
+      const float scale = 1.0f / static_cast<float>(sign_bit - 1);
+      return std::max(-1.0f, static_cast<float>(signed_value) * scale);
+    }
+    return static_cast<float>(raw) /
+           static_cast<float>((1u << bits) - 1u);
+  }
+  if (type == GL_INT_2_10_10_10_REV) {
+    const int sign_bit = 1 << (bits - 1);
+    return static_cast<float>((raw & sign_bit) ? raw - (1 << bits) : raw);
+  }
+  return static_cast<float>(raw);
+}
+
 bool IsIntegerType(GLenum type) {
   return type == GL_BYTE || type == GL_UNSIGNED_BYTE || type == GL_SHORT ||
-         type == GL_UNSIGNED_SHORT || type == GL_INT || type == GL_UNSIGNED_INT;
+         type == GL_UNSIGNED_SHORT || type == GL_INT ||
+         type == GL_UNSIGNED_INT || IsPacked2101010(type);
 }
 
 float NormalizeComponent(GLenum type, int raw) {
@@ -100,6 +138,8 @@ float ReadHalfFloat(const uint8_t* data) {
 // Reads one attribute component as a float.  |data| points at the first
 // component of the element.
 float ReadAttributeComponent(const uint8_t* data, int component, GLenum type) {
+  if (IsPacked2101010(type))
+    return ReadPacked2101010(data, component, type, false);
   switch (type) {
     case GL_FLOAT: {
       float value;
@@ -145,6 +185,8 @@ float ReadAttributeComponent(const uint8_t* data, int component, GLenum type) {
 }
 
 float ReadNormalizedComponent(const uint8_t* data, int component, GLenum type) {
+  if (IsPacked2101010(type))
+    return ReadPacked2101010(data, component, type, true);
   if (TypeSize(type) == 1) {
     const uint8_t raw = data[component];
     return NormalizeComponent(type, type == GL_BYTE ? static_cast<int8_t>(raw)
@@ -479,6 +521,7 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
   std::vector<float> scratch_;
   std::vector<RasterVertex> screen_;
   std::vector<float> varying_values_;
+  std::vector<std::pair<int, int>> flat_varying_ranges_;
   std::vector<float> tf_varyings_;
   float ndc_x_[kMaxClippedVertices] = {};
   float ndc_y_[kMaxClippedVertices] = {};
@@ -734,6 +777,12 @@ bool Pipeline::Prepare() {
                                  available);
   }
   varying_floats_ = program_->VaryingFloats();
+  flat_varying_ranges_.clear();
+  for (const glsl::VaryingInfo& info : program_->varyings()) {
+    if (info.flat)
+      flat_varying_ranges_.push_back(
+          {info.offset, info.offset + info.components});
+  }
   stride_ = kFloatPerPosition + varying_floats_;
   cache_.assign(static_cast<size_t>(kVertexCacheSize) * stride_, 0.0f);
   cache_vertices_.assign(kVertexCacheSize, CachedVertex());
@@ -789,7 +838,9 @@ void Pipeline::FetchAttributes(GLuint index,
     const size_t element =
         divisor > 0 ? static_cast<size_t>(instance) / divisor : index;
     const int components = ClampInt(attribute.size, 1, 4);
-    const int element_size = TypeSize(attribute.type) * components;
+    const int element_size = IsPacked2101010(attribute.type)
+                                 ? 4
+                                 : TypeSize(attribute.type) * components;
     if (element_size == 0)
       continue;
     const int stride = attribute.stride > 0 ? attribute.stride : element_size;
@@ -1174,11 +1225,22 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
   const float w0 = clip_[static_cast<size_t>(fragment.vertex[0]) * stride_ + 3];
   const float w1 = clip_[static_cast<size_t>(fragment.vertex[1]) * stride_ + 3];
   const float w2 = clip_[static_cast<size_t>(fragment.vertex[2]) * stride_ + 3];
+  const float* provoking =
+      clip_.data() + static_cast<size_t>(fragment.vertex[2]) * stride_ + 4;
+  const auto is_flat = [&](int index) {
+    for (const auto& range : flat_varying_ranges_)
+      if (index >= range.first && index < range.second)
+        return true;
+    return false;
+  };
   const bool affine =
       (w0 == w1 && w1 == w2) || w0 == 0.0f || w1 == 0.0f || w2 == 0.0f;
   if (affine) {
     for (int i = 0; i < varying_floats_; ++i) {
-      out[i] = vertex0[i] * bary0 + vertex1[i] * bary1 + vertex2[i] * bary2;
+      out[i] = is_flat(i)
+                   ? provoking[i]
+                   : vertex0[i] * bary0 + vertex1[i] * bary1 +
+                         vertex2[i] * bary2;
     }
     return;
   }
@@ -1192,9 +1254,10 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
     return;
   }
   for (int i = 0; i < varying_floats_; ++i) {
-    out[i] = (vertex0[i] * inverse0 + vertex1[i] * inverse1 +
-              vertex2[i] * inverse2) /
-             inverse_sum;
+    out[i] = is_flat(i) ? provoking[i]
+                        : (vertex0[i] * inverse0 + vertex1[i] * inverse1 +
+                           vertex2[i] * inverse2) /
+                              inverse_sum;
   }
 }
 

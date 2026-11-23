@@ -58,6 +58,8 @@ struct FragmentOut {
   std::string name;
   int location = -1;
   int slot = -1;
+  int element = 0;
+  int components = 0;
   BaseType base = BaseType::kFloat;
 };
 
@@ -179,6 +181,7 @@ struct Variable {
   int ubo_block = -1;       // Uniform block owning this uniform, or -1.
   int ubo_offset = 0;       // Byte offset inside the std140 block.
   bool explicit_location = false;  // layout(location) was declared.
+  bool flat = false;               // Flat interpolation qualifier.
   BuiltinId builtin = BuiltinId::kNone;
   bool read_only = false;
 };

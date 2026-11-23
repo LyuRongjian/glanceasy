@@ -56,6 +56,7 @@ struct VaryingInfo {
   Type type;
   int offset = 0;  // Float offset inside the varying arrays.
   int components = 0;
+  bool flat = false;
 };
 
 struct TransformFeedbackVaryingInfo {
@@ -119,6 +120,8 @@ struct FragmentOutputInfo {
   std::string name;
   int location = -1;
   int slot = -1;
+  int element = 0;
+  int components = 0;
   BaseType base = BaseType::kFloat;
 };
 

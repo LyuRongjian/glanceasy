@@ -373,8 +373,10 @@ bool Parser::ParseQualifiers(Qualifiers* qualifiers) {
       qualifiers->is_out = true;
     } else if (text == "invariant") {
       qualifiers->is_invariant = true;
-    } else if (text == "flat" || text == "smooth" || text == "centroid" ||
-               text == "lowp" || text == "mediump" || text == "highp") {
+    } else if (text == "flat") {
+      qualifiers->flat = true;
+    } else if (text == "smooth" || text == "centroid" || text == "lowp" ||
+               text == "mediump" || text == "highp") {
       // Interpolation and precision qualifiers are accepted and ignored.
     } else if (text == "layout") {
       Advance();
@@ -511,27 +513,11 @@ bool Parser::AddGlobalVariable(const std::string& name,
     int location = qualifiers.location;
     if (location < 0) {
       location = next_attribute_location_;
-      bool free = false;
-      while (location + slots <= kMaxVertexAttribs && !free) {
-        free = true;
-        for (const auto& entry : attribute_names_) {
-          if (entry.second >= location && entry.second < location + slots) {
-            free = false;
-            break;
-          }
-        }
-        if (!free)
-          ++location;
-      }
-    }
-    if (location < 0 || location + slots > kMaxVertexAttribs)
-      return FailAt(line, "too many vertex attributes");
-    for (const auto& entry : attribute_names_) {
-      if (entry.second >= location && entry.second < location + slots)
-        return FailAt(line, "duplicate attribute location");
+      next_attribute_location_ = location + slots;
+    } else if (location + slots > kMaxVertexAttribs) {
+      return FailAt(line, "attribute location out of range");
     }
     variable.index = location;
-    next_attribute_location_ = location + slots;
     for (int slot = 0; slot < slots; ++slot)
       attribute_names_.push_back({name, location + slot});
     ast_->attributes.push_back(variable);
@@ -546,12 +532,17 @@ bool Parser::AddGlobalVariable(const std::string& name,
     if (!valid_output)
       return FailAt(line, "fragment output '" + name +
                              "' must be a vec4, ivec4 or uvec4");
+    const bool is_array = type.is_array();
+    const int array_length = is_array ? type.array_size() : 1;
+    const Type element_type = is_array ? type.array_element() : type;
     int location = qualifiers.location;
     if (location < 0) {
-      for (int candidate = 0; candidate < kMaxFragmentOutputs; ++candidate) {
+      for (int candidate = 0;
+           candidate + array_length <= kMaxFragmentOutputs; ++candidate) {
         bool used = false;
         for (const FragmentOut& output : ast_->outputs) {
-          if (output.location == candidate) {
+          if (output.location >= candidate &&
+              output.location < candidate + array_length) {
             used = true;
             break;
           }
@@ -562,23 +553,27 @@ bool Parser::AddGlobalVariable(const std::string& name,
         }
       }
     }
-    if (location < 0 || location >= kMaxFragmentOutputs)
+    if (location < 0 || location + array_length > kMaxFragmentOutputs)
       return FailAt(line, "fragment output location is out of range");
     for (const FragmentOut& output : ast_->outputs) {
-      if (output.location == location)
+      if (output.location >= location &&
+          output.location < location + array_length)
         return FailAt(line, "duplicate fragment output location");
     }
-    BuiltinId id = static_cast<BuiltinId>(
-        static_cast<int>(BuiltinId::kFragOutput0) + location);
-    const int slot = EnsureBuiltin(id);
+    const int slot = EnsureBuiltin(static_cast<BuiltinId>(
+        static_cast<int>(BuiltinId::kFragOutput0) + location));
     if (slot < 0)
       return FailAt(line, "could not allocate a fragment output");
-    FragmentOut output;
-    output.name = name;
-    output.location = location;
-    output.slot = slot;
-    output.base = type.base();
-    ast_->outputs.push_back(output);
+    for (int element = 0; element < array_length; ++element) {
+      FragmentOut output;
+      output.name = name;
+      output.location = location + element;
+      output.slot = slot;
+      output.element = element;
+      output.components = element_type.components();
+      output.base = element_type.base();
+      ast_->outputs.push_back(output);
+    }
     global_names_.push_back({name, slot});
     ast_->uses_frag_color = true;
     return true;
@@ -594,6 +589,7 @@ bool Parser::AddGlobalVariable(const std::string& name,
       return FailAt(line, "matrix varyings are not supported");
     variable.storage =
         wants_varying_out ? Storage::kVaryingOut : Storage::kVaryingIn;
+    variable.flat = qualifiers.flat;
     variable.index = static_cast<int>(ast_->varyings.size());
     varying_names_.push_back({name, variable.index});
     ast_->varyings.push_back(variable);

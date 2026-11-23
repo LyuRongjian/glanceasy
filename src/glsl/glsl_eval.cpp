@@ -1703,8 +1703,12 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
         fragment_output.slot >= static_cast<int>(fragment_globals_.size()))
       continue;
     const Value& value = fragment_globals_[fragment_output.slot];
+    const int components = fragment_output.components;
+    const float* data =
+        value.Data() + static_cast<size_t>(fragment_output.element) * components;
     for (int i = 0; i < 4; ++i)
-      output->color[fragment_output.location][i] = value.data[i];
+      output->color[fragment_output.location][i] =
+          i < components ? data[i] : (i == 3 ? 1.0f : 0.0f);
     output->color_base[fragment_output.location] = fragment_output.base;
     output->written[fragment_output.location] = true;
   }
