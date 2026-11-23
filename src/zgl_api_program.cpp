@@ -23,7 +23,7 @@ glsl::Stage ShaderStage(GLenum type) {
 }
 
 ShaderObject* LookupShader(Context* context, GLuint name) {
-  ShaderObject* shader = context->shaders.Get(name);
+  ShaderObject* shader = context->FindShader(name);
   if (!shader)
     context->SetError(GL_INVALID_VALUE);
   return shader;
@@ -160,6 +160,7 @@ void glDeleteShader(GLuint shader) {
         context->shaders.Release(shader);
     if (object) {
       object->name = shader;
+      object->delete_status = true;
       context->orphaned_shaders.emplace_back(shader, std::move(object));
     }
     return;
@@ -239,7 +240,7 @@ void glGetShaderiv(GLuint shader, GLenum pname, GLint* params) {
                       : static_cast<GLint>(object->source.size() + 1);
       return;
     case GL_DELETE_STATUS:
-      params[0] = GL_FALSE;
+      params[0] = object->delete_status ? GL_TRUE : GL_FALSE;
       return;
     default:
       context->SetError(GL_INVALID_ENUM);
@@ -275,10 +276,16 @@ void glDeleteProgram(GLuint program) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || program == 0)
     return;
-  context->programs.Delete(program);
-  if (context->state.program == program)
-    context->state.program = 0;
-  context->CollectOrphanedShaders();
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  // Keep the name queryable so GL_DELETE_STATUS remains observable, and leave
+  // the current binding untouched until glUseProgram replaces it.
+  object->delete_status = true;
+  object->linked = false;
+  object->program.reset();
 }
 
 GLboolean glIsProgram(GLuint program) {
@@ -472,7 +479,7 @@ void glGetProgramiv(GLuint program, GLenum pname, GLint* params) {
       params[0] = object->linked ? GL_TRUE : GL_FALSE;
       return;
     case GL_DELETE_STATUS:
-      params[0] = GL_FALSE;
+      params[0] = object->delete_status ? GL_TRUE : GL_FALSE;
       return;
     case GL_TRANSFORM_FEEDBACK_VARYINGS:
       params[0] = static_cast<GLint>(

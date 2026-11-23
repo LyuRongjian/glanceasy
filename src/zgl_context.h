@@ -217,6 +217,7 @@ class ShaderObject {
   std::string source;
   std::unique_ptr<glsl::ShaderAst> ast;
   bool compiled = false;
+  bool delete_status = false;
   std::string log;
 };
 
@@ -225,6 +226,7 @@ class ProgramObject {
   std::vector<GLuint> shaders;
   std::unique_ptr<glsl::Program> program;
   bool linked = false;
+  bool delete_status = false;
   std::string log;
   std::vector<std::pair<std::string, int>> bindings;
   std::vector<std::pair<std::string, int>> frag_data_bindings;

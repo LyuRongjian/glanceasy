@@ -206,6 +206,8 @@ bool ValidFormatType(GLenum format, GLenum type) {
            type == GL_FLOAT_32_UNSIGNED_INT_24_8_REV;
   if (format == GL_RED_INTEGER || format == GL_RG_INTEGER ||
       format == GL_RGB_INTEGER || format == GL_RGBA_INTEGER) {
+    if (type == GL_UNSIGNED_INT_2_10_10_10_REV)
+      return format == GL_RGB_INTEGER || format == GL_RGBA_INTEGER;
     return type == GL_BYTE || type == GL_UNSIGNED_BYTE || type == GL_SHORT ||
            type == GL_UNSIGNED_SHORT || type == GL_INT ||
            type == GL_UNSIGNED_INT;
@@ -230,7 +232,8 @@ bool ValidFormatType(GLenum format, GLenum type) {
   if (type == GL_UNSIGNED_SHORT_4_4_4_4 || type == GL_UNSIGNED_SHORT_5_5_5_1)
     return format == GL_RGBA;
   if (type == GL_UNSIGNED_INT_2_10_10_10_REV)
-    return format == GL_RGBA || format == GL_RGBA_INTEGER;
+    return format == GL_RGBA || format == GL_RGBA_INTEGER ||
+           format == GL_RGB_INTEGER;
   if (type == GL_UNSIGNED_INT_10F_11F_11F_REV)
     return format == GL_RGB;
   if (type == GL_UNSIGNED_INT_5_9_9_9_REV)
@@ -552,6 +555,15 @@ void SetTextureImage(GLenum target,
     return;
   }
   if (!ValidFormatType(format, type)) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  // Packed types require a sized internal format; the unsized RGB/RGBA
+  // combinations are not part of the ES 3.0 table.
+  if ((internal_format == GL_RGB || internal_format == GL_RGBA) &&
+      (type == GL_UNSIGNED_INT_2_10_10_10_REV ||
+       type == GL_UNSIGNED_INT_10F_11F_11F_REV ||
+       type == GL_UNSIGNED_INT_5_9_9_9_REV)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }

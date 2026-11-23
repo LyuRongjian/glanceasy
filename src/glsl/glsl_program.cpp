@@ -157,6 +157,19 @@ bool Program::Link(
           break;
         }
       }
+      if (!found && name == "gl_Position") {
+        TransformFeedbackVaryingInfo position;
+        position.name = name;
+        position.type = Type::Vec(4);
+        position.offset = 0;
+        position.components = 4;
+        position.buffer_index =
+            transform_feedback_separate ? static_cast<int>(i) : 0;
+        transform_feedback_varyings_.push_back(position);
+        if (!transform_feedback_separate)
+          interleaved_components += 4;
+        continue;
+      }
       if (!found)
         return fail("transform feedback varying '" + name +
                     "' is not a vertex output");

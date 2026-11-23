@@ -15,6 +15,19 @@
 
 namespace zgl {
 
+GLint RoundToInteger(float value) {
+  return static_cast<GLint>(value >= 0.0f ? value + 0.5f : value - 0.5f);
+}
+
+GLint ExpandFloatToInteger(float value) {
+  const double scaled = static_cast<double>(value) * 2147483647.0;
+  if (scaled >= 2147483647.0)
+    return 2147483647;
+  if (scaled <= -2147483648.0)
+    return -2147483648;
+  return static_cast<GLint>(scaled);
+}
+
 int FloatBits(float value) {
   int32_t bits = 0;
   memcpy(&bits, &value, sizeof(bits));
@@ -108,6 +121,10 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       return true;
     case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
       *first = 10;
+      return true;
+    case GL_COMPRESSED_TEXTURE_FORMATS:
+      *first = GL_COMPRESSED_RGB8_ETC2;
+      *count = 10;
       return true;
     case GL_SAMPLES:
     case GL_SAMPLE_BUFFERS:
@@ -236,7 +253,7 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       return true;
     case GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:
     case GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:
-      *first = 4096;
+      *first = 102400;
       return true;
     case GL_MAX_VARYING_COMPONENTS:
     case GL_MAX_VERTEX_OUTPUT_COMPONENTS:
@@ -307,13 +324,13 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = static_cast<GLint>(state.depth.func);
       return true;
     case GL_DEPTH_CLEAR_VALUE:
-      *first = FloatBits(state.clear_depth);
+      *first = ExpandFloatToInteger(state.clear_depth);
       return true;
     case GL_STENCIL_CLEAR_VALUE:
       *first = state.clear_stencil;
       return true;
     case GL_COLOR_CLEAR_VALUE:
-      *first = FloatBits(state.clear_color[0]);
+      *first = ExpandFloatToInteger(state.clear_color[0]);
       *count = 4;
       return true;
     case GL_COLOR_WRITEMASK:
@@ -324,10 +341,10 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = state.depth.mask ? GL_TRUE : GL_FALSE;
       return true;
     case GL_STENCIL_WRITEMASK:
-      *first = static_cast<GLint>(state.stencil.write_mask);
+      *first = static_cast<GLint>(state.stencil.write_mask & 0xFF);
       return true;
     case GL_STENCIL_BACK_WRITEMASK:
-      *first = static_cast<GLint>(state.stencil.write_mask);
+      *first = static_cast<GLint>(state.stencil.write_mask & 0xFF);
       return true;
     case GL_STENCIL_FUNC:
       *first = static_cast<GLint>(state.stencil.front.func);
@@ -336,7 +353,7 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = state.stencil.front.reference;
       return true;
     case GL_STENCIL_VALUE_MASK:
-      *first = state.stencil.mask;
+      *first = static_cast<GLint>(state.stencil.mask & 0xFF);
       return true;
     case GL_STENCIL_FAIL:
       *first = static_cast<GLint>(state.stencil.front.op_fail);
@@ -354,7 +371,7 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = state.stencil.back.reference;
       return true;
     case GL_STENCIL_BACK_VALUE_MASK:
-      *first = state.stencil.mask;
+      *first = static_cast<GLint>(state.stencil.mask & 0xFF);
       return true;
     case GL_STENCIL_BACK_FAIL:
       *first = static_cast<GLint>(state.stencil.back.op_fail);
@@ -423,32 +440,32 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = static_cast<GLint>(state.line_width + 0.5f);
       return true;
     case GL_SAMPLE_COVERAGE_VALUE:
-      *first = FloatBits(state.sample_coverage_value);
+      *first = RoundToInteger(state.sample_coverage_value);
       return true;
     case GL_BLEND_COLOR:
-      *first = FloatBits(state.blend.color[0]);
+      *first = ExpandFloatToInteger(state.blend.color[0]);
       *count = 4;
       return true;
     case GL_DEPTH_RANGE:
-      *first = FloatBits(state.depth.range_near);
+      *first = ExpandFloatToInteger(state.depth.range_near);
       *count = 2;
       return true;
     case GL_ALIASED_LINE_WIDTH_RANGE:
-      *first = FloatBits(1.0f);
+      *first = 1;
       *count = 2;
       return true;
     case GL_ALIASED_POINT_SIZE_RANGE:
-      *first = FloatBits(1.0f);
+      *first = 1;
       *count = 2;
       return true;
     case GL_MAX_TEXTURE_LOD_BIAS:
-      *first = FloatBits(2.0f);
+      *first = ExpandFloatToInteger(2.0f);
       return true;
     case GL_POLYGON_OFFSET_FACTOR:
-      *first = FloatBits(state.polygon_offset_factor);
+      *first = RoundToInteger(state.polygon_offset_factor);
       return true;
     case GL_POLYGON_OFFSET_UNITS:
-      *first = FloatBits(state.polygon_offset_units);
+      *first = RoundToInteger(state.polygon_offset_units);
       return true;
     case GL_SAMPLE_COVERAGE_INVERT:
       *first = state.invert_coverage ? GL_TRUE : GL_FALSE;
@@ -503,6 +520,18 @@ void glGetIntegerv(GLenum pname, GLint* data) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !data)
     return;
+  if (pname == GL_COMPRESSED_TEXTURE_FORMATS) {
+    static const GLint kFormats[10] = {
+        GL_COMPRESSED_RGB8_ETC2,          GL_COMPRESSED_SRGB8_ETC2,
+        GL_COMPRESSED_RGBA8_ETC2_EAC,     GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC,
+        GL_COMPRESSED_R11_EAC,            GL_COMPRESSED_SIGNED_R11_EAC,
+        GL_COMPRESSED_RG11_EAC,           GL_COMPRESSED_SIGNED_RG11_EAC,
+        GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2,
+        GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2};
+    for (int i = 0; i < 10; ++i)
+      data[i] = kFormats[i];
+    return;
+  }
   GLint first = 0;
   int count = 1;
   if (!zgl::GetIntegerValue(context, pname, &first, &count)) {
@@ -530,24 +559,23 @@ void glGetIntegerv(GLenum pname, GLint* data) {
   }
   if (pname == GL_COLOR_CLEAR_VALUE) {
     for (int i = 0; i < 4; ++i)
-      data[i] = zgl::FloatBits(context->state.clear_color[i]);
+      data[i] = zgl::ExpandFloatToInteger(context->state.clear_color[i]);
     return;
   }
   if (pname == GL_BLEND_COLOR) {
     for (int i = 0; i < 4; ++i)
-      data[i] = zgl::FloatBits(context->state.blend.color[i]);
+      data[i] = zgl::ExpandFloatToInteger(context->state.blend.color[i]);
     return;
   }
   if (pname == GL_DEPTH_RANGE) {
-    data[0] = zgl::FloatBits(context->state.depth.range_near);
-    data[1] = zgl::FloatBits(context->state.depth.range_far);
+    data[0] = zgl::ExpandFloatToInteger(context->state.depth.range_near);
+    data[1] = zgl::ExpandFloatToInteger(context->state.depth.range_far);
     return;
   }
   if (pname == GL_ALIASED_LINE_WIDTH_RANGE ||
       pname == GL_ALIASED_POINT_SIZE_RANGE) {
-    data[0] = zgl::FloatBits(1.0f);
-    data[1] = pname == GL_ALIASED_POINT_SIZE_RANGE ? zgl::FloatBits(64.0f)
-                                                   : zgl::FloatBits(1.0f);
+    data[0] = 1;
+    data[1] = pname == GL_ALIASED_POINT_SIZE_RANGE ? 64 : 1;
     return;
   }
   if (pname == GL_COMPRESSED_TEXTURE_FORMATS) {
@@ -636,6 +664,11 @@ void glGetBooleanv(GLenum pname, GLboolean* data) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !data)
     return;
+  if (pname == GL_SAMPLE_COVERAGE_VALUE) {
+    data[0] = context->state.sample_coverage_value != 0.0f ? GL_TRUE
+                                                             : GL_FALSE;
+    return;
+  }
   GLint value = 0;
   int count = 1;
   if (!zgl::GetIntegerValue(context, pname, &value, &count)) {
@@ -1249,7 +1282,8 @@ void glSampleCoverage(GLfloat value, GLboolean invert) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  context->state.sample_coverage_value = value;
+  context->state.sample_coverage_value =
+      value < 0.0f ? 0.0f : value > 1.0f ? 1.0f : value;
   context->state.invert_coverage = invert != GL_FALSE;
 }
 

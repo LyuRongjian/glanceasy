@@ -146,6 +146,20 @@ const TextureImage* AttachmentImageOf(Context* context,
   return nullptr;
 }
 
+int AttachmentSamples(const Context& context,
+                      const FramebufferAttachment& attachment) {
+  if (attachment.texture) {
+    const Texture* texture = context.textures.Get(attachment.texture);
+    return texture ? texture->samples : 0;
+  }
+  if (attachment.renderbuffer) {
+    const Renderbuffer* renderbuffer =
+        context.renderbuffers.Get(attachment.renderbuffer);
+    return renderbuffer ? renderbuffer->samples : 0;
+  }
+  return 0;
+}
+
 bool ValidFramebufferTarget(GLenum target) {
   return target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER ||
          target == GL_READ_FRAMEBUFFER;
@@ -226,7 +240,7 @@ GLenum CheckCompleteness(Context* context, const Framebuffer& framebuffer) {
     return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
   const int width = base->width;
   const int height = base->height;
-  const int samples = std::max(1, base->samples);
+  const int samples = AttachmentSamples(*context, *reference);
   for (int i = 1; i < kMaxColorAttachments; ++i) {
     if (!framebuffer.colors[i].bound())
       continue;
@@ -235,7 +249,7 @@ GLenum CheckCompleteness(Context* context, const Framebuffer& framebuffer) {
     if (!image || !image->float_rgba.empty() || image->width != width ||
         image->height != height)
       return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
-    if (std::max(1, image->samples) != samples)
+    if (AttachmentSamples(*context, framebuffer.colors[i]) != samples)
       return GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;
   }
   if (framebuffer.depth.bound()) {
@@ -243,14 +257,14 @@ GLenum CheckCompleteness(Context* context, const Framebuffer& framebuffer) {
     if (!image || !image->float_rgba.empty() || image->width != width ||
         image->height != height)
       return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
-    if (std::max(1, image->samples) != samples)
+    if (AttachmentSamples(*context, framebuffer.depth) != samples)
       return GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;
   }
   if (framebuffer.stencil.bound()) {
     const TextureImage* image = AttachmentImageOf(context, framebuffer.stencil);
     if (!image || image->width != width || image->height != height)
       return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
-    if (std::max(1, image->samples) != samples)
+    if (AttachmentSamples(*context, framebuffer.stencil) != samples)
       return GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;
   }
   return GL_FRAMEBUFFER_COMPLETE;
