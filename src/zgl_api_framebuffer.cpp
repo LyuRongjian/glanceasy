@@ -573,25 +573,10 @@ bool InvalidateAccepted(Context* context,
       context->SetError(GL_INVALID_ENUM);
       return false;
     }
-    if (!framebuffer)
-      continue;
-    if (attachment == GL_COLOR || attachment == GL_DEPTH ||
-        attachment == GL_STENCIL)
-      continue;
-    bool bound = false;
-    if (colour) {
-      bound = framebuffer->colors[attachment - GL_COLOR_ATTACHMENT0].bound();
-    } else if (attachment == GL_DEPTH_ATTACHMENT) {
-      bound = framebuffer->depth.bound();
-    } else if (attachment == GL_STENCIL_ATTACHMENT) {
-      bound = framebuffer->stencil.bound();
-    } else {
-      bound = framebuffer->depth.bound() || framebuffer->stencil.bound();
-    }
-    if (!bound) {
-      context->SetError(GL_INVALID_OPERATION);
-      return false;
-    }
+    // Attachments that are not present in the bound framebuffer are ignored
+    // by the specification; the backend keeps all attachments resident, so a
+    // successful validation is all that is required.
+    (void)framebuffer;
   }
   return true;
 }

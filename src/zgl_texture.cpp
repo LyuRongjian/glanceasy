@@ -156,10 +156,17 @@ uint16_t FloatToDepth16(float value) {
 
 bool ImageHasTexels(const TextureImage& image) {
   return !image.rgba.empty() || !image.float_rgba.empty() ||
-         !image.integer_rgba.empty();
+         !image.integer_rgba.empty() || !image.depth16.empty();
 }
 
 void FetchTexel(const TextureImage& image, size_t index, float rgba[4]) {
+  if (!image.depth16.empty()) {
+    rgba[0] = static_cast<float>(image.depth16[index]) / 65535.0f;
+    rgba[1] = 0.0f;
+    rgba[2] = 0.0f;
+    rgba[3] = 1.0f;
+    return;
+  }
   if (!image.integer_rgba.empty()) {
     const uint32_t* source = image.integer_rgba.data() + index * 4;
     for (int i = 0; i < 4; ++i)
