@@ -5,8 +5,13 @@
 #include "src/glsl/glsl_lexer.h"
 
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#include <map>
+#include <string>
+#include <vector>
 
 namespace zgl {
 namespace glsl {
@@ -29,9 +34,291 @@ const char* const kPuncts[] = {
     ">",   "=",   "!",  "~",  "&",  "|",  "^",  "?",  ":",
 };
 
+// Minimal GLSL ES preprocessor.  Object-like and simple function-like
+// macros are expanded; conditional directives are handled for the common
+// #ifdef/#ifndef/#if 0/#if 1 forms.
+struct Macro {
+  bool function_like = false;
+  std::vector<std::string> params;
+  std::string body;
+};
+
+std::string Trim(const std::string& value) {
+  size_t begin = value.find_first_not_of(" \t");
+  if (begin == std::string::npos)
+    return std::string();
+  size_t end = value.find_last_not_of(" \t");
+  return value.substr(begin, end - begin + 1);
+}
+
+std::vector<std::string> SplitArguments(const std::string& text) {
+  std::vector<std::string> args;
+  std::string current;
+  int depth = 0;
+  for (char c : text) {
+    if (c == '(') {
+      ++depth;
+    } else if (c == ')') {
+      --depth;
+    }
+    if (c == ',' && depth == 0) {
+      args.push_back(Trim(current));
+      current.clear();
+    } else {
+      current += c;
+    }
+  }
+  if (!current.empty() || !args.empty())
+    args.push_back(Trim(current));
+  return args;
+}
+
+std::string Substitute(const std::string& body,
+                       const std::vector<std::string>& params,
+                       const std::vector<std::string>& args) {
+  std::string out;
+  size_t i = 0;
+  while (i < body.size()) {
+    if (IsIdentStart(body[i])) {
+      const size_t start = i;
+      while (i < body.size() && IsIdentChar(body[i]))
+        ++i;
+      const std::string name = body.substr(start, i - start);
+      bool replaced = false;
+      for (size_t p = 0; p < params.size(); ++p) {
+        if (params[p] == name && p < args.size()) {
+          out += args[p];
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced)
+        out += name;
+    } else {
+      out += body[i++];
+    }
+  }
+  return out;
+}
+
+std::string ExpandIdentifiers(const std::string& line,
+                              const std::map<std::string, Macro>& macros,
+                              int depth,
+                              int line_number,
+                              int file_number) {
+  if (depth > 16)
+    return line;
+  std::string out;
+  size_t i = 0;
+  while (i < line.size()) {
+    if (!IsIdentStart(line[i])) {
+      out += line[i++];
+      continue;
+    }
+    const size_t start = i;
+    while (i < line.size() && IsIdentChar(line[i]))
+      ++i;
+    const std::string name = line.substr(start, i - start);
+    if (name == "__LINE__") {
+      out += std::to_string(line_number);
+      continue;
+    }
+    if (name == "__FILE__") {
+      out += std::to_string(file_number);
+      continue;
+    }
+    if (name == "__VERSION__") {
+      out += "300";
+      continue;
+    }
+    if (name == "GL_ES") {
+      out += "1";
+      continue;
+    }
+    const auto it = macros.find(name);
+    if (it == macros.end()) {
+      out += name;
+      continue;
+    }
+    if (!it->second.function_like) {
+      out += ExpandIdentifiers(it->second.body, macros, depth + 1,
+                               line_number, file_number);
+      continue;
+    }
+    size_t lookahead = i;
+    while (lookahead < line.size() &&
+           (line[lookahead] == ' ' || line[lookahead] == '\t'))
+      ++lookahead;
+    if (lookahead >= line.size() || line[lookahead] != '(') {
+      out += name;
+      continue;
+    }
+    size_t open = lookahead;
+    int nesting = 0;
+    size_t close = std::string::npos;
+    for (size_t p = open; p < line.size(); ++p) {
+      if (line[p] == '(') {
+        ++nesting;
+      } else if (line[p] == ')') {
+        --nesting;
+        if (nesting == 0) {
+          close = p;
+          break;
+        }
+      }
+    }
+    if (close == std::string::npos) {
+      out += name;
+      continue;
+    }
+    std::vector<std::string> args =
+        SplitArguments(line.substr(open + 1, close - open - 1));
+    if (args.size() == 1 && args[0].empty() && it->second.params.empty())
+      args.clear();
+    if (args.size() != it->second.params.size()) {
+      out += line.substr(start, close - start + 1);
+      i = close + 1;
+      continue;
+    }
+    out += ExpandIdentifiers(
+        Substitute(it->second.body, it->second.params, args), macros,
+        depth + 1, line_number, file_number);
+    i = close + 1;
+  }
+  return out;
+}
+
+std::string Preprocess(const std::string& source) {
+  std::map<std::string, Macro> macros;
+  struct Conditional {
+    bool parent_active = true;
+    bool active = true;
+    bool taken = false;
+  };
+  std::vector<Conditional> conditionals;
+  std::string out;
+  int logical_line = 1;
+  int logical_file = 0;
+  size_t pos = 0;
+  while (pos <= source.size()) {
+    const size_t end = source.find('\n', pos);
+    const size_t line_end = end == std::string::npos ? source.size() : end;
+    std::string line = source.substr(pos, line_end - pos);
+    const bool active =
+        conditionals.empty() ? true : conditionals.back().active;
+    size_t first = line.find_first_not_of(" \t");
+    if (first != std::string::npos && line[first] == '#') {
+      size_t p = first + 1;
+      while (p < line.size() && (line[p] == ' ' || line[p] == '\t'))
+        ++p;
+      size_t name_end = p;
+      while (name_end < line.size() &&
+             (std::isalnum(static_cast<unsigned char>(line[name_end])) ||
+              line[name_end] == '_'))
+        ++name_end;
+      const std::string directive = line.substr(p, name_end - p);
+      size_t arg = name_end;
+      while (arg < line.size() && (line[arg] == ' ' || line[arg] == '\t'))
+        ++arg;
+      if (directive == "version") {
+        out += line;
+      } else if (directive == "line") {
+        std::string argument =
+            ExpandIdentifiers(line.substr(arg), macros, 0, logical_line,
+                              logical_file);
+        const char* p = argument.c_str();
+        while (*p == ' ' || *p == '\t')
+          ++p;
+        int value = 0;
+        int file = -1;
+        std::sscanf(p, "%d %d", &value, &file);
+        if (value > 0)
+          logical_line = value - 1;
+        if (file >= 0)
+          logical_file = file;
+        out += line;
+      } else if (directive == "define" && active) {
+        size_t n = arg;
+        while (n < line.size() &&
+               (std::isalnum(static_cast<unsigned char>(line[n])) ||
+                line[n] == '_'))
+          ++n;
+        const std::string name = line.substr(arg, n - arg);
+        Macro macro;
+        if (!name.empty()) {
+          if (n < line.size() && line[n] == '(') {
+            const size_t close = line.find(')', n + 1);
+            if (close != std::string::npos) {
+              macro.function_like = true;
+              std::string params = line.substr(n + 1, close - n - 1);
+              for (const std::string& value : SplitArguments(params)) {
+                if (!value.empty())
+                  macro.params.push_back(value);
+              }
+              macro.body = Trim(line.substr(close + 1));
+            }
+          } else {
+            macro.body = Trim(line.substr(n));
+          }
+          macros[name] = macro;
+        }
+      } else if (directive == "undef" && active) {
+        size_t n = arg;
+        while (n < line.size() &&
+               (std::isalnum(static_cast<unsigned char>(line[n])) ||
+                line[n] == '_'))
+          ++n;
+        macros.erase(line.substr(arg, n - arg));
+      } else if (directive == "ifdef" || directive == "ifndef") {
+        Conditional c;
+        c.parent_active = active;
+        size_t n = arg;
+        while (n < line.size() &&
+               (std::isalnum(static_cast<unsigned char>(line[n])) ||
+                line[n] == '_'))
+          ++n;
+        const bool defined = macros.count(line.substr(arg, n - arg)) != 0;
+        c.active = active && (directive == "ifdef" ? defined : !defined);
+        c.taken = c.active;
+        conditionals.push_back(c);
+      } else if (directive == "if") {
+        Conditional c;
+        c.parent_active = active;
+        std::string expr = Trim(line.substr(arg));
+        c.active = active && expr == "1";
+        c.taken = c.active;
+        conditionals.push_back(c);
+      } else if (directive == "else") {
+        if (!conditionals.empty()) {
+          Conditional& c = conditionals.back();
+          c.active = c.parent_active && !c.taken;
+          c.taken = c.taken || c.active;
+        }
+      } else if (directive == "endif") {
+        if (!conditionals.empty())
+          conditionals.pop_back();
+      } else if (directive == "elif") {
+        if (!conditionals.empty())
+          conditionals.back().active = false;
+      }
+      out += '\n';
+    } else if (active) {
+      out += ExpandIdentifiers(line, macros, 0, logical_line, logical_file);
+      out += '\n';
+    } else {
+      out += '\n';
+    }
+    ++logical_line;
+    if (end == std::string::npos)
+      break;
+    pos = end + 1;
+  }
+  return out;
+}
+
 }  // namespace
 
-Lexer::Lexer(const std::string& source) : source_(source) {}
+Lexer::Lexer(const std::string& source) : source_(Preprocess(source)) {}
 
 void Lexer::Fail(const std::string& message) {
   if (!ok_)

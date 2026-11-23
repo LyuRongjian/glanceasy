@@ -25,6 +25,11 @@ GLenum TextureFamily(GLenum target, int* face) {
       return GL_TEXTURE_2D;
     case GL_TEXTURE_3D:
       return GL_TEXTURE_3D;
+    // The CTS state reset binds a zero-sized 2D array texture.  Alias it to
+    // the 3D texture family for now; sampling of sampler2DArray is not
+    // implemented yet, so array-texture tests will still fail.
+    case GL_TEXTURE_2D_ARRAY:
+      return GL_TEXTURE_3D;
     case GL_TEXTURE_CUBE_MAP:
       return GL_TEXTURE_CUBE_MAP;
     case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
@@ -105,7 +110,42 @@ bool ValidInternalFormat(GLenum format) {
     case GL_SRGB8_ALPHA8:
     case GL_SRGB8:
     case GL_R8:
+    case GL_R8_SNORM:
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_RG:
     case GL_RG8:
+    case GL_RG8_SNORM:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_RGB8_SNORM:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+    case GL_RGB10_A2:
+    case GL_RGB10_A2UI:
+    case GL_RGBA8_SNORM:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_R11F_G11F_B10F:
+    case GL_RGB9_E5:
+    case GL_DEPTH_COMPONENT32F:
+    case GL_DEPTH32F_STENCIL8:
     case GL_DEPTH_COMPONENT16:
     case GL_DEPTH_COMPONENT24:
     case GL_DEPTH24_STENCIL8:
@@ -129,18 +169,52 @@ bool ValidFormatType(GLenum format, GLenum type) {
            type == GL_FLOAT;
   }
   if (format == GL_DEPTH_STENCIL)
-    return type == GL_UNSIGNED_INT_24_8;
+    return type == GL_UNSIGNED_INT_24_8 ||
+           type == GL_FLOAT_32_UNSIGNED_INT_24_8_REV;
+  if (format == GL_RED_INTEGER || format == GL_RG_INTEGER ||
+      format == GL_RGB_INTEGER || format == GL_RGBA_INTEGER) {
+    return type == GL_BYTE || type == GL_UNSIGNED_BYTE || type == GL_SHORT ||
+           type == GL_UNSIGNED_SHORT || type == GL_INT ||
+           type == GL_UNSIGNED_INT;
+  }
   if (type == GL_UNSIGNED_BYTE)
     return format == GL_RGBA || format == GL_RGB || format == GL_ALPHA ||
            format == GL_LUMINANCE || format == GL_LUMINANCE_ALPHA ||
            format == GL_RED || format == GL_RG;
+  if (type == GL_BYTE)
+    return format == GL_RED || format == GL_RG || format == GL_RGB ||
+           format == GL_RGBA;
+  if (type == GL_UNSIGNED_SHORT)
+    return format == GL_RED || format == GL_RG || format == GL_RGB ||
+           format == GL_RGBA;
+  if (type == GL_SHORT || type == GL_INT || type == GL_UNSIGNED_INT)
+    return format == GL_RED || format == GL_RG || format == GL_RGB ||
+           format == GL_RGBA;
   if (type == GL_FLOAT || type == GL_HALF_FLOAT)
     return IsFloatFormat(format);
   if (type == GL_UNSIGNED_SHORT_5_6_5)
     return format == GL_RGB;
   if (type == GL_UNSIGNED_SHORT_4_4_4_4 || type == GL_UNSIGNED_SHORT_5_5_5_1)
     return format == GL_RGBA;
+  if (type == GL_UNSIGNED_INT_2_10_10_10_REV)
+    return format == GL_RGBA || format == GL_RGBA_INTEGER;
+  if (type == GL_UNSIGNED_INT_10F_11F_11F_REV)
+    return format == GL_RGB;
+  if (type == GL_UNSIGNED_INT_5_9_9_9_REV)
+    return format == GL_RGB;
   return false;
+}
+
+Texture* DefaultTexture(Context* context, GLenum family) {
+  int index = 0;
+  if (family == GL_TEXTURE_CUBE_MAP)
+    index = 1;
+  else if (family == GL_TEXTURE_3D)
+    index = 2;
+  Texture* texture = &context->default_textures[index];
+  if (texture->target == 0)
+    texture->target = family;
+  return texture;
 }
 
 Texture* BindTargetTexture(Context* context, GLenum target, int* face) {
@@ -155,7 +229,8 @@ Texture* BindTargetTexture(Context* context, GLenum target, int* face) {
     context->SetError(GL_INVALID_OPERATION);
     return nullptr;
   }
-  Texture* texture = context->textures.Get(context->state.textures[unit]);
+  const GLuint name = context->state.textures[unit];
+  Texture* texture = name ? context->textures.Get(name) : DefaultTexture(context, family);
   if (!texture) {
     context->SetError(GL_INVALID_OPERATION);
     return nullptr;
@@ -363,14 +438,37 @@ void SetTextureParameter(Texture* texture, GLenum pname, GLint value) {
       texture->max_level = value;
       return;
     case GL_TEXTURE_COMPARE_MODE:
+      if (value != GL_NONE && value != GL_COMPARE_REF_TO_TEXTURE)
+        break;
+      texture->compare_mode = static_cast<GLenum>(value);
+      return;
     case GL_TEXTURE_COMPARE_FUNC:
+      if (value != GL_LEQUAL && value != GL_GEQUAL && value != GL_LESS &&
+          value != GL_GREATER && value != GL_EQUAL && value != GL_NOTEQUAL &&
+          value != GL_ALWAYS && value != GL_NEVER)
+        break;
+      texture->compare_func = static_cast<GLenum>(value);
+      return;
+    case GL_TEXTURE_MIN_LOD:
+      texture->min_lod = static_cast<float>(value);
+      return;
+    case GL_TEXTURE_MAX_LOD:
+      texture->max_lod = static_cast<float>(value);
+      return;
+    case GL_TEXTURE_SWIZZLE_R:
+      texture->swizzle_r = static_cast<GLenum>(value);
+      return;
+    case GL_TEXTURE_SWIZZLE_G:
+      texture->swizzle_g = static_cast<GLenum>(value);
+      return;
+    case GL_TEXTURE_SWIZZLE_B:
+      texture->swizzle_b = static_cast<GLenum>(value);
+      return;
+    case GL_TEXTURE_SWIZZLE_A:
+      texture->swizzle_a = static_cast<GLenum>(value);
       return;
     case GL_TEXTURE_IMMUTABLE_FORMAT:
     case GL_TEXTURE_IMMUTABLE_LEVELS:
-    case GL_TEXTURE_SWIZZLE_R:
-    case GL_TEXTURE_SWIZZLE_G:
-    case GL_TEXTURE_SWIZZLE_B:
-    case GL_TEXTURE_SWIZZLE_A:
       return;
     default: {
       Context* context = ApiContext();
@@ -826,6 +924,30 @@ void glGetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
     case GL_TEXTURE_HEIGHT:
       params[0] = texture->height;
       return;
+    case GL_TEXTURE_COMPARE_MODE:
+      params[0] = static_cast<GLint>(texture->compare_mode);
+      return;
+    case GL_TEXTURE_COMPARE_FUNC:
+      params[0] = static_cast<GLint>(texture->compare_func);
+      return;
+    case GL_TEXTURE_MIN_LOD:
+      params[0] = static_cast<GLint>(texture->min_lod);
+      return;
+    case GL_TEXTURE_MAX_LOD:
+      params[0] = static_cast<GLint>(texture->max_lod);
+      return;
+    case GL_TEXTURE_SWIZZLE_R:
+      params[0] = static_cast<GLint>(texture->swizzle_r);
+      return;
+    case GL_TEXTURE_SWIZZLE_G:
+      params[0] = static_cast<GLint>(texture->swizzle_g);
+      return;
+    case GL_TEXTURE_SWIZZLE_B:
+      params[0] = static_cast<GLint>(texture->swizzle_b);
+      return;
+    case GL_TEXTURE_SWIZZLE_A:
+      params[0] = static_cast<GLint>(texture->swizzle_a);
+      return;
     default:
       context->SetError(GL_INVALID_ENUM);
       return;
@@ -863,7 +985,7 @@ void glTexImage3D(GLenum target,
                   GLenum format,
                   GLenum type,
                   const void* pixels) {
-  if (target != GL_TEXTURE_3D) {
+  if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY) {
     zgl::Context* context = zgl::ApiContext();
     if (context)
       context->SetError(GL_INVALID_ENUM);
@@ -936,7 +1058,7 @@ void glTexSubImage3D(GLenum target,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  if (target != GL_TEXTURE_3D) {
+  if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -1010,7 +1132,7 @@ void glTexStorage3D(GLenum target,
                     GLsizei width,
                     GLsizei height,
                     GLsizei depth) {
-  if (target != GL_TEXTURE_3D) {
+  if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY) {
     zgl::Context* context = zgl::ApiContext();
     if (context)
       context->SetError(GL_INVALID_ENUM);

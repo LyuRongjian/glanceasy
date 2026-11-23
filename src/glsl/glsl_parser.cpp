@@ -639,8 +639,12 @@ bool Parser::ParseParameters(Function* function) {
     Type type;
     if (!ParseTypeSpec(&type))
       return false;
-    if (type.is_void())
+    if (type.is_void()) {
+      // "(void)" is the GLSL spelling for an empty parameter list.
+      if (CheckPunct(")"))
+        return true;
       return Fail("a parameter cannot have type void");
+    }
     if (current_.kind != Token::Kind::kIdentifier)
       return Fail("expected a parameter name");
     const std::string name = current_.text;

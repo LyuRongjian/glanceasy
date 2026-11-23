@@ -85,6 +85,7 @@ class Buffer {
   GLenum usage = GL_STATIC_DRAW;
   GLenum target = 0;
   bool mapped = false;
+  GLenum access_flags = 0;
   size_t map_offset = 0;
   size_t map_length = 0;
 };
@@ -137,6 +138,14 @@ class Texture {
   GLenum wrap_s = GL_REPEAT;
   GLenum wrap_t = GL_REPEAT;
   GLenum wrap_r = GL_REPEAT;
+  GLenum compare_mode = GL_NONE;
+  GLenum compare_func = GL_LEQUAL;
+  float min_lod = -1000.0f;
+  float max_lod = 1000.0f;
+  GLenum swizzle_r = GL_RED;
+  GLenum swizzle_g = GL_GREEN;
+  GLenum swizzle_b = GL_BLUE;
+  GLenum swizzle_a = GL_ALPHA;
   GLenum internal_format = GL_RGBA;
   int width = 0;
   int height = 0;
@@ -167,6 +176,8 @@ class Renderbuffer {
 struct FramebufferAttachment {
   GLuint texture = 0;
   GLint level = 0;
+  GLint layer = 0;
+  GLenum cube_face = 0;
   GLuint renderbuffer = 0;
 
   bool bound() const { return texture != 0 || renderbuffer != 0; }
@@ -345,6 +356,8 @@ struct PixelStoreState {
   int unpack_skip_rows = 0;
   int pack_skip_pixels = 0;
   int unpack_skip_pixels = 0;
+  int unpack_image_height = 0;
+  int unpack_skip_images = 0;
 };
 
 struct IndexedBufferBinding {
@@ -418,6 +431,8 @@ struct State {
   GLuint program = 0;
   GLuint framebuffer = 0;
   GLuint read_framebuffer = 0;
+  GLenum default_draw_buffer = GL_BACK;
+  GLenum default_read_buffer = GL_BACK;
   GLuint renderbuffer = 0;
 
   PixelStoreState pixel_store;
@@ -459,6 +474,9 @@ class Context {
   ObjectTable<Buffer> buffers;
   ObjectTable<VertexArray> vertex_arrays;
   ObjectTable<Texture> textures;
+  // GL ES texture name 0 is a real default texture object.  Keep one per
+  // texture family so state setup calls on name 0 have a destination.
+  Texture default_textures[3];
   ObjectTable<Renderbuffer> renderbuffers;
   ObjectTable<Framebuffer> framebuffers;
   ObjectTable<ShaderObject> shaders;

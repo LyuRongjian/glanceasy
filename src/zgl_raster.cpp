@@ -25,7 +25,10 @@ bool IsTopLeftEdge(const RasterVertex& a, const RasterVertex& b) {
 }
 
 bool IncludesWeight(float weight, bool top_left) {
-  return weight > 0.0f || (weight == 0.0f && top_left);
+  // Rasterize edge pixels with a small tolerance.  Exact floating-point
+  // equality on a shared triangle edge otherwise drops corner pixels.
+  const float kEdgeEpsilon = 1e-4f;
+  return weight >= -kEdgeEpsilon || (weight == 0.0f && top_left);
 }
 
 }  // namespace

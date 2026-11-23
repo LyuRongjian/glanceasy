@@ -15,6 +15,119 @@
 namespace zgl {
 namespace {
 
+GLenum AttachmentFormat(Context* context,
+                        const FramebufferAttachment& attachment) {
+  if (attachment.texture) {
+    const Texture* texture = context->textures.Get(attachment.texture);
+    return texture ? texture->internal_format : 0;
+  }
+  if (attachment.renderbuffer) {
+    const Renderbuffer* renderbuffer =
+        context->renderbuffers.Get(attachment.renderbuffer);
+    return renderbuffer ? renderbuffer->format : 0;
+  }
+  return 0;
+}
+
+bool IsDepthFormat(GLenum format) {
+  return format == GL_DEPTH_COMPONENT16 || format == GL_DEPTH_COMPONENT24 ||
+         format == GL_DEPTH_COMPONENT32F ||
+         format == GL_DEPTH24_STENCIL8 ||
+         format == GL_DEPTH32F_STENCIL8;
+}
+
+bool IsStencilFormat(GLenum format) {
+  return format == GL_STENCIL_INDEX8 || format == GL_DEPTH24_STENCIL8 ||
+         format == GL_DEPTH32F_STENCIL8;
+}
+
+bool IsSignedIntegerFormat(GLenum format) {
+  switch (format) {
+    case GL_R8I:
+    case GL_R16I:
+    case GL_R32I:
+    case GL_RG8I:
+    case GL_RG16I:
+    case GL_RG32I:
+    case GL_RGB8I:
+    case GL_RGB16I:
+    case GL_RGB32I:
+    case GL_RGBA8I:
+    case GL_RGBA16I:
+    case GL_RGBA32I:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsUnsignedIntegerFormat(GLenum format) {
+  switch (format) {
+    case GL_R8UI:
+    case GL_R16UI:
+    case GL_R32UI:
+    case GL_RG8UI:
+    case GL_RG16UI:
+    case GL_RG32UI:
+    case GL_RGB8UI:
+    case GL_RGB16UI:
+    case GL_RGB32UI:
+    case GL_RGBA8UI:
+    case GL_RGBA16UI:
+    case GL_RGBA32UI:
+    case GL_RGB10_A2UI:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsSrgbFormat(GLenum format) {
+  return format == GL_SRGB8_ALPHA8 || format == GL_SRGB8;
+}
+
+bool IsColorRenderableFormat(GLenum format, bool is_texture) {
+  switch (format) {
+    case GL_RGBA8:
+    case GL_RGB8:
+    case GL_RGB565:
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_SRGB8_ALPHA8:
+    case GL_R8:
+    case GL_RG8:
+    case GL_RGB10_A2:
+    case GL_RGB10_A2UI:
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+      return true;
+    case GL_RGB:
+    case GL_RGBA:
+      return is_texture;
+    default:
+      break;
+  }
+  if (is_texture)
+    return false;
+  return false;
+}
+
 const TextureImage* AttachmentImageOf(Context* context,
                                       const FramebufferAttachment& attachment) {
   if (attachment.texture) {
@@ -54,14 +167,66 @@ GLenum CheckCompleteness(Context* context, const Framebuffer& framebuffer) {
     any_attachment |= framebuffer.colors[i].bound();
   if (!any_attachment)
     return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
+
+  // A depth-only or stencil-only framebuffer is legal.  Pick the first bound
+  // attachment as the reference for the shared dimensions.
+  const FramebufferAttachment* reference = nullptr;
+  for (int i = 0; i < kMaxColorAttachments && !reference; ++i) {
+    if (framebuffer.colors[i].bound())
+      reference = &framebuffer.colors[i];
+  }
+  if (!reference && framebuffer.depth.bound())
+    reference = &framebuffer.depth;
+  if (!reference && framebuffer.stencil.bound())
+    reference = &framebuffer.stencil;
+  if (!reference)
+    return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
+
+  for (int i = 0; i < kMaxColorAttachments; ++i) {
+    if (!framebuffer.colors[i].bound() || !framebuffer.colors[i].texture)
+      continue;
+    const Texture* texture = context->textures.Get(framebuffer.colors[i].texture);
+    if (!texture)
+      return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+    if ((texture->target == GL_TEXTURE_3D ||
+         texture->target == GL_TEXTURE_2D_ARRAY) &&
+        framebuffer.colors[i].layer >= texture->depth)
+      return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+  }
+
+  for (int i = 0; i < kMaxColorAttachments; ++i) {
+    if (!framebuffer.colors[i].bound())
+      continue;
+    const GLenum format = AttachmentFormat(context, framebuffer.colors[i]);
+    const bool is_texture = framebuffer.colors[i].texture != 0;
+    if (format == 0 || IsDepthFormat(format) || IsStencilFormat(format) ||
+        !IsColorRenderableFormat(format, is_texture))
+      return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+  }
+  if (framebuffer.depth.bound() &&
+      !IsDepthFormat(AttachmentFormat(context, framebuffer.depth)))
+    return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+  if (framebuffer.stencil.bound() &&
+      !IsStencilFormat(AttachmentFormat(context, framebuffer.stencil)))
+    return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
+  if (framebuffer.depth.bound() && framebuffer.stencil.bound()) {
+    const FramebufferAttachment& d = framebuffer.depth;
+    const FramebufferAttachment& s = framebuffer.stencil;
+    if (d.texture != s.texture || d.renderbuffer != s.renderbuffer ||
+        d.level != s.level || d.layer != s.layer)
+      return GL_FRAMEBUFFER_UNSUPPORTED;
+  }
+
   const TextureImage* color = AttachmentImageOf(context, framebuffer.colors[0]);
-  if (!color || !color->float_rgba.empty())
+  const TextureImage* base = AttachmentImageOf(context, *reference);
+  if (!base || (framebuffer.colors[0].bound() &&
+                (!color || !color->float_rgba.empty())))
     return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
-  if (color->width <= 0 || color->height <= 0)
+  if (base->width <= 0 || base->height <= 0)
     return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
-  const int width = color->width;
-  const int height = color->height;
-  const int samples = std::max(1, color->samples);
+  const int width = base->width;
+  const int height = base->height;
+  const int samples = std::max(1, base->samples);
   for (int i = 1; i < kMaxColorAttachments; ++i) {
     if (!framebuffer.colors[i].bound())
       continue;
@@ -383,6 +548,8 @@ void glFramebufferTexture2D(GLenum target,
   if (texture == 0) {
     slot->texture = 0;
     slot->level = 0;
+    slot->layer = 0;
+    slot->cube_face = 0;
     return;
   }
   if (!context->textures.Get(texture)) {
@@ -397,6 +564,73 @@ void glFramebufferTexture2D(GLenum target,
   }
   slot->texture = texture;
   slot->level = level;
+  slot->layer = 0;
+  slot->cube_face =
+      (textarget >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+       textarget <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)
+          ? textarget
+          : 0;
+  slot->renderbuffer = 0;
+  if (attachment == GL_DEPTH_STENCIL_ATTACHMENT)
+    framebuffer->stencil = *slot;
+}
+
+void glFramebufferTextureLayer(GLenum target,
+                               GLenum attachment,
+                               GLuint texture,
+                               GLint level,
+                               GLint layer) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (!zgl::ValidFramebufferTarget(target)) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  zgl::Framebuffer* framebuffer = zgl::CurrentFramebuffer(context, target);
+  if (!framebuffer) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  zgl::FramebufferAttachment* slot = nullptr;
+  if (attachment >= GL_COLOR_ATTACHMENT0 &&
+      attachment < GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments) {
+    slot = &framebuffer->colors[attachment - GL_COLOR_ATTACHMENT0];
+  } else if (attachment == GL_DEPTH_ATTACHMENT) {
+    slot = &framebuffer->depth;
+  } else if (attachment == GL_STENCIL_ATTACHMENT) {
+    slot = &framebuffer->stencil;
+  } else if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
+    slot = &framebuffer->depth;
+  } else {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (level < 0 || layer < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (texture == 0) {
+    slot->texture = 0;
+    slot->level = 0;
+    slot->layer = 0;
+    slot->cube_face = 0;
+    return;
+  }
+  const zgl::Texture* bound = context->textures.Get(texture);
+  if (!bound) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (bound->target != GL_TEXTURE_3D && bound->target != GL_TEXTURE_2D_ARRAY) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  // A layer outside the texture is not an attachment-time error; the
+  // framebuffer becomes incomplete instead.
+  slot->texture = texture;
+  slot->level = level;
+  slot->layer = layer;
   slot->renderbuffer = 0;
   if (attachment == GL_DEPTH_STENCIL_ATTACHMENT)
     framebuffer->stencil = *slot;
@@ -476,8 +710,52 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
   }
   zgl::Framebuffer* framebuffer = zgl::CurrentFramebuffer(context, target);
   if (!framebuffer) {
-    context->SetError(GL_INVALID_OPERATION);
-    return;
+    // The default framebuffer exposes GL_BACK, GL_DEPTH and GL_STENCIL as
+    // GL_FRAMEBUFFER_DEFAULT attachments with fixed RGBA8/depth16/stencil8
+    // component sizes.
+    if (attachment != GL_BACK && attachment != GL_COLOR_ATTACHMENT0 &&
+        attachment != GL_DEPTH && attachment != GL_STENCIL &&
+        attachment != GL_DEPTH_STENCIL) {
+      context->SetError(GL_INVALID_ENUM);
+      return;
+    }
+    const bool is_color = attachment == GL_BACK || attachment == GL_COLOR_ATTACHMENT0;
+    const bool is_depth = attachment == GL_DEPTH || attachment == GL_DEPTH_STENCIL;
+    const bool is_stencil = attachment == GL_STENCIL || attachment == GL_DEPTH_STENCIL;
+    switch (pname) {
+      case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:
+        params[0] = GL_FRAMEBUFFER_DEFAULT;
+        return;
+      case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME:
+        params[0] = 0;
+        return;
+      case GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE:
+      case GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE:
+      case GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE:
+      case GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE:
+        params[0] = is_color ? 8 : 0;
+        return;
+      case GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE:
+        params[0] = is_depth ? 16 : 0;
+        return;
+      case GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE:
+        params[0] = is_stencil ? 8 : 0;
+        return;
+      case GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE:
+        params[0] = is_color ? GL_UNSIGNED_NORMALIZED : GL_UNSIGNED_INT;
+        return;
+      case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING:
+        params[0] = GL_LINEAR;
+        return;
+      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:
+      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE:
+      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER:
+        params[0] = 0;
+        return;
+      default:
+        context->SetError(GL_INVALID_ENUM);
+        return;
+    }
   }
   const zgl::FramebufferAttachment* slot = nullptr;
   if (attachment >= GL_COLOR_ATTACHMENT0 &&
@@ -487,10 +765,18 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
     slot = &framebuffer->depth;
   } else if (attachment == GL_STENCIL_ATTACHMENT) {
     slot = &framebuffer->stencil;
+  } else if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
+    slot = framebuffer->depth.bound() ? &framebuffer->depth
+                                      : &framebuffer->stencil;
   } else {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  const bool bound = slot->bound();
+  const GLenum format = bound ? zgl::AttachmentFormat(context, *slot) : 0;
+  const bool has_depth = bound && zgl::IsDepthFormat(format);
+  const bool has_stencil = bound && zgl::IsStencilFormat(format);
+  const bool has_color = bound && !has_depth && !has_stencil;
   switch (pname) {
     case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:
       params[0] = slot->texture
@@ -502,25 +788,46 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
                                                    : slot->renderbuffer);
       return;
     case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:
-      params[0] = slot->level;
+      params[0] = bound ? slot->level : 0;
       return;
     case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE:
-      params[0] = 0;
+      params[0] = static_cast<GLint>(slot->cube_face);
+      return;
+    case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER:
+      params[0] = slot->layer;
       return;
     case GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE:
     case GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE:
     case GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE:
     case GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE:
-      params[0] = 8;
+      params[0] = has_color ? 8 : 0;
       return;
     case GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE:
-      params[0] = 16;
+      params[0] = has_depth ? (format == GL_DEPTH_COMPONENT32F ? 32 : 16) : 0;
       return;
     case GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE:
-      params[0] = 8;
+      params[0] = has_stencil ? 8 : 0;
       return;
     case GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE:
-      params[0] = GL_UNSIGNED_NORMALIZED;
+      if (!bound)
+        params[0] = GL_NONE;
+      else if (has_depth || has_stencil)
+        params[0] = GL_UNSIGNED_INT;
+      else if (zgl::IsSignedIntegerFormat(format))
+        params[0] = GL_INT;
+      else if (zgl::IsUnsignedIntegerFormat(format))
+        params[0] = GL_UNSIGNED_INT;
+      else if (format == GL_RGBA16F || format == GL_RGBA32F ||
+               format == GL_RGB16F || format == GL_RGB32F ||
+               format == GL_R16F || format == GL_R32F ||
+               format == GL_RG16F || format == GL_RG32F ||
+               format == GL_R11F_G11F_B10F || format == GL_RGB9_E5)
+        params[0] = GL_FLOAT;
+      else
+        params[0] = GL_UNSIGNED_NORMALIZED;
+      return;
+    case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING:
+      params[0] = bound && zgl::IsSrgbFormat(format) ? GL_SRGB : GL_LINEAR;
       return;
     default:
       context->SetError(GL_INVALID_ENUM);
@@ -534,6 +841,15 @@ void glDrawBuffers(GLsizei n, const GLenum* buffers) {
     return;
   if (n < 0 || n > zgl::kMaxDrawBuffers) {
     context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (context->state.framebuffer == 0) {
+    // The default framebuffer accepts exactly one of GL_BACK or GL_NONE.
+    if (n != 1 || (buffers[0] != GL_BACK && buffers[0] != GL_NONE)) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    context->state.default_draw_buffer = buffers[0];
     return;
   }
   zgl::Framebuffer* framebuffer =
@@ -562,6 +878,14 @@ void glDrawBuffer(GLenum mode) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  if (context->state.framebuffer == 0) {
+    if (mode != GL_BACK && mode != GL_NONE) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    context->state.default_draw_buffer = mode;
+    return;
+  }
   zgl::Framebuffer* framebuffer =
       context->framebuffers.Get(context->state.framebuffer);
   if (!framebuffer) {
@@ -578,6 +902,14 @@ void glReadBuffer(GLenum mode) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  if (context->state.read_framebuffer == 0) {
+    if (mode != GL_BACK && mode != GL_NONE) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    context->state.default_read_buffer = mode;
+    return;
+  }
   if (mode != GL_NONE &&
       (mode < GL_COLOR_ATTACHMENT0 ||
        mode >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments)) {
@@ -651,8 +983,49 @@ bool RenderbufferFormatSupported(GLenum internal_format) {
     case GL_RGBA8:
     case GL_RGB8:
     case GL_SRGB8_ALPHA8:
-    case GL_RGB:
-    case GL_RGBA:
+    case GL_R8:
+    case GL_R8_SNORM:
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_RG:
+    case GL_RG8:
+    case GL_RG8_SNORM:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_RGB8_SNORM:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+    case GL_RGB10_A2:
+    case GL_RGB10_A2UI:
+    case GL_RGBA8_SNORM:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_R11F_G11F_B10F:
+    case GL_RGB9_E5:
+    case GL_RGB16F:
+    case GL_RGB32F:
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+    case GL_R16F:
+    case GL_R32F:
+    case GL_RG16F:
+    case GL_RG32F:
     case GL_DEPTH_COMPONENT16:
     case GL_DEPTH_COMPONENT24:
     case GL_DEPTH_COMPONENT32F:
@@ -858,16 +1231,20 @@ void glReadPixels(GLint x,
   }
   const zgl::PixelStoreState& store = context->state.pixel_store;
   const size_t bytes = zgl::PixelBytes(format, type);
-  const GLint row_length =
+  const GLint row_pixels =
       store.pack_row_length > 0 ? store.pack_row_length : width;
+  const size_t alignment = static_cast<size_t>(store.pack_alignment);
+  const size_t row_stride =
+      ((static_cast<size_t>(row_pixels) * bytes + alignment - 1) / alignment) *
+      alignment;
   uint8_t* destination =
       static_cast<uint8_t*>(pixels) +
-      static_cast<size_t>(store.pack_skip_rows) * row_length * bytes +
+      static_cast<size_t>(store.pack_skip_rows) * row_stride +
       static_cast<size_t>(store.pack_skip_pixels) * bytes;
   for (GLsizei row = 0; row < height; ++row) {
-    const GLint source_y = y + height - 1 - row;
-    uint8_t* row_start =
-        destination + static_cast<size_t>(row) * row_length * bytes;
+    // The color surface is stored top-down; GL window y=0 is the bottom row.
+    const GLint source_y = target.height - 1 - (y + row);
+    uint8_t* row_start = destination + static_cast<size_t>(row) * row_stride;
     if (source_y < 0 || source_y >= target.height)
       continue;
     for (GLsizei column = 0; column < width; ++column) {
@@ -878,8 +1255,10 @@ void glReadPixels(GLint x,
           target.color + (static_cast<size_t>(source_y) * target.width +
                           static_cast<size_t>(source_x)) *
                              4;
+
       zgl::WritePixel(source, format, type,
                       row_start + static_cast<size_t>(column) * bytes);
+
     }
   }
 }

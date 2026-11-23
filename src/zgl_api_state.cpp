@@ -14,7 +14,6 @@
 #include "src/zgl_simd.h"
 
 namespace zgl {
-namespace {
 
 bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
   const State& state = context->state;
@@ -63,6 +62,16 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
       *first = static_cast<GLint>(state.transform_feedback_buffer);
       return true;
+    case GL_TRANSFORM_FEEDBACK_ACTIVE: {
+      const TransformFeedback* tf = CurrentTransformFeedback(context);
+      *first = tf && tf->active ? 1 : 0;
+      return true;
+    }
+    case GL_TRANSFORM_FEEDBACK_PAUSED: {
+      const TransformFeedback* tf = CurrentTransformFeedback(context);
+      *first = tf && tf->paused ? 1 : 0;
+      return true;
+    }
     case GL_MAX_VERTEX_UNIFORM_BLOCKS:
     case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:
       *first = kMaxUniformBufferBindings;
@@ -170,6 +179,42 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
           state.samplers[ClampInt(unit, 0, kMaxCombinedTextureUnits - 1)]);
       return true;
     }
+    case GL_CULL_FACE:
+      *first = state.cull.enabled ? 1 : 0;
+      return true;
+    case GL_DEPTH_TEST:
+      *first = state.depth.test ? 1 : 0;
+      return true;
+    case GL_DITHER:
+      *first = state.dither ? 1 : 0;
+      return true;
+    case GL_POLYGON_OFFSET_FILL:
+      *first = state.polygon_offset_fill ? 1 : 0;
+      return true;
+    case GL_PRIMITIVE_RESTART_FIXED_INDEX:
+      *first = state.primitive_restart_fixed_index ? 1 : 0;
+      return true;
+    case GL_SAMPLE_ALPHA_TO_COVERAGE:
+      *first = state.sample_alpha_to_coverage ? 1 : 0;
+      return true;
+    case GL_SAMPLE_COVERAGE:
+      *first = state.sample_coverage ? 1 : 0;
+      return true;
+    case GL_SCISSOR_TEST:
+      *first = state.scissor_test ? 1 : 0;
+      return true;
+    case GL_STENCIL_TEST:
+      *first = state.stencil.test ? 1 : 0;
+      return true;
+    case GL_SHADER_COMPILER:
+      *first = 1;
+      return true;
+    case GL_IMPLEMENTATION_COLOR_READ_FORMAT:
+      *first = GL_RGBA;
+      return true;
+    case GL_IMPLEMENTATION_COLOR_READ_TYPE:
+      *first = GL_UNSIGNED_BYTE;
+      return true;
     case GL_DEPTH_FUNC:
       *first = static_cast<GLint>(state.depth.func);
       return true;
@@ -300,7 +345,6 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
   }
 }
 
-}  // namespace
 }  // namespace zgl
 
 extern "C" {
@@ -428,6 +472,15 @@ void glGetFloatv(GLenum pname, GLfloat* data) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  // Vector state such as GL_COLOR_WRITEMASK and GL_VIEWPORT must fill every
+  // component, not just the first one.
+  GLint values[16] = {};
+  if (count > 1) {
+    glGetIntegerv(pname, values);
+    for (int i = 0; i < count && i < 16; ++i)
+      data[i] = static_cast<GLfloat>(values[i]);
+    return;
+  }
   data[0] = static_cast<GLfloat>(value);
 }
 
@@ -439,6 +492,13 @@ void glGetBooleanv(GLenum pname, GLboolean* data) {
   int count = 1;
   if (!zgl::GetIntegerValue(context, pname, &value, &count)) {
     context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  GLint values[16] = {};
+  if (count > 1) {
+    glGetIntegerv(pname, values);
+    for (int i = 0; i < count && i < 16; ++i)
+      data[i] = values[i] ? GL_TRUE : GL_FALSE;
     return;
   }
   data[0] = value ? GL_TRUE : GL_FALSE;
@@ -1071,6 +1131,8 @@ void glPixelStorei(GLenum pname, GLint param) {
     case GL_UNPACK_SKIP_ROWS:
     case GL_PACK_SKIP_PIXELS:
     case GL_UNPACK_SKIP_PIXELS:
+    case GL_UNPACK_IMAGE_HEIGHT:
+    case GL_UNPACK_SKIP_IMAGES:
       if (param < 0) {
         context->SetError(GL_INVALID_VALUE);
         return;
@@ -1111,6 +1173,12 @@ void glPixelStorei(GLenum pname, GLint param) {
       return;
     case GL_UNPACK_SKIP_PIXELS:
       store.unpack_skip_pixels = param < 0 ? 0 : param;
+      return;
+    case GL_UNPACK_IMAGE_HEIGHT:
+      store.unpack_image_height = param < 0 ? 0 : param;
+      return;
+    case GL_UNPACK_SKIP_IMAGES:
+      store.unpack_skip_images = param < 0 ? 0 : param;
       return;
     default:
       context->SetError(GL_INVALID_ENUM);

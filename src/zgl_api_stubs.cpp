@@ -410,10 +410,24 @@ void glGetBufferParameteri64v(GLenum target, GLenum pname, GLint64* params) {
 }
 
 void glGetInteger64v(GLenum pname, GLint64* data) {
+  if (!data)
+    return;
   GLint value = 0;
-  glGetIntegerv(pname, &value);
-  if (data)
-    data[0] = value;
+  int count = 1;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context || !zgl::GetIntegerValue(context, pname, &value, &count)) {
+    if (context)
+      context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  GLint values[16] = {};
+  if (count > 1) {
+    glGetIntegerv(pname, values);
+    for (int i = 0; i < count && i < 16; ++i)
+      data[i] = values[i];
+    return;
+  }
+  data[0] = value;
 }
 
 void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {

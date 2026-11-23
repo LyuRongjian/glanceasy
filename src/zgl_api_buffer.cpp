@@ -341,6 +341,7 @@ void* glMapBufferRange(GLenum target,
     return nullptr;
   }
   buffer->mapped = true;
+  buffer->access_flags = access;
   buffer->map_offset = begin;
   buffer->map_length = size;
   return buffer->data.data() + begin;
@@ -356,6 +357,7 @@ GLboolean glUnmapBuffer(GLenum target) {
     return GL_FALSE;
   }
   buffer->mapped = false;
+  buffer->access_flags = 0;
   buffer->map_offset = 0;
   buffer->map_length = 0;
   return GL_TRUE;
@@ -387,6 +389,9 @@ void glGetBufferParameteriv(GLenum target, GLenum pname, GLint* params) {
       return;
     case GL_BUFFER_MAPPED:
       params[0] = buffer->mapped ? GL_TRUE : GL_FALSE;
+      return;
+    case GL_BUFFER_ACCESS_FLAGS:
+      params[0] = static_cast<GLint>(buffer->access_flags);
       return;
     case GL_BUFFER_MAP_OFFSET:
       params[0] = static_cast<GLint>(buffer->map_offset);

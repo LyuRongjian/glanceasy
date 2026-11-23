@@ -39,6 +39,11 @@ void SetUniformMatrix(GLint location,
 // Number of mip levels a texture of |width| x |height| needs.
 int MipLevelCount(int width, int height);
 
+// Reads a scalar or vector integer state value.  |count| receives the number
+// of components; only |first| is filled here, callers that need the whole
+// vector use glGetIntegerv().
+bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count);
+
 }  // namespace zgl
 
 #endif  // ZGL_SRC_ZGL_API_COMMON_H_

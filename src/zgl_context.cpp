@@ -50,6 +50,12 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
     target.color = target.colors[0];
     target.depth = context->surface.depth16.data();
     target.stencil = context->surface.stencil8.data();
+    // The default framebuffer has one color attachment.  Initialize the
+    // draw-buffer table so glClearBuffer* and the rasterizer agree on it.
+    target.draw_buffers[0] = GL_COLOR_ATTACHMENT0;
+    for (int i = 1; i < kMaxColorAttachments; ++i)
+      target.draw_buffers[i] = GL_NONE;
+    target.draw_buffer_count = 1;
     return target;
   }
   const Framebuffer* framebuffer = context->framebuffers.Get(framebuffer_name);
