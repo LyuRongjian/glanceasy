@@ -79,6 +79,14 @@ if(ZGL_BUILD_TESTS)
     target_compile_options(zgl_unittests PRIVATE --coverage -O0 -g)
     target_link_options(zgl_unittests PRIVATE --coverage)
   endif()
+
+  add_executable(zgl_visual_tests
+      tests/visual/visual_common.cpp
+      tests/visual/visual_tests.cpp)
+  target_link_libraries(zgl_visual_tests PRIVATE zcat_gles)
+  target_include_directories(zgl_visual_tests PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_options(zgl_visual_tests PRIVATE -Wall -Wextra)
 endif()
 
 if(ZGL_BUILD_EXAMPLES)

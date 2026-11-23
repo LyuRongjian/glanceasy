@@ -1,3 +1,8 @@
+<p align="center">
+  <a href="README.md"><img src="https://img.shields.io/badge/README-English-2f81f7" alt="English"></a>
+  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d73a49" alt="简体中文"></a>
+</p>
+
 # ZCat-GLES
 
 A standalone, CPU-only implementation of OpenGL ES for ARM32 Cortex-A SoCs.
@@ -19,13 +24,50 @@ The screenshot below was rendered by the ARM32 build running under
 
 ![ZCat-GLES rendering a colour cube](docs/screenshot.png)
 
+## Visual test gallery
+
+`tests/visual` contains fifteen rendering cases. Each case builds its own
+program and vertex data through the public GLES API, renders a 640x480 frame,
+checks a few pixels, and writes the frame to a PPM file. The images below are
+the actual output of the ARM32 build executed under
+`qemu-arm-static -cpu cortex-a7`; every one of them is bit-identical to the
+host build, which is the regression guarantee the suite provides.
+
+| Case | Screenshot | What it exercises |
+| --- | --- | --- |
+| `01_gradient` | <img src="docs/visual/01_gradient.png" width="320"> | Full-screen triangle, interpolated vertex colours plus a fragment-shader vignette |
+| `02_triangle` | <img src="docs/visual/02_triangle.png" width="320"> | Flat triangle from two client arrays, per-vertex RGB and barycentric interpolation |
+| `03_indexed_quad` | <img src="docs/visual/03_indexed_quad.png" width="320"> | `glDrawElements` with a 16-bit index buffer, two triangles forming one quad |
+| `04_depth_test` | <img src="docs/visual/04_depth_test.png" width="320"> | Near red triangle occludes the far blue triangle through the depth buffer |
+| `05_alpha_blend` | <img src="docs/visual/05_alpha_blend.png" width="320"> | Opaque blue base with a half-transparent red overlay, `GL_SRC_ALPHA`, `GL_ONE_MINUS_SRC_ALPHA` |
+| `06_texture_nearest` | <img src="docs/visual/06_texture_nearest.png" width="320"> | 8x8 checker texture magnified with `GL_NEAREST`, blocky texel edges |
+| `07_texture_linear` | <img src="docs/visual/07_texture_linear.png" width="320"> | The same texture with `GL_LINEAR`, smooth bilinear ramp |
+| `08_mipmap` | <img src="docs/visual/08_mipmap.png" width="320"> | 256x256 checkerboard, LOD 0 on the left and LOD 3 on the right via `textureLod` |
+| `09_culling` | <img src="docs/visual/09_culling.png" width="320"> | Back-face culling: the red back face is discarded, only the green front face remains |
+| `10_scissor` | <img src="docs/visual/10_scissor.png" width="320"> | Scissor rectangle restricts the blue clear to the centre of the red frame |
+| `11_stencil` | <img src="docs/visual/11_stencil.png" width="320"> | Diamond stencil mask limits a gradient to the masked region |
+| `12_instancing` | <img src="docs/visual/12_instancing.png" width="320"> | Nine quads in one `glDrawArraysInstanced` call with per-instance offset and colour |
+| `13_framebuffer` | <img src="docs/visual/13_framebuffer.png" width="320"> | Offscreen framebuffer colour texture, then composited back to the screen |
+| `14_glsl_pattern` | <img src="docs/visual/14_glsl_pattern.png" width="320"> | Procedural concentric rings evaluated entirely in the fragment shader |
+| `15_perspective_cube` | <img src="docs/visual/15_perspective_cube.png" width="320"> | Perspective-projected cube with per-face colours and depth testing |
+
+Running the gallery on the host:
+
+```sh
+cmake --build build --target zgl_visual_tests
+./build/zgl_visual_tests visual-out 640 480
+```
+
+The second argument is the output directory; one PPM per case is written there.
+
 ## Status
 
 | Area | State |
 | --- | --- |
 | GLES 2.0 API | Complete: buffers, vertex arrays, textures, framebuffers, shaders, state, draws |
-| GLES 3.0 API | Complete for the interpreted subset: VAOs, instancing, primitive restart, queries, fences, sampler objects, multiple render targets, blit, invalidate |
+| GLES 3.0 API | Complete for the interpreted subset: VAOs, instancing, primitive restart, queries, fences, sampler objects, blit, invalidate |
 | GLSL | Interpreter for ES 1.00 / 3.00 shaders, see [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
+| Multiple render targets | One colour attachment is written; `gl_FragData[i]` and `out` variables beyond the first are rejected by the compiler |
 | Transform feedback, compute, SSBO, image load/store | Accepted stubs; report `GL_INVALID_OPERATION` where output would change |
 | Tessellation / geometry shaders | Not part of GLES; entry points are stubs |
 | Platform integration | None by design; the embedder owns the surface |
@@ -54,7 +96,7 @@ launch `wsl.exe`.
 
 ## Building for ARM32 with the Android NDK
 
-`tools/build_android.sh` cross-compiles the library and the unit test binary for
+`tools/build_android.sh` cross-compiles the library and the test binaries for
 `armeabi-v7a` with NEON enabled and a static C++ runtime:
 
 ```sh
@@ -75,6 +117,7 @@ binary:
 
 ```sh
 tools/run_qemu_arm.sh build-arm/zgl_unittests
+tools/run_qemu_arm.sh build-arm/zgl_visual_tests visual-out 640 480
 ```
 
 `QEMU_ARM_STATIC` selects the emulator (default `~/qemu-local/usr/bin/qemu-arm-static`).
@@ -109,10 +152,15 @@ tools/coverage.sh build-cov
 
 The script configures a gcov build, runs the tests, and prints per-file line
 coverage into `build-cov/coverage/summary.txt`. The current tree executes 148
-tests with zero failed checks; line coverage is reported as 75.1% of 8590
+API tests with zero failed checks; line coverage is reported as 75.1% of 8590
 instrumented lines. The uncovered remainder is dominated by defensive error
 branches, unsupported-format rejection paths and the GPU-only stubs, which are
 listed in the coverage summary rather than hidden.
+
+The fifteen visual cases above are a second layer: they assert pixels and keep
+the rendered frames as artefacts, so rasterisation regressions show up both as
+a failing check and as a visibly changed image. They do not contribute to the
+gcov figures, which measure the library through the API tests only.
 
 ## Directory layout
 
@@ -124,8 +172,9 @@ src/glsl/                      Lexer, parser and interpreter for the GLSL subset
 src/zgl_api_*.cpp              GLES entry points
 examples/                      Standalone rendering demo
 tests/                         Unit tests and the test harness
+tests/visual/                  Visual regression cases and the PPM writer
 tools/                         NDK build, QEMU runner, TLS patch, coverage
-docs/                          GLSL subset and porting notes
+docs/                          GLSL subset, porting notes and rendered screenshots
 ```
 
 ## Using the library
@@ -144,9 +193,8 @@ image, draw statistics or the last shader log.
 
 ## Known limitations
 
-- Fragment shaders may write one colour output; `gl_FragData` and multiple
-  render targets are supported, but per-output `out` variables beyond the first
-  are ignored.
+- A fragment shader may write one colour output. `gl_FragData` is restricted to
+  index 0, and additional `out` variables are rejected with a compile error.
 - Arrays, structures, uniform blocks, `out`/`inout` parameters and recursive
   functions are outside the interpreted GLSL subset.
 - Texture images are stored top-down; `v = 0` addresses the first stored row.
@@ -159,136 +207,3 @@ image, draw statistics or the last shader log.
 ## License
 
 BSD-3-Clause. See [LICENSE](LICENSE).
-
----
-
-# ZCat-GLES（中文）
-
-一个独立的、纯 CPU 的 OpenGL ES 实现，面向 ARM32 Cortex-A SoC。
-
-ZCat-GLES 的每一次绘制都在软件中完成光栅化。它源自 WebGlance 浏览器原型中的
-ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、不依赖 EGL、不依赖
-平台窗口系统，也没有任何 x86 SSE 专用代码。库对外提供 Khronos GLES 2.0 / 3.0
-入口，自带 RGBA8 颜色缓冲、16 位深度缓冲和 8 位模板缓冲，渲染结果留在内存中，
-由集成方自行上屏或上传。
-
-代码与注释遵循 Chromium C++ 风格，所有注释均为英文。
-
-参考目标芯片是 Rockchip RV1106（单核 Cortex-A7，带 NEON）。下图由 ARM32 构建
-在 `qemu-arm-static -cpu cortex-a7` 下实际渲染得到：
-
-![ZCat-GLES 渲染的彩色立方体](docs/screenshot.png)
-
-## 状态
-
-| 范围 | 状态 |
-| --- | --- |
-| GLES 2.0 API | 完整：缓冲、顶点数组、纹理、帧缓冲、着色器、状态、绘制 |
-| GLES 3.0 API | 解释器子集内完整：VAO、instancing、primitive restart、query、fence、sampler object、多重渲染目标、blit、invalidate |
-| GLSL | 支持 ES 1.00 / 3.00 着色器解释执行，见 [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
-| Transform feedback、compute、SSBO、image load/store | 纯桩；会影响输出的调用返回 `GL_INVALID_OPERATION` |
-| 细分 / 几何着色器 | 不属于 GLES；入口为桩 |
-| 平台集成 | 有意不做；表面归集成方所有 |
-
-## 桌面宿主机编译
-
-```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
-./build/zgl_unittests
-```
-
-Windows 上请在 WSL 中执行上述命令，Windows 侧只用 `wsl.exe` 启动。
-
-## 使用 Android NDK 交叉编译 ARM32
-
-```sh
-ANDROID_NDK_ROOT=$HOME/android-ndk-r27c tools/build_android.sh
-```
-
-脚本面向 `armeabi-v7a`，开启 NEON，使用静态 C++ 运行库，产物是
-`ELF 32-bit ARM EABI5` 静态可执行文件；编译参数为
-`-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=softfp`，与 RV1106 的 Cortex-A7
-核心匹配，同时仍适用于整个 ARMv7-A 系列，不依赖任何 x86 SSE 代码。
-
-## 在 QEMU 下运行 ARM32 产物
-
-NDK 生成的静态 bionic 程序需要 32 字节对齐的 TLS 段，否则 bionic 在 qemu-user
-下启动即中止。`tools/run_qemu_arm.sh` 会先修补 `PT_TLS` 程序头，再启动模拟器：
-
-```sh
-tools/run_qemu_arm.sh build-arm/zgl_unittests
-```
-
-`QEMU_ARM_STATIC` 可指定模拟器路径，默认
-`~/qemu-local/usr/bin/qemu-arm-static`。
-
-## 渲染示例
-
-`examples/render_cube.cpp` 使用公开 API 绘制一个带透视投影和深度测试的立方体，
-渲染到离屏缓冲后写出二进制 PPM 文件：
-
-```sh
-cmake --build build --target zgl_cube_demo
-./build/zgl_cube_demo cube.ppm 800 600
-tools/run_qemu_arm.sh build-arm/zgl_cube_demo cube.ppm 800 600
-```
-
-`docs/screenshot.png` 由第二条命令生成；在开发机上 qemu-user 耗时约 8 秒，这不
-代表 RV1106 实机性能。
-
-## 测试与覆盖率
-
-单元测试通过仓库内的小型注册式框架（`tests/zgl_test.h`）组织，覆盖光栅化、
-纹理采样、GLSL 解释器、全部已实现的 GL 入口、状态机错误路径以及兼容桩。
-
-```sh
-tools/coverage.sh build-cov
-```
-
-脚本会配置 gcov 构建、运行测试，并把逐文件行覆盖率写入
-`build-cov/coverage/summary.txt`。当前共 148 个测试、0 个失败断言；行覆盖率
-为 8590 行中的 75.1%。未覆盖部分主要是防御性错误分支、不支持的格式拒绝路径
-以及 GPU 专用桩，均如实列在覆盖率汇总中。
-
-## 目录结构
-
-```
-include/GLES2, include/GLES3   Khronos 原始头文件
-include/zgl/zgl.h              软件渲染器的公共 C API
-src/                           上下文、光栅化、纹理管线、绘制管线
-src/glsl/                      GLSL 子集的词法、语法与解释执行
-src/zgl_api_*.cpp              GLES 入口实现
-examples/                      独立渲染示例
-tests/                         单元测试与测试框架
-tools/                         NDK 构建、QEMU 运行、TLS 修补、覆盖率
-docs/                          GLSL 子集与移植说明
-```
-
-## 使用方式
-
-```c
-#include "zgl/zgl.h"
-
-zglCreateContext(320, 240);
-/* 之后正常调用 GLES 入口，需先包含 GLES3/gl32.h。 */
-zglDestroyContext();
-```
-
-`include/zgl/zgl.h` 还提供 `zglGetPixels`、`zglGetPixels32`、`zglGetStats` 与
-`zglGetDiagnostics`，供集成方取回渲染结果、绘制统计或最近的着色器日志。
-
-## 已知限制
-
-- 片元着色器只使用第一个颜色输出；`gl_FragData` 与多重渲染目标可用，但除第一个
-  之外的 `out` 变量会被忽略。
-- 数组、结构体、uniform block、`out`/`inout` 参数、递归函数不在解释器子集内。
-- 纹理图像按 top-down 存储，`v = 0` 对应第一条存储的行。
-- `dFdx`、`dFdy`、`fwidth` 恒为 0，不计算隐式 LOD；`textureLod` 可显式选级。
-- 恰好落在视口底边或右边的线与点会被非对称裁剪，因为 NDC 的 `y = -1` 映射到
-  `height`。
-- 不提供 `glGetTexImage`（它不属于 GLES）。
-
-## 许可证
-
-BSD-3-Clause，见 [LICENSE](LICENSE)。
