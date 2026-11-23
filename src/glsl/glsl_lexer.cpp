@@ -231,12 +231,38 @@ std::string Preprocess(const std::string& source) {
           ++p;
         int value = 0;
         int file = -1;
-        std::sscanf(p, "%d %d", &value, &file);
-        if (value > 0)
+        int consumed = 0;
+        const int fields = std::sscanf(p, "%d %d %n", &value, &file, &consumed);
+        bool valid_line =
+            fields >= 1 && value > 0 && !(fields >= 2 && file < 0);
+        if (fields == 1)
+          consumed = 0;
+        if (valid_line && fields >= 1) {
+          const char* tail = p;
+          if (fields == 1) {
+            // Locate the end of the single parsed integer.
+            while (*tail == ' ' || *tail == '\t')
+              ++tail;
+            if (*tail == '-')
+              ++tail;
+            while (*tail >= '0' && *tail <= '9')
+              ++tail;
+          } else {
+            tail = p + consumed;
+          }
+          while (*tail == ' ' || *tail == '\t')
+            ++tail;
+          if (*tail != '\0')
+            valid_line = false;
+        }
+        if (!valid_line) {
+          out += "__zgl_invalid_line_directive__\n";
+        } else {
           logical_line = value - 1;
-        if (file >= 0)
-          logical_file = file;
-        out += line;
+          if (file >= 0)
+            logical_file = file;
+          out += line;
+        }
       } else if (directive == "define" && active) {
         size_t n = arg;
         while (n < line.size() &&
