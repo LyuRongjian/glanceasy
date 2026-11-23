@@ -191,10 +191,18 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_TEXTURE_BINDING_CUBE_MAP:
     case GL_TEXTURE_BINDING_3D:
     case GL_TEXTURE_BINDING_2D_ARRAY: {
-      const int unit = static_cast<int>(state.active_texture) -
-                       static_cast<int>(GL_TEXTURE0);
-      *first = static_cast<GLint>(
-          state.textures[ClampInt(unit, 0, kMaxCombinedTextureUnits - 1)]);
+      const int unit =
+          ClampInt(static_cast<int>(state.active_texture) -
+                       static_cast<int>(GL_TEXTURE0),
+                   0, kMaxCombinedTextureUnits - 1);
+      GLuint binding = state.textures_2d[unit];
+      if (pname == GL_TEXTURE_BINDING_CUBE_MAP)
+        binding = state.textures_cube[unit];
+      else if (pname == GL_TEXTURE_BINDING_3D)
+        binding = state.textures_3d[unit];
+      else if (pname == GL_TEXTURE_BINDING_2D_ARRAY)
+        binding = state.textures_2d_array[unit];
+      *first = static_cast<GLint>(binding);
       return true;
     }
     case GL_SAMPLER_BINDING: {

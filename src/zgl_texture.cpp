@@ -456,6 +456,11 @@ void SampleTexture3D(const Texture& texture,
     sample_slice(0, out);
     return;
   }
+  if (filter == GL_NEAREST) {
+    const int z = ClampInt(static_cast<int>(r * depth), 0, depth - 1);
+    sample_slice(z, out);
+    return;
+  }
   const float pz = r * depth - 0.5f;
   const int z0 = ClampInt(static_cast<int>(std::floor(pz)), 0, depth - 1);
   const int z1 = ClampInt(z0 + 1, 0, depth - 1);

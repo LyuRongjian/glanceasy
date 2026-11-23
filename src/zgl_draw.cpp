@@ -1417,7 +1417,10 @@ void Pipeline::Size(int unit, int out[3]) {
   out[1] = 0;
   out[2] = 0;
   const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
-  const Texture* texture = context_->textures.Get(state().textures[slot]);
+  const Texture* texture =
+      context_->textures.Get(state().textures_3d[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_2d[slot]);
   if (!texture)
     return;
   out[0] = texture->width;
@@ -1449,7 +1452,7 @@ void Pipeline::Sample2D(int unit,
   out[2] = 0.0f;
   out[3] = 1.0f;
   const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
-  const Texture* texture = context_->textures.Get(state().textures[slot]);
+  const Texture* texture = context_->textures.Get(state().textures_2d[slot]);
   if (!texture)
     return;
   GLenum min_filter = texture->min_filter;
@@ -1477,7 +1480,8 @@ void Pipeline::SampleCube(int unit,
   out[2] = 0.0f;
   out[3] = 1.0f;
   const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
-  const Texture* texture = context_->textures.Get(state().textures[slot]);
+  const Texture* texture =
+      context_->textures.Get(state().textures_cube[slot]);
   if (!texture)
     return;
   GLenum min_filter = texture->min_filter;
@@ -1500,7 +1504,8 @@ void Pipeline::Sample3D(int unit,
   out[2] = 0.0f;
   out[3] = 1.0f;
   const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
-  const Texture* texture = context_->textures.Get(state().textures[slot]);
+  const Texture* texture =
+      context_->textures.Get(state().textures_3d[slot]);
   if (!texture)
     return;
   GLenum min_filter = texture->min_filter;

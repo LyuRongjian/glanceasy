@@ -442,9 +442,24 @@ void ClearColourBuffer(Context* context, GLint drawbuffer, uint32_t packed) {
   }
   const size_t texels = static_cast<size_t>(target.width) * target.height;
   const int planes = target.multisampled() ? target.samples : 1;
-  for (int sample = 0; sample < planes; ++sample)
-    simd::FillRgba(color + static_cast<size_t>(sample) * texels, texels,
-                   packed);
+  const Rect& scissor = context->state.scissor;
+  const bool scissor_test = context->state.scissor_test;
+  const int x0 = scissor_test ? std::max(0, scissor.x) : 0;
+  const int y0 = scissor_test ? std::max(0, scissor.y) : 0;
+  const int x1 = scissor_test
+                     ? std::min(target.width, scissor.x + scissor.width)
+                     : target.width;
+  const int y1 = scissor_test
+                     ? std::min(target.height, scissor.y + scissor.height)
+                     : target.height;
+  for (int sample = 0; sample < planes; ++sample) {
+    for (int y = y0; y < y1; ++y) {
+      const size_t row = static_cast<size_t>(target.height - 1 - y);
+      simd::FillRgba(color + static_cast<size_t>(sample) * texels * 4 +
+                         (row * target.width + x0) * 4,
+                     static_cast<size_t>(x1 - x0), packed);
+    }
+  }
   if (target.multisampled()) {
     uint32_t* resolved = target.resolved_colors[buffer - GL_COLOR_ATTACHMENT0];
     if (resolved) {
@@ -488,10 +503,24 @@ void ClearIntegerColourBuffer(Context* context,
   }
   const size_t texels = static_cast<size_t>(target.width) * target.height;
   const int planes = target.multisampled() ? target.samples : 1;
+  const Rect& scissor = context->state.scissor;
+  const bool scissor_test = context->state.scissor_test;
+  const int x0 = scissor_test ? std::max(0, scissor.x) : 0;
+  const int y0 = scissor_test ? std::max(0, scissor.y) : 0;
+  const int x1 = scissor_test
+                     ? std::min(target.width, scissor.x + scissor.width)
+                     : target.width;
+  const int y1 = scissor_test
+                     ? std::min(target.height, scissor.y + scissor.height)
+                     : target.height;
   for (int sample = 0; sample < planes; ++sample) {
     uint32_t* plane = destination + static_cast<size_t>(sample) * texels * 4;
-    for (size_t texel = 0; texel < texels; ++texel)
-      memcpy(plane + texel * 4, values, sizeof(uint32_t) * 4);
+    for (int y = y0; y < y1; ++y) {
+      const size_t row = static_cast<size_t>(target.height - 1 - y);
+      uint32_t* pixels = plane + (row * target.width + x0) * 4;
+      for (int x = x0; x < x1; ++x)
+        memcpy(pixels + (x - x0) * 4, values, sizeof(uint32_t) * 4);
+    }
   }
   if (target.multisampled()) {
     uint32_t* resolved = target.resolved_integer_colors[attachment];

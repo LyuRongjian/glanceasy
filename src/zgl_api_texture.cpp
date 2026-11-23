@@ -284,7 +284,23 @@ Texture* BindTargetTexture(Context* context, GLenum target, int* face) {
     context->SetError(GL_INVALID_OPERATION);
     return nullptr;
   }
-  const GLuint name = context->state.textures[unit];
+  GLuint name = context->state.textures[unit];
+  switch (family) {
+    case GL_TEXTURE_2D:
+      name = context->state.textures_2d[unit];
+      break;
+    case GL_TEXTURE_3D:
+      name = context->state.textures_3d[unit];
+      break;
+    case GL_TEXTURE_CUBE_MAP:
+      name = context->state.textures_cube[unit];
+      break;
+    case GL_TEXTURE_2D_ARRAY:
+      name = context->state.textures_2d_array[unit];
+      break;
+    default:
+      break;
+  }
   Texture* texture = name ? context->textures.Get(name) : DefaultTexture(context, family);
   if (!texture) {
     context->SetError(GL_INVALID_OPERATION);
@@ -586,10 +602,18 @@ void SetTextureImage(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  if (level == 0) {
+    texture->width = width;
+    texture->height = height;
+    texture->depth = depth;
+    texture->internal_format = static_cast<GLenum>(internal_format);
+  }
   const bool layered = texture->target == GL_TEXTURE_3D ||
                        texture->target == GL_TEXTURE_2D_ARRAY;
-  const int extent = layered ? std::max(std::max(width, height), depth)
-                             : std::max(width, height);
+  const int extent =
+      layered ? std::max(std::max(texture->width, texture->height),
+                         texture->depth)
+              : std::max(texture->width, texture->height);
   const int max_levels = MipLevelCount(extent, extent);
   if (level >= max_levels && extent > 0) {
     context->SetError(GL_INVALID_VALUE);
@@ -604,12 +628,6 @@ void SetTextureImage(GLenum target,
   if (level > texture->levels) {
     context->SetError(GL_INVALID_OPERATION);
     return;
-  }
-  if (level == 0) {
-    texture->width = width;
-    texture->height = height;
-    texture->depth = depth;
-    texture->internal_format = static_cast<GLenum>(internal_format);
   }
   const int faces = texture->faces();
   const int levels = std::max(texture->levels, level + 1);
@@ -888,6 +906,14 @@ void glDeleteTextures(GLsizei n, const GLuint* textures) {
     for (int unit = 0; unit < zgl::kMaxCombinedTextureUnits; ++unit) {
       if (context->state.textures[unit] == textures[i])
         context->state.textures[unit] = 0;
+      if (context->state.textures_2d[unit] == textures[i])
+        context->state.textures_2d[unit] = 0;
+      if (context->state.textures_3d[unit] == textures[i])
+        context->state.textures_3d[unit] = 0;
+      if (context->state.textures_cube[unit] == textures[i])
+        context->state.textures_cube[unit] = 0;
+      if (context->state.textures_2d_array[unit] == textures[i])
+        context->state.textures_2d_array[unit] = 0;
     }
   }
 }
@@ -928,7 +954,15 @@ void glBindTexture(GLenum target, GLuint texture) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  GLuint* binding = &context->state.textures_2d[unit];
+  if (family == GL_TEXTURE_3D)
+    binding = &context->state.textures_3d[unit];
+  else if (family == GL_TEXTURE_CUBE_MAP)
+    binding = &context->state.textures_cube[unit];
+  else if (family == GL_TEXTURE_2D_ARRAY)
+    binding = &context->state.textures_2d_array[unit];
   if (texture == 0) {
+    *binding = 0;
     context->state.textures[unit] = 0;
     return;
   }
@@ -943,6 +977,7 @@ void glBindTexture(GLenum target, GLuint texture) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  *binding = texture;
   context->state.textures[unit] = texture;
 }
 

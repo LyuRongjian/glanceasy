@@ -12,6 +12,8 @@
 #include <string>
 #include <utility>
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include "GLES3/gl32.h"
@@ -472,6 +474,10 @@ struct State {
 
   GLenum active_texture = GL_TEXTURE0;
   GLuint textures[kMaxCombinedTextureUnits] = {};
+  GLuint textures_2d[kMaxCombinedTextureUnits] = {};
+  GLuint textures_3d[kMaxCombinedTextureUnits] = {};
+  GLuint textures_cube[kMaxCombinedTextureUnits] = {};
+  GLuint textures_2d_array[kMaxCombinedTextureUnits] = {};
   GLuint samplers[kMaxCombinedTextureUnits] = {};
   float current_attribute[kMaxVertexAttribs][4] = {};
   GLint current_attribute_integer[kMaxVertexAttribs][4] = {};
