@@ -935,6 +935,10 @@ void Pipeline::EmitPoint(GLuint index, int instance) {
   const float w = vertex.data[3];
   if (!(w > 0.0f))
     return;
+  for (int plane = 4; plane < 6; ++plane) {
+    if (PlaneDistance(vertex.data, plane) < 0.0f)
+      return;
+  }
   const State& current = state();
   const float ndc_x = vertex.data[0] / w;
   const float ndc_y = vertex.data[1] / w;
@@ -964,22 +968,29 @@ void Pipeline::EmitLine(GLuint index_a, GLuint index_b, int instance) {
          sizeof(float) * stride_);
   memcpy(emit_[1].data(), AcquireVertex(index_b, instance).data,
          sizeof(float) * stride_);
-  const float wa = emit_[0][3];
-  const float wb = emit_[1][3];
-  if (!(wa > 0.0f) || !(wb > 0.0f))
+  memcpy(clip_.data(), emit_[0].data(), sizeof(float) * stride_);
+  memcpy(clip_.data() + stride_, emit_[1].data(), sizeof(float) * stride_);
+  int count = 2;
+  float* polygon = clip_.data();
+  float* destination = scratch_.data();
+  for (int plane = 0; plane < 6 && count >= 2; ++plane) {
+    count = ClipPolygon(polygon, count, plane, destination);
+    polygon = destination;
+    destination =
+        destination == scratch_.data() ? clip_.data() : scratch_.data();
+  }
+  if (count < 2)
     return;
   const State& current = state();
-  float* slot_a = clip_.data();
-  float* slot_b = clip_.data() + stride_;
-  memcpy(slot_a, emit_[0].data(), sizeof(float) * stride_);
-  memcpy(slot_b, emit_[1].data(), sizeof(float) * stride_);
   RasterVertex vertices[2];
-  const float* positions[2] = {emit_[0].data(), emit_[1].data()};
   for (int i = 0; i < 2; ++i) {
-    const float w = positions[i][3];
-    const float ndc_x = positions[i][0] / w;
-    const float ndc_y = positions[i][1] / w;
-    const float ndc_z = positions[i][2] / w;
+    const float* position = polygon + static_cast<size_t>(i) * stride_;
+    const float w = position[3];
+    if (!(w > 0.0f))
+      return;
+    const float ndc_x = position[0] / w;
+    const float ndc_y = position[1] / w;
+    const float ndc_z = position[2] / w;
     vertices[i].x =
         static_cast<float>(current.viewport.x) +
         (ndc_x * 0.5f + 0.5f) * static_cast<float>(current.viewport.width);
@@ -1086,8 +1097,32 @@ void Pipeline::ProcessTriangle(const float* a, const float* b, const float* c) {
   if (polygon != clip_.data())
     memcpy(clip_.data(), polygon, sizeof(float) * stride_ * count);
 
-  ProjectVertices(clip_.data(), count);
+  int unique = 0;
+  for (int i = 0; i < count; ++i) {
+    const float* candidate = clip_.data() + static_cast<size_t>(i) * stride_;
+    bool duplicate = false;
+    for (int j = 0; j < unique; ++j) {
+      const float* kept = clip_.data() + static_cast<size_t>(j) * stride_;
+      float difference = 0.0f;
+      for (int k = 0; k < stride_; ++k)
+        difference = std::max(difference, std::fabs(kept[k] - candidate[k]));
+      if (difference < 1e-3f) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) {
+      if (unique != i)
+        memcpy(clip_.data() + static_cast<size_t>(unique) * stride_,
+               candidate, sizeof(float) * stride_);
+      ++unique;
+    }
+  }
+  count = unique;
+  if (count < 3)
+    return;
 
+  ProjectVertices(clip_.data(), count);
   const float area = (ndc_x_[1] - ndc_x_[0]) * (ndc_y_[2] - ndc_y_[0]) -
                      (ndc_x_[2] - ndc_x_[0]) * (ndc_y_[1] - ndc_y_[0]);
   const State& current = state();
