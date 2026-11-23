@@ -427,19 +427,26 @@ int Program::UniformLocation(const std::string& name) const {
     if (info.name == name && info.block_index < 0)
       return info.location;
   }
-  // "values[0]" names the first element of an array uniform.  Locations are
-  // element-granular in GL, but the interpreted subset stores the whole array
-  // at one location, so only element zero can be addressed.
+  // Array element locations are encoded relative to the uniform's storage
+  // slot.  Element zero uses the slot itself; later elements use a negative
+  // code so that glGetUniform* can return exactly one element.
   const size_t bracket = name.find('[');
   if (bracket != std::string::npos && name.back() == ']') {
     const std::string base = name.substr(0, bracket);
     const std::string index =
         name.substr(bracket + 1, name.size() - bracket - 2);
-    if (index == "0") {
+    int element = -1;
+    if (!index.empty() && index.find_first_not_of("0123456789") ==
+                              std::string::npos) {
+      element = std::stoi(index);
+    }
+    if (element >= 0) {
       for (const UniformInfo& info : uniforms_) {
         if (info.name == base && info.block_index < 0 &&
-            info.type.is_array()) {
-          return info.location;
+            info.type.is_array() && element < info.type.array_size()) {
+          if (element == 0)
+            return info.location;
+          return -(info.location * 256 + element + 1);
         }
       }
     }

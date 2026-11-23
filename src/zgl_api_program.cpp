@@ -15,7 +15,19 @@
 #include "src/zgl_api_common.h"
 
 namespace zgl {
-namespace {
+
+bool DecodeUniformLocation(GLint location, int* index, int* element) {
+  if (location >= 0) {
+    *index = location;
+    *element = 0;
+    return true;
+  }
+  const int code = -location - 1;
+  *index = code / 256;
+  *element = code % 256;
+  return true;
+}
+
 
 glsl::Stage ShaderStage(GLenum type) {
   return type == GL_VERTEX_SHADER ? glsl::Stage::kVertex
@@ -42,6 +54,10 @@ void SetInfoLog(std::string* log, GLchar* info_log, GLsizei max_length) {
 // Maps a GLSL type onto the GLenum used by glGetActiveAttrib and
 // glGetActiveUniform.  Samplers report their opaque type, matrices and vectors
 // report their shape so callers can size their uniform arrays.
+int UniformArraySize(const zgl::glsl::UniformInfo& uniform) {
+  return uniform.type.is_array() ? uniform.type.array_size() : 1;
+}
+
 GLenum GlslTypeToGlEnum(const glsl::Type& type) {
   switch (type.base()) {
     case glsl::BaseType::kFloat:
@@ -112,7 +128,6 @@ GLenum GlslTypeToGlEnum(const glsl::Type& type) {
   }
 }
 
-}  // namespace
 }  // namespace zgl
 
 extern "C" {
@@ -482,8 +497,28 @@ void glGetProgramiv(GLuint program, GLenum pname, GLint* params) {
       params[0] = object->delete_status ? GL_TRUE : GL_FALSE;
       return;
     case GL_TRANSFORM_FEEDBACK_VARYINGS:
-      params[0] = static_cast<GLint>(
-          object->transform_feedback_varyings.size());
+      params[0] = object->program
+                      ? static_cast<GLint>(object->program
+                                               ->transform_feedback_varyings()
+                                               .size())
+                      : 0;
+      return;
+    case GL_TRANSFORM_FEEDBACK_VARYING_MAX_LENGTH: {
+      int length = 0;
+      if (object->program) {
+        for (const auto& varying :
+             object->program->transform_feedback_varyings()) {
+          length = std::max(length, static_cast<int>(varying.name.size()) + 1);
+        }
+      }
+      params[0] = length;
+      return;
+    }
+    case GL_PROGRAM_BINARY_LENGTH:
+      params[0] = 0;
+      return;
+    case GL_PROGRAM_BINARY_RETRIEVABLE_HINT:
+      params[0] = object->program_binary_retrievable_hint ? GL_TRUE : GL_FALSE;
       return;
     case GL_TRANSFORM_FEEDBACK_BUFFER_MODE:
       params[0] = static_cast<GLint>(object->transform_feedback_mode);
@@ -797,6 +832,9 @@ void glGetActiveUniformsiv(GLuint program,
     case GL_UNIFORM_ARRAY_STRIDE:
     case GL_UNIFORM_MATRIX_STRIDE:
     case GL_UNIFORM_IS_ROW_MAJOR:
+    case GL_UNIFORM_NAME_LENGTH:
+    case GL_UNIFORM_TYPE:
+    case GL_UNIFORM_SIZE:
       break;
     default:
       context->SetError(GL_INVALID_ENUM);
@@ -816,7 +854,20 @@ void glGetActiveUniformsiv(GLuint program,
         params[i] = uniform.block_index >= 0 ? uniform.block_offset : -1;
         break;
       case GL_UNIFORM_ARRAY_STRIDE:
-        params[i] = 0;
+        params[i] = uniform.type.is_array()
+                        ? uniform.type.array_element().components() * 4
+                        : 0;
+        break;
+      case GL_UNIFORM_NAME_LENGTH:
+        params[i] = static_cast<GLint>(uniform.name.size() + 1);
+        break;
+      case GL_UNIFORM_TYPE:
+        params[i] = static_cast<GLint>(zgl::GlslTypeToGlEnum(
+            uniform.type.is_array() ? uniform.type.array_element()
+                                    : uniform.type));
+        break;
+      case GL_UNIFORM_SIZE:
+        params[i] = zgl::UniformArraySize(uniform);
         break;
       case GL_UNIFORM_MATRIX_STRIDE:
         params[i] = uniform.type.is_matrix() ? 16 : 0;
@@ -1060,11 +1111,18 @@ void glGetUniformfv(GLuint program, GLint location, GLfloat* params) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  const zgl::glsl::Value* value = object->program->uniform_value(location);
+  int index = 0;
+  int element = 0;
+  zgl::DecodeUniformLocation(location, &index, &element);
+  const zgl::glsl::Value* value = object->program->uniform_value(index);
   if (!value)
     return;
-  for (int i = 0; i < value->type.components(); ++i)
-    params[i] = value->Data()[i];
+  const int components = value->type.is_array()
+                             ? value->type.array_element().components()
+                             : value->type.components();
+  const int offset = value->type.is_array() ? element * components : 0;
+  for (int i = 0; i < components; ++i)
+    params[i] = value->Data()[offset + i];
 }
 
 void glGetUniformiv(GLuint program, GLint location, GLint* params) {
@@ -1076,13 +1134,20 @@ void glGetUniformiv(GLuint program, GLint location, GLint* params) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  const zgl::glsl::Value* value = object->program->uniform_value(location);
+  int index = 0;
+  int element = 0;
+  zgl::DecodeUniformLocation(location, &index, &element);
+  const zgl::glsl::Value* value = object->program->uniform_value(index);
   if (!value)
     return;
-  for (int i = 0; i < value->type.components(); ++i) {
+  const int components = value->type.is_array()
+                             ? value->type.array_element().components()
+                             : value->type.components();
+  const int offset = value->type.is_array() ? element * components : 0;
+  for (int i = 0; i < components; ++i) {
     params[i] = value->type.base() == zgl::glsl::BaseType::kBool
-                    ? (value->Data()[i] != 0.0f ? 1 : 0)
-                    : static_cast<GLint>(value->Data()[i]);
+                    ? (value->Data()[offset + i] != 0.0f ? 1 : 0)
+                    : static_cast<GLint>(value->Data()[offset + i]);
   }
 }
 

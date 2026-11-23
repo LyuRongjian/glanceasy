@@ -232,6 +232,7 @@ class ProgramObject {
   std::vector<std::pair<std::string, int>> frag_data_bindings;
   std::vector<std::string> transform_feedback_varyings;
   GLenum transform_feedback_mode = GL_INTERLEAVED_ATTRIBS;
+  bool program_binary_retrievable_hint = false;
 };
 
 class Query {
@@ -381,6 +382,7 @@ struct IndexedBufferBinding {
   GLuint buffer = 0;
   size_t offset = 0;
   size_t size = 0;
+  bool whole_buffer = false;
 };
 
 class TransformFeedback {

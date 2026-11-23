@@ -255,8 +255,12 @@ void glGetTransformFeedbackVarying(GLuint program,
     return;
   }
   const zgl::glsl::TransformFeedbackVaryingInfo& varying = varyings[index];
+  const int copy = buffer_size > 0
+                       ? std::min(static_cast<int>(varying.name.size()),
+                                  static_cast<int>(buffer_size) - 1)
+                       : 0;
   if (length)
-    *length = static_cast<GLsizei>(varying.name.size());
+    *length = copy;
   if (size)
     *size = 1;
   if (type)
@@ -334,6 +338,7 @@ void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
     }
     binding.buffer = buffer;
     binding.size = object->data.size();
+    binding.whole_buffer = true;
   }
   if (transform_feedback)
     feedback->buffers[index] = binding;
@@ -449,8 +454,11 @@ void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
         data[0] =
             static_cast<GLint>(context->state.uniform_buffers[index].offset);
       } else {
-        data[0] =
-            static_cast<GLint>(context->state.uniform_buffers[index].size);
+        const zgl::IndexedBufferBinding& binding =
+            context->state.uniform_buffers[index];
+        data[0] = binding.whole_buffer
+                      ? 0
+                      : static_cast<GLint>(binding.size);
       }
       return;
     case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
@@ -469,8 +477,12 @@ void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
         data[0] = static_cast<GLint>(feedback->buffers[index].buffer);
       else if (pname == GL_TRANSFORM_FEEDBACK_BUFFER_START)
         data[0] = static_cast<GLint>(feedback->buffers[index].offset);
-      else
-        data[0] = static_cast<GLint>(feedback->buffers[index].size);
+      else {
+        const zgl::IndexedBufferBinding& binding = feedback->buffers[index];
+        data[0] = binding.whole_buffer
+                      ? 0
+                      : static_cast<GLint>(binding.size);
+      }
       return;
     }
     default:
@@ -678,10 +690,19 @@ void glProgramBinary(GLuint program,
 }
 
 void glProgramParameteri(GLuint program, GLenum pname, GLint value) {
-  (void)program;
-  (void)pname;
-  (void)value;
-  zgl::Reject();
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (pname != GL_PROGRAM_BINARY_RETRIEVABLE_HINT) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  object->program_binary_retrievable_hint = value != 0;
 }
 
 // ---- Multisampling --------------------------------------------------------

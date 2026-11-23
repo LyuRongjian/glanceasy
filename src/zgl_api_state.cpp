@@ -78,9 +78,13 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS:
       *first = 64;
       return true;
-    case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
-      *first = static_cast<GLint>(state.transform_feedback_buffer);
+    case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING: {
+      const TransformFeedback* feedback = CurrentTransformFeedback(context);
+      *first = feedback && feedback->buffers[0].buffer
+                   ? static_cast<GLint>(feedback->buffers[0].buffer)
+                   : static_cast<GLint>(state.transform_feedback_buffer);
       return true;
+    }
     case GL_TRANSFORM_FEEDBACK_ACTIVE: {
       const TransformFeedback* tf = CurrentTransformFeedback(context);
       *first = tf && tf->active ? 1 : 0;
