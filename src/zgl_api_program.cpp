@@ -117,12 +117,47 @@ GLenum GlslTypeToGlEnum(const glsl::Type& type) {
         default:
           return GL_BOOL;
       }
+    case glsl::BaseType::kUInt:
+      switch (type.rows()) {
+        case 2:
+          return GL_UNSIGNED_INT_VEC2;
+        case 3:
+          return GL_UNSIGNED_INT_VEC3;
+        case 4:
+          return GL_UNSIGNED_INT_VEC4;
+        default:
+          return GL_UNSIGNED_INT;
+      }
     case glsl::BaseType::kSampler2D:
       return GL_SAMPLER_2D;
     case glsl::BaseType::kSamplerCube:
       return GL_SAMPLER_CUBE;
     case glsl::BaseType::kSampler3D:
       return GL_SAMPLER_3D;
+    case glsl::BaseType::kSampler2DShadow:
+      return GL_SAMPLER_2D_SHADOW;
+    case glsl::BaseType::kSampler2DArray:
+      return GL_SAMPLER_2D_ARRAY;
+    case glsl::BaseType::kSampler2DArrayShadow:
+      return GL_SAMPLER_2D_ARRAY_SHADOW;
+    case glsl::BaseType::kSamplerCubeShadow:
+      return GL_SAMPLER_CUBE_SHADOW;
+    case glsl::BaseType::kISampler2D:
+      return GL_INT_SAMPLER_2D;
+    case glsl::BaseType::kISampler3D:
+      return GL_INT_SAMPLER_3D;
+    case glsl::BaseType::kISamplerCube:
+      return GL_INT_SAMPLER_CUBE;
+    case glsl::BaseType::kISampler2DArray:
+      return GL_INT_SAMPLER_2D_ARRAY;
+    case glsl::BaseType::kUSampler2D:
+      return GL_UNSIGNED_INT_SAMPLER_2D;
+    case glsl::BaseType::kUSampler3D:
+      return GL_UNSIGNED_INT_SAMPLER_3D;
+    case glsl::BaseType::kUSamplerCube:
+      return GL_UNSIGNED_INT_SAMPLER_CUBE;
+    case glsl::BaseType::kUSampler2DArray:
+      return GL_UNSIGNED_INT_SAMPLER_2D_ARRAY;
     default:
       return GL_FLOAT;
   }
@@ -485,11 +520,20 @@ void glGetProgramiv(GLuint program, GLenum pname, GLint* params) {
       return;
     }
     case GL_ACTIVE_UNIFORM_BLOCKS:
-      params[0] = 0;
+      params[0] = object->program
+                      ? static_cast<GLint>(
+                            object->program->uniform_blocks().size())
+                      : 0;
       return;
-    case GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH:
-      params[0] = 0;
+    case GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH: {
+      int length = 0;
+      if (object->program) {
+        for (const auto& block : object->program->uniform_blocks())
+          length = std::max(length, static_cast<int>(block.name.size()) + 1);
+      }
+      params[0] = length;
       return;
+    }
     case GL_VALIDATE_STATUS:
       params[0] = object->linked ? GL_TRUE : GL_FALSE;
       return;
@@ -747,12 +791,15 @@ void glGetActiveUniformBlockName(GLuint program,
     return;
   }
   const std::string& block_name = blocks[block_index].name;
+  const int copy = buffer_size > 0
+                       ? std::min(static_cast<int>(block_name.size()),
+                                  static_cast<int>(buffer_size) - 1)
+                       : 0;
   if (length)
-    *length = static_cast<GLsizei>(block_name.size());
+    *length = copy;
   if (name && buffer_size > 0) {
-    const int copy = std::min(static_cast<int>(block_name.size()),
-                              static_cast<int>(buffer_size) - 1);
-    memcpy(name, block_name.c_str(), static_cast<size_t>(copy));
+    if (copy > 0)
+      memcpy(name, block_name.c_str(), static_cast<size_t>(copy));
     name[copy] = '\0';
   }
 }
@@ -1233,6 +1280,19 @@ void glGetUniformIndices(GLuint program,
       if (uniforms[u].name == names[i]) {
         indices[i] = static_cast<GLuint>(u);
         break;
+      }
+    }
+    if (indices[i] == GL_INVALID_INDEX) {
+      for (const auto& block : object->program->uniform_blocks()) {
+        for (const auto& member : block.members) {
+          if (block.name + "." + member.name == names[i] &&
+              member.uniform_index >= 0) {
+            indices[i] = static_cast<GLuint>(member.uniform_index);
+            break;
+          }
+        }
+        if (indices[i] != GL_INVALID_INDEX)
+          break;
       }
     }
   }

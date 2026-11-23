@@ -73,6 +73,47 @@ std::vector<std::string> SplitArguments(const std::string& text) {
   return args;
 }
 
+int NewlinesBetween(const std::string& text, size_t begin, size_t end) {
+  int count = 0;
+  for (size_t i = begin; i < end && i < text.size(); ++i)
+    if (text[i] == '\n')
+      ++count;
+  return count;
+}
+
+std::vector<std::pair<size_t, size_t>> SplitArgumentRanges(
+    const std::string& text) {
+  std::vector<std::pair<size_t, size_t>> ranges;
+  int depth = 0;
+  size_t begin = 0;
+  for (size_t i = 0; i < text.size(); ++i) {
+    if (text[i] == '(') {
+      ++depth;
+    } else if (text[i] == ')') {
+      --depth;
+    } else if (text[i] == ',' && depth == 0) {
+      size_t b = begin;
+      size_t e = i;
+      while (b < e && (text[b] == ' ' || text[b] == '\t' || text[b] == '\n'))
+        ++b;
+      while (e > b && (text[e - 1] == ' ' || text[e - 1] == '\t' ||
+                       text[e - 1] == '\n'))
+        --e;
+      ranges.push_back({b, e});
+      begin = i + 1;
+    }
+  }
+  size_t b = begin;
+  size_t e = text.size();
+  while (b < e && (text[b] == ' ' || text[b] == '\t' || text[b] == '\n'))
+    ++b;
+  while (e > b && (text[e - 1] == ' ' || text[e - 1] == '\t' ||
+                   text[e - 1] == '\n'))
+    --e;
+  ranges.push_back({b, e});
+  return ranges;
+}
+
 std::string Substitute(const std::string& body,
                        const std::vector<std::string>& params,
                        const std::vector<std::string>& args) {
@@ -110,8 +151,11 @@ std::string ExpandIdentifiers(const std::string& line,
     return line;
   std::string out;
   size_t i = 0;
+  int current_line = line_number;
   while (i < line.size()) {
     if (!IsIdentStart(line[i])) {
+      if (line[i] == '\n')
+        ++current_line;
       out += line[i++];
       continue;
     }
@@ -125,7 +169,7 @@ std::string ExpandIdentifiers(const std::string& line,
       continue;
     }
     if (name == "__LINE__") {
-      out += std::to_string(line_number);
+      out += std::to_string(current_line);
       continue;
     }
     if (name == "__FILE__") {
@@ -152,7 +196,8 @@ std::string ExpandIdentifiers(const std::string& line,
     }
     size_t lookahead = i;
     while (lookahead < line.size() &&
-           (line[lookahead] == ' ' || line[lookahead] == '\t'))
+           (line[lookahead] == ' ' || line[lookahead] == '\t' ||
+            line[lookahead] == '\n' || line[lookahead] == '\r'))
       ++lookahead;
     if (lookahead >= line.size() || line[lookahead] != '(') {
       out += name;
@@ -176,8 +221,20 @@ std::string ExpandIdentifiers(const std::string& line,
       out += name;
       continue;
     }
-    std::vector<std::string> args =
-        SplitArguments(line.substr(open + 1, close - open - 1));
+    const std::string argument_text = line.substr(open + 1, close - open - 1);
+    const auto ranges = SplitArgumentRanges(argument_text);
+    std::vector<std::string> args;
+    args.reserve(ranges.size());
+    for (const auto& range : ranges) {
+      // Macro arguments are macro-expanded before substitution.  Each
+      // argument expands at the physical line where it appears.
+      const int argument_line =
+          line_number + NewlinesBetween(line, 0, open + 1 + range.first);
+      const std::string raw = argument_text.substr(range.first,
+                                                   range.second - range.first);
+      args.push_back(ExpandIdentifiers(raw, macros, depth + 1,
+                                       argument_line, file_number));
+    }
     if (args.size() == 1 && args[0].empty() && it->second.params.empty())
       args.clear();
     if (args.size() != it->second.params.size()) {
@@ -185,9 +242,12 @@ std::string ExpandIdentifiers(const std::string& line,
       i = close + 1;
       continue;
     }
+    // The replacement list expands at the invocation's closing line.
+    const int invocation_line =
+        line_number + NewlinesBetween(line, 0, close);
     out += ExpandIdentifiers(
         Substitute(it->second.body, it->second.params, args), macros,
-        depth + 1, line_number, file_number);
+        depth + 1, invocation_line, file_number);
     i = close + 1;
   }
   return out;
@@ -607,6 +667,15 @@ std::string Preprocess(const std::string& source) {
   bool version_seen = false;
   bool code_seen = false;
   bool saw_statement = false;
+  std::string pending_code;
+  int pending_line = 1;
+  auto flush_code = [&]() {
+    if (!pending_code.empty()) {
+      out += ExpandIdentifiers(pending_code, macros, 0, pending_line,
+                               logical_file);
+      pending_code.clear();
+    }
+  };
   size_t pos = 0;
   while (pos <= input.size()) {
     const size_t end = input.find('\n', pos);
@@ -616,6 +685,7 @@ std::string Preprocess(const std::string& source) {
         conditionals.empty() ? true : conditionals.back().active;
     size_t first = line.find_first_not_of(" \t");
     if (first != std::string::npos && line[first] == '#') {
+      flush_code();
       size_t p = first + 1;
       while (p < line.size() && (line[p] == ' ' || line[p] == '\t'))
         ++p;
@@ -864,9 +934,12 @@ std::string Preprocess(const std::string& source) {
         code_seen = true;
         saw_statement = true;
       }
-      out += ExpandIdentifiers(line, macros, 0, logical_line, logical_file);
-      out += '\n';
+      if (pending_code.empty())
+        pending_line = logical_line;
+      pending_code += line;
+      pending_code += '\n';
     } else {
+      flush_code();
       out += '\n';
     }
     ++logical_line;
@@ -874,6 +947,7 @@ std::string Preprocess(const std::string& source) {
       break;
     pos = end + 1;
   }
+  flush_code();
   if (!conditionals.empty())
     out += "__zgl_unterminated_conditional__\n";
   return out;

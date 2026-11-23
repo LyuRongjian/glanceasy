@@ -246,24 +246,22 @@ GLenum CheckCompleteness(Context* context, const Framebuffer& framebuffer) {
       continue;
     const TextureImage* image =
         AttachmentImageOf(context, framebuffer.colors[i]);
-    if (!image || !image->float_rgba.empty() || image->width != width ||
-        image->height != height)
-      return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+    if (!image)
+      return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
     if (AttachmentSamples(*context, framebuffer.colors[i]) != samples)
       return GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;
   }
   if (framebuffer.depth.bound()) {
     const TextureImage* image = AttachmentImageOf(context, framebuffer.depth);
-    if (!image || !image->float_rgba.empty() || image->width != width ||
-        image->height != height)
-      return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+    if (!image)
+      return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
     if (AttachmentSamples(*context, framebuffer.depth) != samples)
       return GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;
   }
   if (framebuffer.stencil.bound()) {
     const TextureImage* image = AttachmentImageOf(context, framebuffer.stencil);
-    if (!image || image->width != width || image->height != height)
-      return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+    if (!image)
+      return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;
     if (AttachmentSamples(*context, framebuffer.stencil) != samples)
       return GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;
   }

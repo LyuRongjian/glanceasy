@@ -340,10 +340,12 @@ void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
     binding.size = object->data.size();
     binding.whole_buffer = true;
   }
-  if (transform_feedback)
+  if (transform_feedback) {
     feedback->buffers[index] = binding;
-  else
+    context->state.transform_feedback_buffer = buffer;
+  } else {
     context->state.uniform_buffers[index] = binding;
+  }
 }
 
 void glBindBufferRange(GLenum target,

@@ -100,6 +100,30 @@ std::string Type::Name() const {
       return "samplerCube";
     case BaseType::kSampler3D:
       return "sampler3D";
+    case BaseType::kSampler2DShadow:
+      return "sampler2DShadow";
+    case BaseType::kSampler2DArray:
+      return "sampler2DArray";
+    case BaseType::kSampler2DArrayShadow:
+      return "sampler2DArrayShadow";
+    case BaseType::kSamplerCubeShadow:
+      return "samplerCubeShadow";
+    case BaseType::kISampler2D:
+      return "isampler2D";
+    case BaseType::kISampler3D:
+      return "isampler3D";
+    case BaseType::kISamplerCube:
+      return "isamplerCube";
+    case BaseType::kISampler2DArray:
+      return "isampler2DArray";
+    case BaseType::kUSampler2D:
+      return "usampler2D";
+    case BaseType::kUSampler3D:
+      return "usampler3D";
+    case BaseType::kUSamplerCube:
+      return "usamplerCube";
+    case BaseType::kUSampler2DArray:
+      return "usampler2DArray";
     default:
       break;
   }

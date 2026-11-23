@@ -178,9 +178,9 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
           feedback->buffers[i] = zgl::IndexedBufferBinding();
       }
     };
-    clear_feedback(&context->default_transform_feedback);
-    for (int i = 1; i <= context->transform_feedbacks.size(); ++i)
-      clear_feedback(context->transform_feedbacks.Get(static_cast<GLuint>(i)));
+    // Only the current transform feedback object is unbound.  Bindings in
+    // other transform feedback objects remain stale until they are rebound.
+    clear_feedback(zgl::CurrentTransformFeedback(context));
   }
 }
 

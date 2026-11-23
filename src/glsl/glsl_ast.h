@@ -164,6 +164,7 @@ enum class BuiltinFunc {
   kTexture3D,
   kTexture,
   kTextureLod,
+  kTextureSize,
   kDfdx,
   kDfdy,
   kFwidth,

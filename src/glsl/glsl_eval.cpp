@@ -1530,6 +1530,18 @@ Value Evaluator::EvalBuiltin(const Expr& expr) {
         out.data[i] = ComponentAt(args[0], i) == 0.0f ? 1.0f : 0.0f;
       return out;
     }
+    case BuiltinFunc::kTextureSize: {
+      const int unit = args[0].type.is_sampler()
+                           ? static_cast<int>(args[0].data[0])
+                           : 0;
+      int size[3] = {0, 0, 0};
+      if (sampler_)
+        sampler_->Size(unit, size);
+      Value out(expr.type);
+      for (int i = 0; i < expr.type.components() && i < 3; ++i)
+        out.data[i] = static_cast<float>(size[i]);
+      return out;
+    }
     case BuiltinFunc::kDfdx:
     case BuiltinFunc::kDfdy:
     case BuiltinFunc::kFwidth: {

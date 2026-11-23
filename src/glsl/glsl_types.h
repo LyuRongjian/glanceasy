@@ -28,6 +28,18 @@ enum class BaseType {
   kSampler2D,
   kSamplerCube,
   kSampler3D,
+  kSampler2DShadow,
+  kSampler2DArray,
+  kSampler2DArrayShadow,
+  kSamplerCubeShadow,
+  kISampler2D,
+  kISampler3D,
+  kISamplerCube,
+  kISampler2DArray,
+  kUSampler2D,
+  kUSampler3D,
+  kUSamplerCube,
+  kUSampler2DArray,
 };
 
 enum class TypeKind {
@@ -108,9 +120,7 @@ class Type {
   }
   bool is_sampler() const {
     return kind_ == TypeKind::kBasic &&
-           (base_ == BaseType::kSampler2D ||
-            base_ == BaseType::kSamplerCube ||
-            base_ == BaseType::kSampler3D);
+           base_ >= BaseType::kSampler2D;
   }
 
   // Element type of a vector / matrix (scalar).

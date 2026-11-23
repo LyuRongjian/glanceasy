@@ -54,6 +54,18 @@ const TypeNameEntry kTypeNames[] = {
     {"sampler2D", Type(BaseType::kSampler2D, 1, 1)},
     {"samplerCube", Type(BaseType::kSamplerCube, 1, 1)},
     {"sampler3D", Type(BaseType::kSampler3D, 1, 1)},
+    {"sampler2DShadow", Type(BaseType::kSampler2DShadow, 1, 1)},
+    {"sampler2DArray", Type(BaseType::kSampler2DArray, 1, 1)},
+    {"sampler2DArrayShadow", Type(BaseType::kSampler2DArrayShadow, 1, 1)},
+    {"samplerCubeShadow", Type(BaseType::kSamplerCubeShadow, 1, 1)},
+    {"isampler2D", Type(BaseType::kISampler2D, 1, 1)},
+    {"isampler3D", Type(BaseType::kISampler3D, 1, 1)},
+    {"isamplerCube", Type(BaseType::kISamplerCube, 1, 1)},
+    {"isampler2DArray", Type(BaseType::kISampler2DArray, 1, 1)},
+    {"usampler2D", Type(BaseType::kUSampler2D, 1, 1)},
+    {"usampler3D", Type(BaseType::kUSampler3D, 1, 1)},
+    {"usamplerCube", Type(BaseType::kUSamplerCube, 1, 1)},
+    {"usampler2DArray", Type(BaseType::kUSampler2DArray, 1, 1)},
 };
 
 bool LookupTypeName(const std::string& name, Type* type) {
@@ -161,6 +173,7 @@ const BuiltinFuncEntry kBuiltinFuncs[] = {
     {"texture3D", BuiltinFunc::kTexture3D},
     {"texture", BuiltinFunc::kTexture},
     {"textureLod", BuiltinFunc::kTextureLod},
+    {"textureSize", BuiltinFunc::kTextureSize},
     {"dFdx", BuiltinFunc::kDfdx},
     {"dFdy", BuiltinFunc::kDfdy},
     {"fwidth", BuiltinFunc::kFwidth},
@@ -1975,6 +1988,23 @@ Type Parser::BuiltinResultType(BuiltinFunc function,
     case BuiltinFunc::kTexture:
     case BuiltinFunc::kTextureLod:
       return Type::Vec(4);
+    case BuiltinFunc::kTextureSize: {
+      if (args.size() != 2 || !first.is_sampler()) {
+        FailAt(line, "textureSize() expects a sampler and a level");
+        return Type::Int();
+      }
+      switch (first.base()) {
+        case BaseType::kSampler3D:
+        case BaseType::kSampler2DArray:
+        case BaseType::kISampler3D:
+        case BaseType::kISampler2DArray:
+        case BaseType::kUSampler3D:
+        case BaseType::kUSampler2DArray:
+          return Type::IVec(3);
+        default:
+          return Type::IVec(2);
+      }
+    }
     default:
       break;
   }

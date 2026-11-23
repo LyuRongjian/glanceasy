@@ -404,6 +404,7 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
                 const float position[3],
                 float lod_bias,
                 float out[4]) override;
+  void Size(int unit, int out[3]) override;
 
  private:
   struct TransformedVertex {
@@ -1391,6 +1392,19 @@ void Pipeline::StoreFragmentColor(size_t pixel,
   }
   const uint32_t packed = PackRgba(bytes[0], bytes[1], bytes[2], bytes[3]);
   memcpy(destination + pixel * 4, &packed, sizeof(packed));
+}
+
+void Pipeline::Size(int unit, int out[3]) {
+  out[0] = 0;
+  out[1] = 0;
+  out[2] = 0;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture = context_->textures.Get(state().textures[slot]);
+  if (!texture)
+    return;
+  out[0] = texture->width;
+  out[1] = texture->height;
+  out[2] = texture->target == GL_TEXTURE_3D ? texture->depth : 1;
 }
 
 void Pipeline::Sample2D(int unit,
