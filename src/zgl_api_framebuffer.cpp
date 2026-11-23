@@ -919,6 +919,33 @@ void QuantizeColorFormat(uint8_t components[4], GLenum format) {
   }
 }
 
+void LoadNormalizedBlitTexel(const zgl::RenderTarget& source,
+                             int x,
+                             int y,
+                             uint8_t components[4]) {
+  const size_t index =
+      static_cast<size_t>(source.height - 1 - y) * source.width + x;
+  uint32_t value;
+  memcpy(&value, source.color + index * 4, sizeof(value));
+  const zgl::Rgba texel = zgl::UnpackRgba(value);
+  const uint8_t channels[4] = {texel.r, texel.g, texel.b, texel.a};
+  components[0] = 0;
+  components[1] = 0;
+  components[2] = 0;
+  components[3] = 255;
+  for (int channel = 0; channel < 4; ++channel) {
+    if (channel < source.read_channels)
+      components[channel] = channels[channel];
+  }
+  QuantizeColorFormat(components, source.read_format);
+  if (source.read_format == GL_SRGB8_ALPHA8) {
+    for (int channel = 0; channel < 3; ++channel) {
+      components[channel] = static_cast<uint8_t>(
+          zgl::SrgbToLinear(components[channel]) * 255.0f + 0.5f);
+    }
+  }
+}
+
 bool HasColorStorage(const zgl::FramebufferAttachment* slot, GLenum format) {
   if (slot->texture) {
     const zgl::Texture* texture = zgl::ApiContext()->textures.Get(slot->texture);
@@ -1667,6 +1694,18 @@ void glBlitFramebuffer(GLint src_x0,
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
+  const bool mirror_src_x = src_x1 < src_x0;
+  const bool mirror_src_y = src_y1 < src_y0;
+  const bool mirror_dst_x = dst_x1 < dst_x0;
+  const bool mirror_dst_y = dst_y1 < dst_y0;
+  if (mirror_src_x)
+    std::swap(src_x0, src_x1);
+  if (mirror_src_y)
+    std::swap(src_y0, src_y1);
+  if (mirror_dst_x)
+    std::swap(dst_x0, dst_x1);
+  if (mirror_dst_y)
+    std::swap(dst_y0, dst_y1);
   if (mask & GL_COLOR_BUFFER_BIT) {
     const int dst_width = dst_x1 - dst_x0;
     const int dst_height = dst_y1 - dst_y0;
@@ -1678,16 +1717,26 @@ void glBlitFramebuffer(GLint src_x0,
           destination.color_is_integer[0]) {
         for (int row = 0; row < dst_height; ++row) {
           for (int column = 0; column < dst_width; ++column) {
-            const int destination_x = dst_x0 + column;
-            const int destination_y = dst_y0 + row;
+            const int destination_column =
+                mirror_dst_x ? dst_width - 1 - column : column;
+            const int destination_row =
+                mirror_dst_y ? dst_height - 1 - row : row;
+            const int destination_x = dst_x0 + destination_column;
+            const int destination_y = dst_y0 + destination_row;
             const int gl_y = destination.height - 1 - destination_y;
             if (destination_x < 0 || destination_x >= destination.width ||
                 gl_y < 0 || gl_y >= destination.height)
               continue;
-            const int source_offset_x =
-                src_x0 + (column * src_width) / dst_width;
-            const int source_offset_y =
-                src_y0 + (row * src_height) / dst_height;
+            int source_column =
+                ((column * 2 + 1) * src_width) / (dst_width * 2);
+            int source_row =
+                ((row * 2 + 1) * src_height) / (dst_height * 2);
+            if (mirror_src_x)
+              source_column = src_width - 1 - source_column;
+            if (mirror_src_y)
+              source_row = src_height - 1 - source_row;
+            const int source_offset_x = src_x0 + source_column;
+            const int source_offset_y = src_y0 + source_row;
             if (source_offset_x < 0 || source_offset_x >= source.width ||
                 source_offset_y < 0 || source_offset_y >= source.height)
               continue;
@@ -1730,7 +1779,8 @@ void glBlitFramebuffer(GLint src_x0,
           context->state.color_mask[0] && context->state.color_mask[1] &&
           context->state.color_mask[2] && context->state.color_mask[3];
       const bool copy_rows =
-          writes_all_channels && source.read_channels == 4 &&
+          writes_all_channels && !mirror_src_x && !mirror_src_y &&
+          !mirror_dst_x && !mirror_dst_y && source.read_channels == 4 &&
           destination.color_channels[0] == 4 &&
           source.read_format != GL_SRGB8_ALPHA8 &&
           destination.color_format[0] != GL_SRGB8_ALPHA8 &&
@@ -1765,53 +1815,126 @@ void glBlitFramebuffer(GLint src_x0,
       } else {
         for (int row = 0; row < dst_height; ++row) {
           for (int column = 0; column < dst_width; ++column) {
-            const int destination_x = dst_x0 + column;
-            const int destination_y = dst_y0 + row;
+            const int destination_column =
+                mirror_dst_x ? dst_width - 1 - column : column;
+            const int destination_row =
+                mirror_dst_y ? dst_height - 1 - row : row;
+            const int destination_x = dst_x0 + destination_column;
+            const int destination_y = dst_y0 + destination_row;
             const int gl_y = destination.height - 1 - destination_y;
             if (destination_x < 0 || destination_x >= destination.width ||
                 gl_y < 0 || gl_y >= destination.height) {
               continue;
             }
-            const int source_offset_x =
-                src_x0 + (column * src_width) / dst_width;
-            const int source_offset_y =
-                src_y0 + (row * src_height) / dst_height;
+            int source_column =
+                ((column * 2 + 1) * src_width) / (dst_width * 2);
+            int source_row =
+                ((row * 2 + 1) * src_height) / (dst_height * 2);
+            if (mirror_src_x)
+              source_column = src_width - 1 - source_column;
+            if (mirror_src_y)
+              source_row = src_height - 1 - source_row;
+            const int source_offset_x = src_x0 + source_column;
+            const int source_offset_y = src_y0 + source_row;
             if (source_offset_x < 0 || source_offset_x >= source.width ||
                 source_offset_y < 0 || source_offset_y >= source.height) {
               continue;
             }
-            const size_t source_index =
-                static_cast<size_t>(source.height - 1 - source_offset_y) *
-                    source.width +
-                static_cast<size_t>(source_offset_x);
             const size_t destination_index =
                 static_cast<size_t>(gl_y) * destination.width +
                 static_cast<size_t>(destination_x);
-            uint32_t value;
-            memcpy(&value, source.color + source_index * 4, sizeof(value));
             uint32_t existing;
             memcpy(&existing, destination.color + destination_index * 4,
                    sizeof(existing));
             const zgl::Rgba previous = zgl::UnpackRgba(existing);
-            const zgl::Rgba incoming = zgl::UnpackRgba(value);
-            const uint8_t source_channels[4] = {
-                incoming.r, incoming.g, incoming.b, incoming.a};
-            uint8_t components[4] = {0, 0, 0, 255};
-            for (int channel = 0; channel < 4; ++channel) {
-              if (channel < source.read_channels)
-                components[channel] = source_channels[channel];
-            }
-            QuantizeColorFormat(components, source.read_format);
-            const bool source_srgb = source.read_format == GL_SRGB8_ALPHA8;
-            const bool destination_srgb =
-                destination.color_format[0] == GL_SRGB8_ALPHA8;
-            if (source_srgb != destination_srgb) {
-              for (int channel = 0; channel < 3; ++channel) {
-                components[channel] = source_srgb
-                    ? static_cast<uint8_t>(
-                          zgl::SrgbToLinear(components[channel]) * 255.0f +
-                          0.5f)
-                    : zgl::LinearToSrgb8(components[channel] / 255.0f);
+            uint8_t components[4];
+            if (filter == GL_LINEAR) {
+              float sample_x =
+                  src_x0 +
+                  (static_cast<float>(column) + 0.5f) * src_width / dst_width -
+                  0.5f;
+              float sample_y =
+                  src_y0 +
+                  (static_cast<float>(row) + 0.5f) * src_height / dst_height -
+                  0.5f;
+              if (mirror_src_x)
+                sample_x = src_x0 + static_cast<float>(src_width - 1) -
+                           (sample_x - src_x0);
+              if (mirror_src_y)
+                sample_y = src_y0 + static_cast<float>(src_height - 1) -
+                           (sample_y - src_y0);
+              sample_x =
+                  std::max(0.0f, std::min(static_cast<float>(source.width - 1),
+                                          sample_x));
+              sample_y =
+                  std::max(0.0f, std::min(static_cast<float>(source.height - 1),
+                                          sample_y));
+              const int lower_x = static_cast<int>(std::floor(sample_x));
+              const int lower_y = static_cast<int>(std::floor(sample_y));
+              const int upper_x = std::min(lower_x + 1, source.width - 1);
+              const int upper_y = std::min(lower_y + 1, source.height - 1);
+              const float fraction_x = sample_x - lower_x;
+              const float fraction_y = sample_y - lower_y;
+              float result[4] = {0, 0, 0, 0};
+              for (int sample_y = 0; sample_y < 2; ++sample_y) {
+                for (int sample_x = 0; sample_x < 2; ++sample_x) {
+                  const int x = sample_x == 0 ? lower_x : upper_x;
+                  const int y = sample_y == 0 ? lower_y : upper_y;
+                  const float weight_x =
+                      sample_x == 0 ? 1.0f - fraction_x : fraction_x;
+                  const float weight_y =
+                      sample_y == 0 ? 1.0f - fraction_y: fraction_y;
+                  uint8_t texel[4];
+                  LoadNormalizedBlitTexel(source, x, y, texel);
+                  for (int channel = 0; channel < 4; ++channel) {
+                    result[channel] +=
+                        texel[channel] * weight_x * weight_y;
+                  }
+                }
+              }
+              for (int channel = 0; channel < 4; ++channel) {
+                components[channel] = static_cast<uint8_t>(
+                    std::max(0.0f, std::min(255.0f, result[channel])) + 0.5f);
+              }
+              const bool destination_srgb =
+                  destination.color_format[0] == GL_SRGB8_ALPHA8;
+              if (destination_srgb) {
+                for (int channel = 0; channel < 3; ++channel) {
+                  components[channel] = zgl::LinearToSrgb8(
+                      components[channel] / 255.0f);
+                }
+              }
+            } else {
+              const size_t source_index =
+                  static_cast<size_t>(source.height - 1 - source_offset_y) *
+                      source.width +
+                  static_cast<size_t>(source_offset_x);
+              uint32_t value;
+              memcpy(&value, source.color + source_index * 4, sizeof(value));
+              const zgl::Rgba incoming = zgl::UnpackRgba(value);
+              const uint8_t source_channels[4] = {
+                  incoming.r, incoming.g, incoming.b, incoming.a};
+              components[0] = 0;
+              components[1] = 0;
+              components[2] = 0;
+              components[3] = 255;
+              for (int channel = 0; channel < 4; ++channel) {
+                if (channel < source.read_channels)
+                  components[channel] = source_channels[channel];
+              }
+              QuantizeColorFormat(components, source.read_format);
+              const bool source_srgb =
+                  source.read_format == GL_SRGB8_ALPHA8;
+              const bool destination_srgb =
+                  destination.color_format[0] == GL_SRGB8_ALPHA8;
+              if (source_srgb != destination_srgb) {
+                for (int channel = 0; channel < 3; ++channel) {
+                  components[channel] = source_srgb
+                      ? static_cast<uint8_t>(
+                            zgl::SrgbToLinear(components[channel]) * 255.0f +
+                            0.5f)
+                      : zgl::LinearToSrgb8(components[channel] / 255.0f);
+                }
               }
             }
             QuantizeColorFormat(components, destination.color_format[0]);
@@ -1835,14 +1958,30 @@ void glBlitFramebuffer(GLint src_x0,
     }
   }
   if ((mask & GL_DEPTH_BUFFER_BIT) && source.depth && destination.depth) {
-    for (GLint y = dst_y0; y < dst_y1; ++y) {
-      for (GLint x = dst_x0; x < dst_x1; ++x) {
+    for (GLint row = 0; row < dst_y1 - dst_y0; ++row) {
+      for (GLint column = 0; column < dst_x1 - dst_x0; ++column) {
+        const GLint destination_column =
+            mirror_dst_x ? dst_x1 - dst_x0 - 1 - column : column;
+        const GLint destination_row =
+            mirror_dst_y ? dst_y1 - dst_y0 - 1 - row : row;
+        const GLint x = dst_x0 + destination_column;
+        const GLint y = dst_y0 + destination_row;
         const GLint gl_y = destination.height - 1 - y;
         if (x < 0 || x >= destination.width || gl_y < 0 ||
             gl_y >= destination.height)
           continue;
-        const GLint source_x = src_x0 + (x - dst_x0);
-        const GLint source_y = src_y0 + (y - dst_y0);
+        GLint source_column =
+            ((column * 2 + 1) * (src_x1 - src_x0)) /
+            ((dst_x1 - dst_x0) * 2);
+        GLint source_row =
+            ((row * 2 + 1) * (src_y1 - src_y0)) /
+            ((dst_y1 - dst_y0) * 2);
+        if (mirror_src_x)
+          source_column = src_x1 - src_x0 - 1 - source_column;
+        if (mirror_src_y)
+          source_row = src_y1 - src_y0 - 1 - source_row;
+        const GLint source_x = src_x0 + source_column;
+        const GLint source_y = src_y0 + source_row;
         if (source_x < 0 || source_x >= source.width || source_y < 0 ||
             source_y >= source.height)
           continue;
@@ -1854,14 +1993,30 @@ void glBlitFramebuffer(GLint src_x0,
     }
   }
   if ((mask & GL_STENCIL_BUFFER_BIT) && source.stencil && destination.stencil) {
-    for (GLint y = dst_y0; y < dst_y1; ++y) {
-      for (GLint x = dst_x0; x < dst_x1; ++x) {
+    for (GLint row = 0; row < dst_y1 - dst_y0; ++row) {
+      for (GLint column = 0; column < dst_x1 - dst_x0; ++column) {
+        const GLint destination_column =
+            mirror_dst_x ? dst_x1 - dst_x0 - 1 - column : column;
+        const GLint destination_row =
+            mirror_dst_y ? dst_y1 - dst_y0 - 1 - row : row;
+        const GLint x = dst_x0 + destination_column;
+        const GLint y = dst_y0 + destination_row;
         const GLint gl_y = destination.height - 1 - y;
         if (x < 0 || x >= destination.width || gl_y < 0 ||
             gl_y >= destination.height)
           continue;
-        const GLint source_x = src_x0 + (x - dst_x0);
-        const GLint source_y = src_y0 + (y - dst_y0);
+        GLint source_column =
+            ((column * 2 + 1) * (src_x1 - src_x0)) /
+            ((dst_x1 - dst_x0) * 2);
+        GLint source_row =
+            ((row * 2 + 1) * (src_y1 - src_y0)) /
+            ((dst_y1 - dst_y0) * 2);
+        if (mirror_src_x)
+          source_column = src_x1 - src_x0 - 1 - source_column;
+        if (mirror_src_y)
+          source_row = src_y1 - src_y0 - 1 - source_row;
+        const GLint source_x = src_x0 + source_column;
+        const GLint source_y = src_y0 + source_row;
         if (source_x < 0 || source_x >= source.width || source_y < 0 ||
             source_y >= source.height)
           continue;
