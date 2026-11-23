@@ -25,11 +25,8 @@ GLenum TextureFamily(GLenum target, int* face) {
       return GL_TEXTURE_2D;
     case GL_TEXTURE_3D:
       return GL_TEXTURE_3D;
-    // The CTS state reset binds a zero-sized 2D array texture.  Alias it to
-    // the 3D texture family for now; sampling of sampler2DArray is not
-    // implemented yet, so array-texture tests will still fail.
     case GL_TEXTURE_2D_ARRAY:
-      return GL_TEXTURE_3D;
+      return GL_TEXTURE_2D_ARRAY;
     case GL_TEXTURE_CUBE_MAP:
       return GL_TEXTURE_CUBE_MAP;
     case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
@@ -247,6 +244,8 @@ Texture* DefaultTexture(Context* context, GLenum family) {
     index = 1;
   else if (family == GL_TEXTURE_3D)
     index = 2;
+  else if (family == GL_TEXTURE_2D_ARRAY)
+    index = 3;
   Texture* texture = &context->default_textures[index];
   if (texture->target == 0)
     texture->target = family;
@@ -567,9 +566,10 @@ void SetTextureImage(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  const int extent = texture->target == GL_TEXTURE_3D
-                         ? std::max(std::max(width, height), depth)
-                         : std::max(width, height);
+  const bool layered = texture->target == GL_TEXTURE_3D ||
+                       texture->target == GL_TEXTURE_2D_ARRAY;
+  const int extent = layered ? std::max(std::max(width, height), depth)
+                             : std::max(width, height);
   const int max_levels = MipLevelCount(extent, extent);
   if (level >= max_levels && extent > 0) {
     context->SetError(GL_INVALID_VALUE);
@@ -607,7 +607,10 @@ void SetTextureImage(GLenum target,
   if (IsFloatInternalFormat(internal_format)) {
     image->width = width;
     image->height = height;
-    image->depth = texture->target == GL_TEXTURE_3D ? depth : 1;
+    image->depth = (texture->target == GL_TEXTURE_3D ||
+                    texture->target == GL_TEXTURE_2D_ARRAY)
+                       ? depth
+                       : 1;
     const size_t texels = static_cast<size_t>(width) * height * image->depth;
     image->rgba.clear();
     image->float_rgba.assign(texels * 4, 0.0f);
@@ -638,7 +641,10 @@ void SetTextureImage(GLenum target,
   }
   image->width = width;
   image->height = height;
-  image->depth = texture->target == GL_TEXTURE_3D ? depth : 1;
+  image->depth = (texture->target == GL_TEXTURE_3D ||
+                  texture->target == GL_TEXTURE_2D_ARRAY)
+                     ? depth
+                     : 1;
   const size_t texels = static_cast<size_t>(width) * height * image->depth;
   if (IsIntegerInternalFormat(internal_format)) {
     image->integer_rgba.assign(texels * 4, 0u);
@@ -647,7 +653,8 @@ void SetTextureImage(GLenum target,
   }
   if (pixels) {
     const PixelStoreState& store = context->state.pixel_store;
-    if (texture->target == GL_TEXTURE_3D) {
+    if (texture->target == GL_TEXTURE_3D ||
+        texture->target == GL_TEXTURE_2D_ARRAY) {
       for (int z = 0; z < depth; ++z) {
         const uint8_t* slice = static_cast<const uint8_t*>(pixels) +
                                static_cast<size_t>(z) * width * height * 4;
@@ -899,7 +906,7 @@ void glBindTexture(GLenum target, GLuint texture) {
     context->state.textures[unit] = 0;
     return;
   }
-  zgl::Texture* object = context->textures.Get(texture);
+  zgl::Texture* object = context->textures.GetOrCreate(texture);
   if (!object) {
     context->SetError(GL_INVALID_OPERATION);
     return;

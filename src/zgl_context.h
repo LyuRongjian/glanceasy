@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <algorithm>
 #include <vector>
 
 #include "GLES3/gl32.h"
@@ -282,6 +283,22 @@ class ObjectTable {
   T* Get(GLuint name) {
     return name < objects_.size() ? objects_[name].get() : nullptr;
   }
+
+  // Binding a name that was never generated creates the object, as required
+  // for the glBind* entry points.
+  T* GetOrCreate(GLuint name) {
+    if (name == 0)
+      return nullptr;
+    if (name >= objects_.size())
+      objects_.resize(static_cast<size_t>(name) + 1);
+    if (!objects_[name]) {
+      auto it = std::find(free_.begin(), free_.end(), name);
+      if (it != free_.end())
+        free_.erase(it);
+      objects_[name].reset(new T());
+    }
+    return objects_[name].get();
+  }
   const T* Get(GLuint name) const {
     return name < objects_.size() ? objects_[name].get() : nullptr;
   }
@@ -500,7 +517,7 @@ class Context {
   ObjectTable<Texture> textures;
   // GL ES texture name 0 is a real default texture object.  Keep one per
   // texture family so state setup calls on name 0 have a destination.
-  Texture default_textures[3];
+  Texture default_textures[4];
   ObjectTable<Renderbuffer> renderbuffers;
   ObjectTable<Framebuffer> framebuffers;
   ObjectTable<ShaderObject> shaders;
