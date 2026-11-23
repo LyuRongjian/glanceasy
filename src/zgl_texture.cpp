@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace zgl {
 
@@ -153,10 +155,19 @@ uint16_t FloatToDepth16(float value) {
 }
 
 bool ImageHasTexels(const TextureImage& image) {
-  return !image.rgba.empty() || !image.float_rgba.empty();
+  return !image.rgba.empty() || !image.float_rgba.empty() ||
+         !image.integer_rgba.empty();
 }
 
 void FetchTexel(const TextureImage& image, size_t index, float rgba[4]) {
+  if (!image.integer_rgba.empty()) {
+    const uint32_t* source = image.integer_rgba.data() + index * 4;
+    for (int i = 0; i < 4; ++i)
+      rgba[i] = image.integer_signed
+                    ? static_cast<float>(static_cast<int32_t>(source[i]))
+                    : static_cast<float>(source[i]);
+    return;
+  }
   if (!image.float_rgba.empty()) {
     const float* source = image.float_rgba.data() + index * 4;
     rgba[0] = source[0];
@@ -179,6 +190,19 @@ GLenum BaseFilter(GLenum filter) {
     default:
       return GL_LINEAR;
   }
+}
+
+int WrapTexel(int value, int size, GLenum mode) {
+  if (size <= 0)
+    return 0;
+  if (mode == GL_CLAMP_TO_EDGE)
+    return ClampInt(value, 0, size - 1);
+  if (mode == GL_MIRRORED_REPEAT) {
+    const int period = size * 2;
+    int wrapped = ((value % period) + period) % period;
+    return wrapped < size ? wrapped : period - 1 - wrapped;
+  }
+  return ((value % size) + size) % size;
 }
 
 float WrapCoordinate(float coordinate, GLenum mode) {
@@ -227,7 +251,8 @@ void SampleTexture2D(const Texture& texture,
     return;
   const GLenum filter = lod > 0.0f ? BaseFilter(min_filter) : mag_filter;
   const float s = WrapCoordinate(u, wrap_s);
-  const float t = WrapCoordinate(v, wrap_t);
+  const float t = WrapCoordinate(texture.render_target_flip_y ? 1.0f - v : v,
+                                 wrap_t);
   if (s < 0.0f || t < 0.0f)
     return;
   if (filter == GL_NEAREST) {
@@ -249,8 +274,8 @@ void SampleTexture2D(const Texture& texture,
   float c01[4];
   float c11[4];
   const auto fetch = [&](int x, int y, float rgba[4]) {
-    const int cx = ClampInt(x, 0, image->width - 1);
-    const int cy = ClampInt(y, 0, image->height - 1);
+    const int cx = WrapTexel(x, image->width, wrap_s);
+    const int cy = WrapTexel(y, image->height, wrap_t);
     FetchTexel(*image, static_cast<size_t>(cy) * image->width + cx, rgba);
   };
   fetch(x0, y0, c00);

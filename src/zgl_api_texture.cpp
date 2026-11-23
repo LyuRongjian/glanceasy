@@ -94,6 +94,26 @@ bool IsIntegerInternalFormat(GLenum format) {
   }
 }
 
+bool IsSignedIntegerInternalFormat(GLenum format) {
+  switch (format) {
+    case GL_R8I:
+    case GL_R16I:
+    case GL_R32I:
+    case GL_RG8I:
+    case GL_RG16I:
+    case GL_RG32I:
+    case GL_RGB8I:
+    case GL_RGB16I:
+    case GL_RGB32I:
+    case GL_RGBA8I:
+    case GL_RGBA16I:
+    case GL_RGBA32I:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool IsFloatInternalFormat(GLenum format) {
   switch (format) {
     case GL_RGBA16F:
@@ -624,12 +644,15 @@ void SetTextureImage(GLenum target,
   }
   if (internal_format == GL_DEPTH_COMPONENT16 ||
       internal_format == GL_DEPTH_COMPONENT24 ||
-      internal_format == GL_DEPTH24_STENCIL8) {
+      internal_format == GL_DEPTH_COMPONENT32F ||
+      internal_format == GL_DEPTH24_STENCIL8 ||
+      internal_format == GL_DEPTH32F_STENCIL8) {
     image->width = width;
     image->height = height;
     image->depth = 1;
     image->depth16.assign(static_cast<size_t>(width) * height, 0xFFFFu);
-    if (internal_format == GL_DEPTH24_STENCIL8)
+    if (internal_format == GL_DEPTH24_STENCIL8 ||
+        internal_format == GL_DEPTH32F_STENCIL8)
       image->stencil8.assign(static_cast<size_t>(width) * height, 0u);
     if (pixels) {
       const PixelStoreState& store = context->state.pixel_store;
@@ -647,9 +670,12 @@ void SetTextureImage(GLenum target,
                      : 1;
   const size_t texels = static_cast<size_t>(width) * height * image->depth;
   if (IsIntegerInternalFormat(internal_format)) {
+    image->integer_signed = IsSignedIntegerInternalFormat(internal_format);
     image->integer_rgba.assign(texels * 4, 0u);
   } else {
-    image->rgba.assign(texels, PackRgba(0, 0, 0, 0));
+    const uint8_t alpha =
+        FormatColorChannels(internal_format) == 1 ? 255u : 0u;
+    image->rgba.assign(texels, PackRgba(0, 0, 0, alpha));
   }
   if (pixels) {
     const PixelStoreState& store = context->state.pixel_store;

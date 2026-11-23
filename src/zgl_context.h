@@ -21,6 +21,9 @@
 
 namespace zgl {
 
+// Returns the number of color channels carried by an internal format.
+int FormatColorChannels(GLenum format);
+
 // A rectangular block of pixels used by textures, renderbuffers and the
 // default framebuffer.  Colour is always stored as RGBA8; depth and stencil
 // are kept in their own planes so that a depth-only surface costs nothing
@@ -58,6 +61,9 @@ struct RenderTarget {
   uint32_t* resolved_integer_colors[kMaxColorAttachments] = {};
   bool color_is_integer[kMaxColorAttachments] = {};
   bool color_is_unsigned[kMaxColorAttachments] = {};
+  bool color_has_alpha[kMaxColorAttachments] = {true, true, true, true};
+  bool color_is_srgb[kMaxColorAttachments] = {};
+  int color_channels[kMaxColorAttachments] = {4, 4, 4, 4};
   int color_bytes[kMaxColorAttachments] = {4, 4, 4, 4};
   // draw_buffers[i] selects the attachment that fragment output i writes.
   GLenum draw_buffers[kMaxColorAttachments] = {
@@ -69,6 +75,9 @@ struct RenderTarget {
   // Type of the currently selected read colour buffer.
   bool read_integer = false;
   bool read_unsigned = false;
+  bool read_has_alpha = true;
+  int read_channels = 4;
+  GLenum read_format = 0;
   int read_color_bytes = 4;
   uint16_t* depth = nullptr;
   uint8_t* stencil = nullptr;
@@ -126,6 +135,7 @@ struct TextureImage {
   int height = 0;
   int depth = 1;
   int samples = 1;
+  bool integer_signed = false;
   // 0xAABBGGRR per texel, one 32-bit word per pixel.  A multisample image
   // keeps the resolved plane here and the sample planes in |sample_rgba|.
   std::vector<uint32_t> rgba;
@@ -170,6 +180,10 @@ class Texture {
   int samples = 0;  // Zero for ordinary textures, otherwise the sample count.
   bool fixed_sample_locations = true;
   bool immutable = false;
+  // Rendering into a texture stores rows top-down, while GL texture
+  // coordinates address the first uploaded row as v = 0.  Attachments flip
+  // the sampled coordinate until new image data is uploaded.
+  bool render_target_flip_y = false;
   std::vector<TextureImage> images;  // level * faces + face
 
   int faces() const { return target == GL_TEXTURE_CUBE_MAP ? 6 : 1; }

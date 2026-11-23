@@ -8,6 +8,8 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 
@@ -67,6 +69,90 @@ bool IsIntegerFormat(GLenum format) {
       return false;
   }
 }
+
+// Formats whose RGB channels are stored without an alpha channel.  Reads
+// back as RGBA must return one for alpha, not the zero in unused storage.
+bool FormatHasAlpha(GLenum format) {
+  switch (format) {
+    case GL_RGBA:
+    case GL_LUMINANCE_ALPHA:
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGBA8:
+    case GL_RGBA8_SNORM:
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGB10_A2:
+    case GL_RGB10_A2UI:
+      return true;
+    default:
+      return false;
+  }
+}
+
+}  // namespace
+
+int FormatColorChannels(GLenum format) {
+  switch (format) {
+    case GL_RGBA:
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGBA8:
+    case GL_RGBA8_SNORM:
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGB10_A2:
+    case GL_RGB10_A2UI:
+      return 4;
+    case GL_RGB:
+    case GL_RGB8:
+    case GL_RGB8_SNORM:
+    case GL_SRGB8:
+    case GL_RGB565:
+    case GL_RGB16F:
+    case GL_RGB32F:
+    case GL_R11F_G11F_B10F:
+    case GL_RGB9_E5:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+      return 3;
+    case GL_RG:
+    case GL_LUMINANCE_ALPHA:
+    case GL_RG8:
+    case GL_RG8_SNORM:
+    case GL_RG16F:
+    case GL_RG32F:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+namespace {
 
 bool IsUnsignedIntegerFormat(GLenum format) {
   switch (format) {
@@ -143,6 +229,9 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
       const bool integer = IsIntegerFormat(format);
       target.color_is_integer[i] = integer;
       target.color_is_unsigned[i] = IsUnsignedIntegerFormat(format);
+      target.color_has_alpha[i] = FormatHasAlpha(format);
+      target.color_is_srgb[i] = format == GL_SRGB8_ALPHA8;
+      target.color_channels[i] = FormatColorChannels(format);
       target.color_bytes[i] = integer ? 16 : 4;
       if (integer) {
         target.integer_colors[i] = const_cast<uint32_t*>(
@@ -193,6 +282,9 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
     target.color = target.colors[first];
     target.read_integer = target.color_is_integer[first];
     target.read_unsigned = target.color_is_unsigned[first];
+    target.read_has_alpha = target.color_has_alpha[first];
+    target.read_channels = target.color_channels[first];
+    target.read_format = AttachmentFormat(*context, framebuffer->colors[first]);
     target.read_color_bytes = target.color_bytes[first];
   }
   if (depth && depth->width == target.width && depth->height == target.height) {
@@ -343,6 +435,10 @@ RenderTarget Context::GetReadTarget() {
       target.color = target.colors[index];
       target.read_integer = target.color_is_integer[index];
       target.read_unsigned = target.color_is_unsigned[index];
+      target.read_has_alpha = target.color_has_alpha[index];
+      target.read_channels = target.color_channels[index];
+      target.read_format =
+          AttachmentFormat(*this, framebuffer->colors[index]);
       target.read_color_bytes = target.color_bytes[index];
       if (target.multisampled() &&
           target.resolved_integer_colors[index]) {

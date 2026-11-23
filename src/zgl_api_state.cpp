@@ -937,10 +937,18 @@ void glClear(GLbitfield mask) {
       if (buffer < GL_COLOR_ATTACHMENT0 ||
           buffer >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments)
         continue;
-      uint8_t* const color_buffer =
-          target.colors[buffer - GL_COLOR_ATTACHMENT0];
+      const int attachment = buffer - GL_COLOR_ATTACHMENT0;
+      uint8_t* const color_buffer = target.colors[attachment];
       if (!color_buffer)
         continue;
+      uint32_t buffer_packed = packed;
+      if (target.color_is_srgb[attachment]) {
+        const zgl::Rgba linear = zgl::UnpackRgba(packed);
+        buffer_packed = zgl::PackRgba(zgl::LinearToSrgb8(linear.r / 255.0f),
+                                      zgl::LinearToSrgb8(linear.g / 255.0f),
+                                      zgl::LinearToSrgb8(linear.b / 255.0f),
+                                      linear.a);
+      }
       const int sample_planes = target.multisampled() ? target.samples : 1;
       const size_t plane_bytes =
           target.multisampled() ? target.sample_texels * 4 : 0;
@@ -952,7 +960,7 @@ void glClear(GLbitfield mask) {
           uint8_t* row =
               plane + static_cast<size_t>(y) * target.width * 4;
           zgl::simd::FillRgba(
-              row + static_cast<size_t>(area.x) * 4, area.width, packed);
+              row + static_cast<size_t>(area.x) * 4, area.width, buffer_packed);
         }
         continue;
       }
@@ -979,7 +987,7 @@ void glClear(GLbitfield mask) {
             target.resolved_colors[buffer - GL_COLOR_ATTACHMENT0];
         for (int y = area.y; y < area.bottom(); ++y) {
           for (int x = area.x; x < area.right(); ++x)
-            resolved[static_cast<size_t>(y) * target.width + x] = packed;
+            resolved[static_cast<size_t>(y) * target.width + x] = buffer_packed;
         }
       }
     }

@@ -428,7 +428,14 @@ void ClearColourBuffer(Context* context, GLint drawbuffer, uint32_t packed) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  uint8_t* const color = target.colors[buffer - GL_COLOR_ATTACHMENT0];
+  const int attachment = buffer - GL_COLOR_ATTACHMENT0;
+  if (target.color_is_srgb[attachment]) {
+    const Rgba c = UnpackRgba(packed);
+    packed = PackRgba(LinearToSrgb8(c.r / 255.0f),
+                      LinearToSrgb8(c.g / 255.0f),
+                      LinearToSrgb8(c.b / 255.0f), c.a);
+  }
+  uint8_t* const color = target.colors[attachment];
   if (!color) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -606,10 +613,8 @@ void glBindFramebuffer(GLenum target, GLuint framebuffer) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (framebuffer != 0 && !context->framebuffers.Get(framebuffer)) {
-    context->SetError(GL_INVALID_OPERATION);
-    return;
-  }
+  if (framebuffer != 0)
+    context->framebuffers.GetOrCreate(framebuffer);
   if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER)
     context->state.framebuffer = framebuffer;
   if (target == GL_FRAMEBUFFER || target == GL_READ_FRAMEBUFFER)
@@ -677,6 +682,8 @@ void glFramebufferTexture2D(GLenum target,
           ? textarget
           : 0;
   slot->renderbuffer = 0;
+  if (zgl::Texture* object = context->textures.Get(texture))
+    object->render_target_flip_y = true;
   if (attachment == GL_DEPTH_STENCIL_ATTACHMENT)
     framebuffer->stencil = *slot;
 }
@@ -738,6 +745,8 @@ void glFramebufferTextureLayer(GLenum target,
   slot->level = level;
   slot->layer = layer;
   slot->renderbuffer = 0;
+  if (zgl::Texture* object = context->textures.Get(texture))
+    object->render_target_flip_y = true;
   if (attachment == GL_DEPTH_STENCIL_ATTACHMENT)
     framebuffer->stencil = *slot;
 }
@@ -772,10 +781,8 @@ void glFramebufferRenderbuffer(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (renderbuffer != 0 && !context->renderbuffers.Get(renderbuffer)) {
-    context->SetError(GL_INVALID_OPERATION);
-    return;
-  }
+  if (renderbuffer != 0)
+    context->renderbuffers.GetOrCreate(renderbuffer);
   if (renderbuffer != 0 && renderbuffer_target != GL_RENDERBUFFER) {
     context->SetError(GL_INVALID_ENUM);
     return;
@@ -1189,10 +1196,8 @@ void glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (renderbuffer != 0 && !context->renderbuffers.Get(renderbuffer)) {
-    context->SetError(GL_INVALID_OPERATION);
-    return;
-  }
+  if (renderbuffer != 0)
+    context->renderbuffers.GetOrCreate(renderbuffer);
   context->state.renderbuffer = renderbuffer;
 }
 
@@ -1576,13 +1581,30 @@ void glReadPixels(GLint x,
            static_cast<size_t>(source_x)) *
               static_cast<size_t>(target.read_color_bytes);
 
+      uint8_t* out = row_start + static_cast<size_t>(column) * bytes;
       if (integer_read) {
         zgl::WriteIntegerPixel(reinterpret_cast<const uint32_t*>(source),
-                              format, type,
-                              row_start + static_cast<size_t>(column) * bytes);
+                              format, type, out);
+        GLuint* components = reinterpret_cast<GLuint*>(out);
+        const int output_channels = format == GL_RGBA_INTEGER   ? 4
+                                    : format == GL_RGB_INTEGER  ? 3
+                                    : format == GL_RG_INTEGER   ? 2
+                                                                : 1;
+        for (int channel = target.read_channels; channel < output_channels;
+             ++channel)
+          components[channel] = channel == 3 ? 1u : 0u;
       } else {
-        zgl::WritePixel(source, format, type,
-                        row_start + static_cast<size_t>(column) * bytes);
+        zgl::WritePixel(source, format, type, out);
+        if (format == GL_RGBA || format == GL_RGB ||
+            format == GL_RG || format == GL_RED) {
+          int output_channels = format == GL_RGBA   ? 4
+                                : format == GL_RGB  ? 3
+                                : format == GL_RG   ? 2
+                                                    : 1;
+          for (int channel = target.read_channels; channel < output_channels;
+               ++channel)
+            out[channel] = channel == 3 ? 255 : 0;
+        }
       }
     }
   }

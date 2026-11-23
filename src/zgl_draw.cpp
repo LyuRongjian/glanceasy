@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include "src/glsl/glsl_program.h"
@@ -1343,6 +1345,13 @@ void Pipeline::StoreFragmentColor(size_t pixel,
     uint32_t existing;
     memcpy(&existing, destination + pixel * 4, sizeof(existing));
     UnpackRgba(existing, destination_color);
+    if (target_.color_is_srgb[attachment]) {
+      const Rgba stored = UnpackRgba(existing);
+      destination_color[0] = SrgbToLinear(stored.r);
+      destination_color[1] = SrgbToLinear(stored.g);
+      destination_color[2] = SrgbToLinear(stored.b);
+      destination_color[3] = static_cast<float>(stored.a) / 255.0f;
+    }
     float source[4];
     for (int i = 0; i < 4; ++i)
       source[i] = Clamp01(color[i]);
@@ -1362,19 +1371,28 @@ void Pipeline::StoreFragmentColor(size_t pixel,
     result[3] = BlendCombine(state.blend.equation_alpha, source[3],
                              destination_color[3], sf, df);
     uint8_t bytes[4];
-    for (int i = 0; i < 4; ++i)
-      bytes[i] = state.color_mask[i] ? FloatToUnorm8(result[i])
-                                     : (i == 0   ? UnpackRgba(existing).r
-                                        : i == 1 ? UnpackRgba(existing).g
-                                        : i == 2 ? UnpackRgba(existing).b
-                                                 : UnpackRgba(existing).a);
+    const bool srgb = target_.color_is_srgb[attachment];
+    for (int i = 0; i < 4; ++i) {
+      if (!state.color_mask[i]) {
+        const Rgba previous = UnpackRgba(existing);
+        bytes[i] = i == 0   ? previous.r
+                   : i == 1 ? previous.g
+                   : i == 2 ? previous.b
+                            : previous.a;
+      } else {
+        bytes[i] = srgb && i < 3 ? LinearToSrgb8(result[i])
+                                 : FloatToUnorm8(result[i]);
+      }
+    }
     const uint32_t packed = PackRgba(bytes[0], bytes[1], bytes[2], bytes[3]);
     memcpy(destination + pixel * 4, &packed, sizeof(packed));
     return;
   }
   uint8_t bytes[4];
+  const bool srgb = target_.color_is_srgb[attachment];
   for (int i = 0; i < 4; ++i)
-    bytes[i] = FloatToUnorm8(color[i]);
+    bytes[i] = srgb && i < 3 ? LinearToSrgb8(color[i])
+                             : FloatToUnorm8(color[i]);
   if (!(state.color_mask[0] && state.color_mask[1] && state.color_mask[2] &&
         state.color_mask[3])) {
     uint32_t existing;
@@ -1407,6 +1425,20 @@ void Pipeline::Size(int unit, int out[3]) {
   out[2] = texture->target == GL_TEXTURE_3D ? texture->depth : 1;
 }
 
+namespace {
+
+void MaskSampledAlpha(GLenum internal_format, float out[4]) {
+  const int channels = FormatColorChannels(internal_format);
+  if (internal_format == GL_SRGB8_ALPHA8) {
+    for (int channel = 0; channel < 3; ++channel)
+      out[channel] = SrgbToLinear(FloatToUnorm8(out[channel]));
+  }
+  for (int channel = channels; channel < 4; ++channel)
+    out[channel] = channel == 3 ? 1.0f : 0.0f;
+}
+
+}  // namespace
+
 void Pipeline::Sample2D(int unit,
                         float u,
                         float v,
@@ -1433,6 +1465,7 @@ void Pipeline::Sample2D(int unit,
   }
   SampleTexture2D(*texture, u, v, lod_bias, min_filter, mag_filter, wrap_s,
                   wrap_t, out);
+  MaskSampledAlpha(texture->internal_format, out);
 }
 
 void Pipeline::SampleCube(int unit,
@@ -1455,6 +1488,7 @@ void Pipeline::SampleCube(int unit,
     mag_filter = sampler->mag_filter;
   }
   SampleTextureCube(*texture, direction, lod_bias, min_filter, mag_filter, out);
+  MaskSampledAlpha(texture->internal_format, out);
 }
 
 void Pipeline::Sample3D(int unit,
@@ -1484,6 +1518,7 @@ void Pipeline::Sample3D(int unit,
   }
   SampleTexture3D(*texture, position, lod_bias, min_filter, mag_filter, wrap_s,
                   wrap_t, wrap_r, out);
+  MaskSampledAlpha(texture->internal_format, out);
 }
 
 }  // namespace

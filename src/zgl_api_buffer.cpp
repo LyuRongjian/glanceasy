@@ -751,7 +751,11 @@ void glGetVertexAttribPointerv(GLuint index, GLenum pname, void** pointer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  *pointer = const_cast<uint8_t*>(array->attributes[index].client_pointer);
+  const zgl::VertexAttribute& attribute = array->attributes[index];
+  *pointer = attribute.buffer
+                 ? reinterpret_cast<void*>(
+                       static_cast<intptr_t>(attribute.offset))
+                 : const_cast<uint8_t*>(attribute.client_pointer);
 }
 
 }  // extern "C"
