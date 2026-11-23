@@ -98,7 +98,10 @@ struct RenderTarget {
   uint16_t* resolved_depth = nullptr;
   uint8_t* resolved_stencil = nullptr;
 
-  bool valid() const { return color != nullptr && width > 0 && height > 0; }
+  bool valid() const {
+    return width > 0 && height > 0 &&
+           (color != nullptr || depth != nullptr || stencil != nullptr);
+  }
   bool multisampled() const { return samples > 1; }
 };
 
@@ -159,6 +162,7 @@ struct TextureImage {
 
 class Texture {
  public:
+  bool generated_only = false;
   // Zero until the texture is first bound: a name may be bound to any target
   // only while its target is still unspecified.
   GLenum target = 0;
@@ -201,6 +205,7 @@ class Texture {
 
 class Renderbuffer {
  public:
+  bool generated_only = false;
   int width = 0;
   int height = 0;
   int samples = 0;
@@ -320,6 +325,14 @@ class ObjectTable {
   }
   const T* Get(GLuint name) const {
     return name < objects_.size() ? objects_[name].get() : nullptr;
+  }
+
+  template <typename Function>
+  void ForEach(Function function) {
+    for (auto& object : objects_) {
+      if (object)
+        function(*object);
+    }
   }
 
   bool Delete(GLuint name) {

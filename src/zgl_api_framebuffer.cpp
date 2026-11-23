@@ -675,6 +675,12 @@ void glFramebufferTexture2D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  const bool cube_face = textarget >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+                         textarget <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
+  if (textarget != GL_TEXTURE_2D && !cube_face) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (texture == 0) {
     slot->texture = 0;
     slot->level = 0;
@@ -682,14 +688,23 @@ void glFramebufferTexture2D(GLenum target,
     slot->cube_face = 0;
     return;
   }
-  if (!context->textures.Get(texture)) {
+  zgl::Texture* object = context->textures.Get(texture);
+  if (!object) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (textarget != GL_TEXTURE_2D && textarget != GL_TEXTURE_CUBE_MAP &&
-      !(textarget >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
-        textarget <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)) {
-    context->SetError(GL_INVALID_ENUM);
+  if (object->generated_only) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const GLenum required_target =
+      cube_face ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D;
+  if (object->target != required_target) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (level >= zgl::MipLevelCount(zgl::kMaxTextureSize, zgl::kMaxTextureSize)) {
+    context->SetError(GL_INVALID_VALUE);
     return;
   }
   slot->texture = texture;
@@ -701,8 +716,7 @@ void glFramebufferTexture2D(GLenum target,
           ? textarget
           : 0;
   slot->renderbuffer = 0;
-  if (zgl::Texture* object = context->textures.Get(texture))
-    object->render_target_flip_y = true;
+  object->render_target_flip_y = true;
   if (attachment == GL_DEPTH_STENCIL_ATTACHMENT)
     framebuffer->stencil = *slot;
 }
@@ -800,11 +814,16 @@ void glFramebufferRenderbuffer(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (renderbuffer != 0)
-    context->renderbuffers.GetOrCreate(renderbuffer);
-  if (renderbuffer != 0 && renderbuffer_target != GL_RENDERBUFFER) {
+  if (renderbuffer_target != GL_RENDERBUFFER) {
     context->SetError(GL_INVALID_ENUM);
     return;
+  }
+  if (renderbuffer != 0) {
+    const zgl::Renderbuffer* object = context->renderbuffers.Get(renderbuffer);
+    if (!object || object->generated_only) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
   }
   slot->renderbuffer = renderbuffer;
   slot->texture = 0;
@@ -1009,13 +1028,12 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
     // The default framebuffer exposes GL_BACK, GL_DEPTH and GL_STENCIL as
     // GL_FRAMEBUFFER_DEFAULT attachments with fixed RGBA8/depth16/stencil8
     // component sizes.
-    if (attachment != GL_BACK && attachment != GL_COLOR_ATTACHMENT0 &&
-        attachment != GL_DEPTH && attachment != GL_STENCIL &&
-        attachment != GL_DEPTH_STENCIL) {
+    if (attachment != GL_BACK && attachment != GL_DEPTH &&
+        attachment != GL_STENCIL && attachment != GL_DEPTH_STENCIL) {
       context->SetError(GL_INVALID_ENUM);
       return;
     }
-    const bool is_color = attachment == GL_BACK || attachment == GL_COLOR_ATTACHMENT0;
+    const bool is_color = attachment == GL_BACK;
     const bool is_depth = attachment == GL_DEPTH || attachment == GL_DEPTH_STENCIL;
     const bool is_stencil = attachment == GL_STENCIL || attachment == GL_DEPTH_STENCIL;
     switch (pname) {
@@ -1069,6 +1087,18 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
     return;
   }
   const bool bound = slot->bound();
+  if (!bound && pname != GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE &&
+      pname != GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (bound && slot->renderbuffer &&
+      (pname == GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL ||
+       pname == GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE ||
+       pname == GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER)) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   const GLenum format = bound ? zgl::AttachmentFormat(context, *slot) : 0;
   const bool has_depth = bound && zgl::IsDepthFormat(format);
   const bool has_stencil = bound && zgl::IsStencilFormat(format);
@@ -1242,8 +1272,12 @@ void glGenRenderbuffers(GLsizei n, GLuint* renderbuffers) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  for (GLsizei i = 0; i < n; ++i)
+  for (GLsizei i = 0; i < n; ++i) {
     renderbuffers[i] = context->renderbuffers.Create();
+    zgl::Renderbuffer* object = context->renderbuffers.Get(renderbuffers[i]);
+    if (object)
+      object->generated_only = true;
+  }
 }
 
 void glDeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
@@ -1255,9 +1289,22 @@ void glDeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
     return;
   }
   for (GLsizei i = 0; i < n; ++i) {
-    context->renderbuffers.Delete(renderbuffers[i]);
-    if (context->state.renderbuffer == renderbuffers[i])
+    const GLuint name = renderbuffers[i];
+    context->renderbuffers.Delete(name);
+    if (context->state.renderbuffer == name)
       context->state.renderbuffer = 0;
+    zgl::Framebuffer* framebuffer =
+        zgl::CurrentFramebuffer(context, GL_FRAMEBUFFER);
+    if (framebuffer) {
+      for (int i = 0; i < zgl::kMaxColorAttachments; ++i) {
+        if (framebuffer->colors[i].renderbuffer == name)
+          framebuffer->colors[i] = zgl::FramebufferAttachment();
+      }
+      if (framebuffer->depth.renderbuffer == name)
+        framebuffer->depth = zgl::FramebufferAttachment();
+      if (framebuffer->stencil.renderbuffer == name)
+        framebuffer->stencil = zgl::FramebufferAttachment();
+    }
   }
 }
 
@@ -1276,8 +1323,12 @@ void glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (renderbuffer != 0)
-    context->renderbuffers.GetOrCreate(renderbuffer);
+  if (renderbuffer != 0) {
+    zgl::Renderbuffer* object =
+        context->renderbuffers.GetOrCreate(renderbuffer);
+    if (object)
+      object->generated_only = false;
+  }
   context->state.renderbuffer = renderbuffer;
 }
 

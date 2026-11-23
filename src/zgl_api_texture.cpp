@@ -339,6 +339,30 @@ void UploadSlice(TextureImage* destination,
   const size_t source_stride = static_cast<size_t>(width);
   const size_t destination_stride = static_cast<size_t>(destination->width);
   const size_t slice = destination_stride * destination->height;
+  if (!destination->depth16.empty()) {
+    if (source.depth16.empty())
+      return;
+    const size_t destination_offset =
+        static_cast<size_t>(zoffset) * slice +
+        static_cast<size_t>(yoffset) * destination_stride + xoffset;
+    for (int y = 0; y < height; ++y) {
+      memcpy(destination->depth16.data() + destination_offset +
+                 static_cast<size_t>(y) * destination_stride,
+             source.depth16.data() + static_cast<size_t>(y) * source_stride,
+             sizeof(uint16_t) * source_stride);
+    }
+    if (!destination->stencil8.empty() && !source.stencil8.empty()) {
+      for (int y = 0; y < height; ++y) {
+        memcpy(destination->stencil8.data() + destination_offset +
+                   static_cast<size_t>(y) * destination_stride,
+               source.stencil8.data() + static_cast<size_t>(y) * source_stride,
+               sizeof(uint8_t) * source_stride);
+      }
+    }
+    return;
+  }
+  if (destination->rgba.empty())
+    return;
   for (int y = 0; y < height; ++y) {
     const uint32_t* source_row =
         source.rgba.data() + static_cast<size_t>(y) * source_stride;
@@ -822,7 +846,21 @@ void SetTextureStorage(GLenum target,
       image->depth = texture->target == GL_TEXTURE_3D ? depth : 1;
       const size_t texels =
           static_cast<size_t>(level_width) * level_height * image->depth;
-      if (IsFloatInternalFormat(internal_format)) {
+      if (internal_format == GL_DEPTH_COMPONENT16 ||
+          internal_format == GL_DEPTH_COMPONENT24 ||
+          internal_format == GL_DEPTH_COMPONENT32F ||
+          internal_format == GL_DEPTH24_STENCIL8 ||
+          internal_format == GL_DEPTH32F_STENCIL8) {
+        image->rgba.clear();
+        image->float_rgba.clear();
+        image->integer_rgba.clear();
+        image->depth16.assign(texels, 0xFFFFu);
+        if (internal_format == GL_DEPTH24_STENCIL8 ||
+            internal_format == GL_DEPTH32F_STENCIL8)
+          image->stencil8.assign(texels, 0u);
+        else
+          image->stencil8.clear();
+      } else if (IsFloatInternalFormat(internal_format)) {
         image->rgba.clear();
         image->float_rgba.assign(texels * 4, 0.0f);
       } else if (IsIntegerInternalFormat(internal_format)) {
@@ -890,8 +928,12 @@ void glGenTextures(GLsizei n, GLuint* textures) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  for (GLsizei i = 0; i < n; ++i)
+  for (GLsizei i = 0; i < n; ++i) {
     textures[i] = context->textures.Create();
+    zgl::Texture* object = context->textures.Get(textures[i]);
+    if (object)
+      object->generated_only = true;
+  }
 }
 
 void glDeleteTextures(GLsizei n, const GLuint* textures) {
@@ -903,7 +945,20 @@ void glDeleteTextures(GLsizei n, const GLuint* textures) {
     return;
   }
   for (GLsizei i = 0; i < n; ++i) {
-    context->textures.Delete(textures[i]);
+    const GLuint name = textures[i];
+    context->textures.Delete(name);
+    zgl::Framebuffer* framebuffer =
+        context->framebuffers.Get(context->state.framebuffer);
+    if (framebuffer) {
+      for (int j = 0; j < zgl::kMaxColorAttachments; ++j) {
+        if (framebuffer->colors[j].texture == name)
+          framebuffer->colors[j] = zgl::FramebufferAttachment();
+      }
+      if (framebuffer->depth.texture == name)
+        framebuffer->depth = zgl::FramebufferAttachment();
+      if (framebuffer->stencil.texture == name)
+        framebuffer->stencil = zgl::FramebufferAttachment();
+    }
     for (int unit = 0; unit < zgl::kMaxCombinedTextureUnits; ++unit) {
       if (context->state.textures[unit] == textures[i])
         context->state.textures[unit] = 0;
@@ -972,6 +1027,7 @@ void glBindTexture(GLenum target, GLuint texture) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  object->generated_only = false;
   if (object->target == 0)
     object->target = family;
   else if (object->target != family) {

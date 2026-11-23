@@ -316,10 +316,15 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
   }
   const TextureImage* depth = AttachmentImage(*context, framebuffer->depth);
   const TextureImage* stencil = AttachmentImage(*context, framebuffer->stencil);
-  if (!color || !color->width || !color->height)
+  const TextureImage* extent_image = color;
+  if (!extent_image || !extent_image->width || !extent_image->height)
+    extent_image = depth;
+  if (!extent_image || !extent_image->width || !extent_image->height)
+    extent_image = stencil;
+  if (!extent_image || !extent_image->width || !extent_image->height)
     return target;
-  target.width = color->width;
-  target.height = color->height;
+  target.width = extent_image->width;
+  target.height = extent_image->height;
   target.samples = samples;
   target.sample_texels =
       static_cast<size_t>(target.width) * static_cast<size_t>(target.height);
