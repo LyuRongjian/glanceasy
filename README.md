@@ -1,6 +1,6 @@
 <p align="center">
-  <a href="README.md"><img src="https://img.shields.io/badge/README-English-2f81f7" alt="English"></a>
-  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d73a49" alt="简体中文"></a>
+  <a href="README.md"><img src="docs/badge-en.svg" alt="English"></a>
+  <a href="README.zh-CN.md"><img src="docs/badge-zh.svg" alt="简体中文"></a>
 </p>
 
 # ZCat-GLES
