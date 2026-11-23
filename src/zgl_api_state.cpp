@@ -47,6 +47,22 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_MAX_FRAGMENT_UNIFORM_VECTORS:
       *first = kMaxUniformVectors;
       return true;
+    case GL_MAX_UNIFORM_BUFFER_BINDINGS:
+      *first = kMaxUniformBufferBindings;
+      return true;
+    case GL_MAX_UNIFORM_BLOCK_SIZE:
+      *first = 16384;
+      return true;
+    case GL_MAX_VERTEX_UNIFORM_BLOCKS:
+    case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:
+      *first = kMaxUniformBufferBindings;
+      return true;
+    case GL_MAX_COMBINED_UNIFORM_BLOCKS:
+      *first = kMaxUniformBufferBindings;
+      return true;
+    case GL_UNIFORM_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.uniform_buffer);
+      return true;
     case GL_MAX_VARYING_VECTORS:
       *first = kMaxVaryingVectors;
       return true;

@@ -127,6 +127,12 @@ void SetComponent(Value* value, int index, float v);
 // a vector, as in an if() condition).
 bool IsTrue(const Value& value);
 
+// std140 layout rules for the basic member types the subset understands.
+// Vectors are not padded to their alignment when stored alone; the next
+// member's offset is rounded up instead, matching the std140 rules.
+int Std140Alignment(const Type& type);
+int Std140Size(const Type& type);
+
 }  // namespace glsl
 }  // namespace zgl
 

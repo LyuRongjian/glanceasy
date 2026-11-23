@@ -180,5 +180,24 @@ Value Convert(const Value& value, const Type& target) {
   return out;
 }
 
+int Std140Alignment(const Type& type) {
+  if (type.is_matrix())
+    return 16;
+  if (type.is_vector()) {
+    if (type.rows() == 2)
+      return 8;
+    return 16;
+  }
+  return 4;
+}
+
+int Std140Size(const Type& type) {
+  if (type.is_matrix())
+    return type.columns() * 16;
+  if (type.is_vector())
+    return type.rows() * 4;
+  return 4;
+}
+
 }  // namespace glsl
 }  // namespace zgl

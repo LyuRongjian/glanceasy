@@ -5,9 +5,12 @@
 #include "src/glsl/glsl_program.h"
 
 #include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
 #include <algorithm>
 #include <string>
+#include <utility>
 
 #include "src/glsl/glsl_jit.h"
 
@@ -40,6 +43,7 @@ bool Program::Link(
   linked_ = false;
   attributes_.clear();
   uniforms_.clear();
+  uniform_blocks_.clear();
   varyings_.clear();
   uniform_values_.clear();
   vertex_uniform_map_.clear();
@@ -166,17 +170,88 @@ bool Program::Link(
     }
   }
 
+  // Uniform blocks.  The same block name may appear in both stages with the
+  // same std140 layout; its members occupy one program-wide uniform slot per
+  // member and are refreshed from the bound buffer before each draw.
+  std::vector<int> vertex_block_map;
+  std::vector<int> fragment_block_map;
+  {
+    const auto merge_blocks = [&](ShaderAst* ast, bool is_vertex,
+                                  std::vector<int>* map) {
+      map->assign(ast->uniform_blocks.size(), -1);
+      for (size_t i = 0; i < ast->uniform_blocks.size(); ++i) {
+        const UniformBlock& source = ast->uniform_blocks[i];
+        int index = -1;
+        for (size_t j = 0; j < uniform_blocks_.size(); ++j) {
+          if (uniform_blocks_[j].name == source.name) {
+            index = static_cast<int>(j);
+            break;
+          }
+        }
+        if (index < 0) {
+          UniformBlockInfo info;
+          info.name = source.name;
+          info.size = source.size;
+          info.binding = 0;
+          info.vertex_stage = is_vertex;
+          info.fragment_stage = !is_vertex;
+          for (const UniformBlockMember& member : source.members) {
+            UniformBlockMemberInfo member_info;
+            member_info.name = member.name;
+            member_info.type = member.type;
+            member_info.offset = member.offset;
+            info.members.push_back(member_info);
+          }
+          uniform_blocks_.push_back(std::move(info));
+          index = static_cast<int>(uniform_blocks_.size()) - 1;
+        } else {
+          const UniformBlockInfo& existing = uniform_blocks_[index];
+          if (existing.size != source.size ||
+              existing.members.size() != source.members.size()) {
+            return false;
+          }
+          for (size_t m = 0; m < source.members.size(); ++m) {
+            if (existing.members[m].name != source.members[m].name ||
+                existing.members[m].type != source.members[m].type ||
+                existing.members[m].offset != source.members[m].offset) {
+              return false;
+            }
+          }
+          if (is_vertex)
+            uniform_blocks_[index].vertex_stage = true;
+          else
+            uniform_blocks_[index].fragment_stage = true;
+        }
+        (*map)[i] = index;
+      }
+      return true;
+    };
+    if (!merge_blocks(vertex, true, &vertex_block_map) ||
+        !merge_blocks(fragment, false, &fragment_block_map)) {
+      return fail("uniform block layouts do not match between the two stages");
+    }
+  }
+
   // Uniforms.  Names and types must agree across stages; the merged list is
   // the program-wide uniform namespace that glGetUniformLocation() exposes.
   {
     std::vector<UniformInfo> merged;
-    const auto merge_stage = [&](ShaderAst* ast, std::vector<int>* map) {
+    const auto merge_stage = [&](ShaderAst* ast, const std::vector<int>& blocks,
+                                 std::vector<int>* map) {
       map->assign(ast->uniforms.size(), -1);
       for (size_t i = 0; i < ast->uniforms.size(); ++i) {
         const Variable& uniform = ast->uniforms[i];
+        const int block_index =
+            uniform.ubo_block >= 0 &&
+                    uniform.ubo_block < static_cast<int>(blocks.size())
+                ? blocks[uniform.ubo_block]
+                : -1;
+        const int block_offset = block_index >= 0 ? uniform.ubo_offset : 0;
         int index = -1;
         for (size_t j = 0; j < merged.size(); ++j) {
-          if (merged[j].name == uniform.name) {
+          if (merged[j].name == uniform.name &&
+              merged[j].block_index == block_index &&
+              merged[j].block_offset == block_offset) {
             index = static_cast<int>(j);
             break;
           }
@@ -191,6 +266,8 @@ bool Program::Link(
           info.name = uniform.name;
           info.type = uniform.type;
           info.location = static_cast<int>(merged.size());
+          info.block_index = block_index;
+          info.block_offset = block_offset;
           merged.push_back(info);
           index = info.location;
         }
@@ -198,14 +275,28 @@ bool Program::Link(
       }
       return true;
     };
-    if (!merge_stage(vertex, &vertex_uniform_map_) ||
-        !merge_stage(fragment, &fragment_uniform_map_)) {
+    if (!merge_stage(vertex, vertex_block_map, &vertex_uniform_map_) ||
+        !merge_stage(fragment, fragment_block_map, &fragment_uniform_map_)) {
       return fail("uniform declarations do not match between the two stages");
     }
     uniforms_ = merged;
     uniform_values_.assign(uniforms_.size(), Value());
     for (size_t i = 0; i < uniforms_.size(); ++i)
       uniform_values_[i].type = uniforms_[i].type;
+  }
+
+  for (size_t b = 0; b < uniform_blocks_.size(); ++b) {
+    for (UniformBlockMemberInfo& member : uniform_blocks_[b].members) {
+      for (size_t u = 0; u < uniforms_.size(); ++u) {
+        if (uniforms_[u].block_index == static_cast<int>(b) &&
+            uniforms_[u].name == member.name) {
+          member.uniform_index = static_cast<int>(u);
+          break;
+        }
+      }
+      if (member.uniform_index < 0)
+        return fail("uniform block member was not merged");
+    }
   }
 
   vertex_globals_.assign(vertex->global_slots, Value());
@@ -269,10 +360,78 @@ int Program::FragDataLocation(const std::string& name) const {
 
 int Program::UniformLocation(const std::string& name) const {
   for (const UniformInfo& info : uniforms_) {
-    if (info.name == name)
+    if (info.name == name && info.block_index < 0)
       return info.location;
   }
   return -1;
+}
+
+int Program::UniformBlockIndex(const std::string& name) const {
+  for (size_t i = 0; i < uniform_blocks_.size(); ++i) {
+    if (uniform_blocks_[i].name == name)
+      return static_cast<int>(i);
+  }
+  return -1;
+}
+
+bool Program::SetUniformBlockBinding(int block_index, int binding) {
+  if (block_index < 0 ||
+      block_index >= static_cast<int>(uniform_blocks_.size()) || binding < 0) {
+    return false;
+  }
+  uniform_blocks_[block_index].binding = binding;
+  return true;
+}
+
+void Program::UploadUniformBlock(int block_index,
+                                 const uint8_t* bytes,
+                                 size_t byte_count) {
+  if (!bytes || block_index < 0 ||
+      block_index >= static_cast<int>(uniform_blocks_.size())) {
+    return;
+  }
+  const UniformBlockInfo& block = uniform_blocks_[block_index];
+  for (const UniformBlockMemberInfo& member : block.members) {
+    Value* value = uniform_value(member.uniform_index);
+    if (!value)
+      continue;
+    const auto read_float = [&](size_t offset, float* out) {
+      const size_t position = static_cast<size_t>(member.offset) + offset;
+      if (position + sizeof(float) <= byte_count)
+        memcpy(out, bytes + position, sizeof(float));
+      else
+        *out = 0.0f;
+    };
+    const auto read_int = [&](size_t offset, int32_t* out) {
+      const size_t position = static_cast<size_t>(member.offset) + offset;
+      if (position + sizeof(int32_t) <= byte_count)
+        memcpy(out, bytes + position, sizeof(int32_t));
+      else
+        *out = 0;
+    };
+
+    if (member.type.is_matrix()) {
+      const int rows = member.type.rows();
+      const int columns = member.type.columns();
+      for (int c = 0; c < columns; ++c) {
+        for (int r = 0; r < rows; ++r) {
+          read_float(static_cast<size_t>(c) * 16 + static_cast<size_t>(r) * 4,
+                     &value->data[c * rows + r]);
+        }
+      }
+    } else if (member.type.base() == BaseType::kFloat) {
+      const int components = member.type.components();
+      for (int i = 0; i < components; ++i)
+        read_float(static_cast<size_t>(i) * 4, &value->data[i]);
+    } else {
+      int32_t integer = 0;
+      read_int(0, &integer);
+      value->data[0] =
+          member.type.base() == BaseType::kBool
+              ? (integer != 0 ? 1.0f : 0.0f)
+              : static_cast<float>(integer);
+    }
+  }
 }
 
 }  // namespace glsl

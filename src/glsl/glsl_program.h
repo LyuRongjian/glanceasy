@@ -5,6 +5,9 @@
 #ifndef ZGL_SRC_GLSL_GLSL_PROGRAM_H_
 #define ZGL_SRC_GLSL_GLSL_PROGRAM_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <memory>
 #include <string>
 #include <utility>
@@ -28,6 +31,24 @@ struct UniformInfo {
   std::string name;
   Type type;
   int location = -1;  // Equals the index into the program's value array.
+  int block_index = -1;  // Uniform block owning this member, or -1.
+  int block_offset = 0;
+};
+
+struct UniformBlockMemberInfo {
+  std::string name;
+  Type type;
+  int offset = 0;
+  int uniform_index = -1;  // Index into Program::uniforms().
+};
+
+struct UniformBlockInfo {
+  std::string name;
+  int size = 0;
+  int binding = 0;
+  bool vertex_stage = false;
+  bool fragment_stage = false;
+  std::vector<UniformBlockMemberInfo> members;
 };
 
 struct VaryingInfo {
@@ -109,6 +130,16 @@ class Program {
 
   const std::vector<AttributeInfo>& attributes() const { return attributes_; }
   const std::vector<UniformInfo>& uniforms() const { return uniforms_; }
+  const std::vector<UniformBlockInfo>& uniform_blocks() const {
+    return uniform_blocks_;
+  }
+  int UniformBlockIndex(const std::string& name) const;
+  bool SetUniformBlockBinding(int block_index, int binding);
+  // Copies std140 data from |bytes| into the block's uniform values.  Reads
+  // beyond |bytes| leave the corresponding value untouched.
+  void UploadUniformBlock(int block_index,
+                          const uint8_t* bytes,
+                          size_t byte_count);
   const std::vector<VaryingInfo>& varyings() const { return varyings_; }
   const std::vector<FragmentOutputInfo>& fragment_outputs() const {
     return fragment_outputs_;
@@ -155,6 +186,7 @@ class Program {
 
   std::vector<AttributeInfo> attributes_;
   std::vector<UniformInfo> uniforms_;
+  std::vector<UniformBlockInfo> uniform_blocks_;
   std::vector<VaryingInfo> varyings_;
   std::vector<FragmentOutputInfo> fragment_outputs_;
   std::vector<Value> uniform_values_;

@@ -30,8 +30,10 @@ Buffer* BoundBuffer(Context* context, GLenum target) {
     return context->buffers.Get(context->state.copy_read_buffer);
   if (target == GL_COPY_WRITE_BUFFER)
     return context->buffers.Get(context->state.copy_write_buffer);
+  if (target == GL_UNIFORM_BUFFER)
+    return context->buffers.Get(context->state.uniform_buffer);
   if (target == GL_PIXEL_PACK_BUFFER || target == GL_PIXEL_UNPACK_BUFFER ||
-      target == GL_UNIFORM_BUFFER || target == GL_TRANSFORM_FEEDBACK_BUFFER) {
+      target == GL_TRANSFORM_FEEDBACK_BUFFER) {
     return nullptr;
   }
   return nullptr;
@@ -149,6 +151,12 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
       context->state.element_buffer = 0;
       context->default_vertex_array.element_buffer = 0;
     }
+    if (context->state.uniform_buffer == name)
+      context->state.uniform_buffer = 0;
+    for (int i = 0; i < zgl::kMaxUniformBufferBindings; ++i) {
+      if (context->state.uniform_buffers[i].buffer == name)
+        context->state.uniform_buffers[i] = zgl::IndexedBufferBinding();
+    }
   }
 }
 
@@ -182,6 +190,8 @@ void glBindBuffer(GLenum target, GLuint buffer) {
     context->state.copy_read_buffer = buffer;
   } else if (target == GL_COPY_WRITE_BUFFER) {
     context->state.copy_write_buffer = buffer;
+  } else if (target == GL_UNIFORM_BUFFER) {
+    context->state.uniform_buffer = buffer;
   }
 }
 

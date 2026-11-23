@@ -376,6 +376,8 @@ bool Parser::ParseQualifiers(Qualifiers* qualifiers) {
           Advance();
         } else if (CheckIdent("std140") || CheckIdent("depth_any") ||
                    CheckIdent("index")) {
+          if (CheckIdent("std140"))
+            qualifiers->is_std140 = true;
           Advance();
         } else if (current_.kind == Token::Kind::kIntLiteral) {
           Advance();
@@ -679,6 +681,11 @@ bool Parser::ParseGlobalDeclaration() {
     Advance();
     return ExpectPunct(";");
   }
+  if (qualifiers.is_uniform && current_.kind == Token::Kind::kIdentifier &&
+      !IsTypeName(current_.text) && !CheckIdent("true") &&
+      !CheckIdent("false")) {
+    return ParseUniformBlock(qualifiers, current_.line);
+  }
   Type type;
   if (!ParseTypeSpec(&type))
     return false;
@@ -712,6 +719,109 @@ bool Parser::ParseGlobalDeclaration() {
     if (CheckPunct("["))
       return Fail("arrays are not supported");
   }
+  return ExpectPunct(";");
+}
+
+bool Parser::ParseUniformBlock(const Qualifiers& qualifiers, int line) {
+  (void)qualifiers;
+  const std::string block_name = current_.text;
+  Advance();
+  for (const std::string& existing : block_names_) {
+    if (existing == block_name)
+      return FailAt(line, "duplicate uniform block '" + block_name + "'");
+  }
+
+  if (!ExpectPunct("{"))
+    return false;
+
+  UniformBlock block;
+  block.name = block_name;
+  const int block_index = static_cast<int>(ast_->uniform_blocks.size());
+  int offset = 0;
+  while (!CheckPunct("}")) {
+    if (current_.kind == Token::Kind::kEnd) {
+      FailAt(line, "unexpected end of shader inside uniform block");
+      return false;
+    }
+    Qualifiers member_qualifiers;
+    if (!ParseQualifiers(&member_qualifiers))
+      return false;
+    if (member_qualifiers.is_uniform || member_qualifiers.is_attribute ||
+        member_qualifiers.is_varying || member_qualifiers.is_in ||
+        member_qualifiers.is_out)
+      return FailAt(line, "invalid qualifier on a uniform block member");
+    Type member_type;
+    if (!ParseTypeSpec(&member_type))
+      return false;
+    if (member_type.is_void())
+      return FailAt(line, "a uniform block member cannot have type void");
+    if (member_type.is_sampler())
+      return FailAt(line, "a uniform block member cannot be a sampler");
+    if (current_.kind != Token::Kind::kIdentifier)
+      return FailAt(line, "expected a uniform block member name");
+    const std::string member_name = current_.text;
+    Advance();
+    if (CheckPunct("["))
+      return FailAt(line, "uniform block arrays are not supported");
+    if (AcceptPunct("="))
+      return FailAt(line, "a uniform block member cannot be initialised");
+    for (const UniformBlockMember& member : block.members) {
+      if (member.name == member_name)
+        return FailAt(line, "duplicate uniform block member '" + member_name +
+                               "'");
+    }
+
+    const int alignment = Std140Alignment(member_type);
+    offset = (offset + alignment - 1) / alignment * alignment;
+    UniformBlockMember member;
+    member.name = member_name;
+    member.type = member_type;
+    member.offset = offset;
+    member.uniform_index = static_cast<int>(ast_->uniforms.size());
+
+    Variable variable;
+    variable.name = member_name;
+    variable.type = member_type;
+    variable.storage = Storage::kUniform;
+    variable.index = member.uniform_index;
+    variable.ubo_block = block_index;
+    variable.ubo_offset = offset;
+    ast_->uniforms.push_back(variable);
+    block.members.push_back(member);
+
+    offset += Std140Size(member_type);
+    if (!ExpectPunct(";"))
+      return false;
+  }
+
+  if (!ExpectPunct("}"))
+    return false;
+
+  if (current_.kind == Token::Kind::kIdentifier) {
+    block.instance_name = current_.text;
+    Advance();
+    if (CheckPunct("["))
+      return FailAt(line, "uniform block instance arrays are not supported");
+    for (const auto& existing : block_instances_) {
+      if (existing.first == block.instance_name)
+        return FailAt(line, "duplicate uniform block instance '" +
+                               block.instance_name + "'");
+    }
+    block_instances_.push_back({block.instance_name, block_index});
+  } else {
+    // Members of an unnamed block live in the global uniform namespace.
+    for (const UniformBlockMember& member : block.members) {
+      int existing = -1;
+      if (HasName(uniform_names_, member.name, &existing))
+        return FailAt(line, "duplicate uniform block member '" + member.name +
+                               "'");
+      uniform_names_.push_back({member.name, member.uniform_index});
+    }
+  }
+
+  block.size = (offset + 15) / 16 * 16;
+  block_names_.push_back(block.name);
+  ast_->uniform_blocks.push_back(block);
   return ExpectPunct(";");
 }
 
@@ -1197,6 +1307,29 @@ ExprPtr Parser::ParsePostfix() {
       }
       const std::string field = current_.text;
       Advance();
+      if (expression->kind == Expr::Kind::kVariable &&
+          expression->ubo_block >= 0) {
+        const UniformBlock& block =
+            ast_->uniform_blocks[expression->ubo_block];
+        const UniformBlockMember* found = nullptr;
+        for (const UniformBlockMember& member : block.members) {
+          if (member.name == field) {
+            found = &member;
+            break;
+          }
+        }
+        if (!found) {
+          Fail("uniform block '" + block.name + "' has no member '" + field +
+               "'");
+          return nullptr;
+        }
+        ExprPtr variable = MakeExpr(Expr::Kind::kVariable, line);
+        variable->storage = Storage::kUniform;
+        variable->index = found->uniform_index;
+        variable->type = found->type;
+        expression = std::move(variable);
+        continue;
+      }
       int swizzle_set = -1;
       for (char c : field) {
         int set = -1;
@@ -1356,6 +1489,19 @@ ExprPtr Parser::ParseVariable(const std::string& name, int line) {
     }
   }
   int index = -1;
+  if (HasName(block_instances_, name, &index)) {
+    if (!CheckPunct(".")) {
+      FailAt(line, "uniform block instance '" + name +
+                       "' must be accessed through a member");
+      return nullptr;
+    }
+    ExprPtr expr = MakeExpr(Expr::Kind::kVariable, line);
+    expr->storage = Storage::kUniform;
+    expr->index = -1;
+    expr->ubo_block = index;
+    expr->type = Type::Void();
+    return expr;
+  }
   if (HasName(global_names_, name, &index)) {
     ExprPtr expr = MakeExpr(Expr::Kind::kVariable, line);
     expr->storage = Storage::kGlobal;

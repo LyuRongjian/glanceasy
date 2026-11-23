@@ -640,6 +640,24 @@ bool Pipeline::Prepare() {
     return false;
   }
   uniforms_ = program_->uniform_value(0);
+  for (size_t i = 0; i < program_->uniform_blocks().size(); ++i) {
+    const int binding_point = program_->uniform_blocks()[i].binding;
+    if (binding_point < 0 || binding_point >= kMaxUniformBufferBindings)
+      continue;
+    const IndexedBufferBinding& binding =
+        context_->state.uniform_buffers[binding_point];
+    if (binding.buffer == 0)
+      continue;
+    const Buffer* buffer = context_->buffers.Get(binding.buffer);
+    if (!buffer || binding.offset >= buffer->data.size())
+      continue;
+    size_t available = buffer->data.size() - binding.offset;
+    if (binding.size < available)
+      available = binding.size;
+    program_->UploadUniformBlock(static_cast<int>(i),
+                                 buffer->data.data() + binding.offset,
+                                 available);
+  }
   varying_floats_ = program_->VaryingFloats();
   stride_ = kFloatPerPosition + varying_floats_;
   cache_.assign(static_cast<size_t>(kVertexCacheSize) * stride_, 0.0f);

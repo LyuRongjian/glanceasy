@@ -602,16 +602,141 @@ void glGetActiveUniform(GLuint program,
   }
 }
 
+void glGetActiveUniformBlockName(GLuint program,
+                                 GLuint block_index,
+                                 GLsizei buffer_size,
+                                 GLsizei* length,
+                                 GLchar* name) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object || !object->program || !object->linked) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const auto& blocks = object->program->uniform_blocks();
+  if (block_index >= blocks.size()) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const std::string& block_name = blocks[block_index].name;
+  if (length)
+    *length = static_cast<GLsizei>(block_name.size());
+  if (name && buffer_size > 0) {
+    const int copy = std::min(static_cast<int>(block_name.size()),
+                              static_cast<int>(buffer_size) - 1);
+    memcpy(name, block_name.c_str(), static_cast<size_t>(copy));
+    name[copy] = '\0';
+  }
+}
+
+void glGetActiveUniformBlockiv(GLuint program,
+                               GLuint block_index,
+                               GLenum pname,
+                               GLint* params) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object || !object->program || !object->linked) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const auto& blocks = object->program->uniform_blocks();
+  if (block_index >= blocks.size()) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!params)
+    return;
+  const zgl::glsl::UniformBlockInfo& block = blocks[block_index];
+  switch (pname) {
+    case GL_UNIFORM_BLOCK_BINDING:
+      params[0] = block.binding;
+      return;
+    case GL_UNIFORM_BLOCK_DATA_SIZE:
+      params[0] = block.size;
+      return;
+    case GL_UNIFORM_BLOCK_NAME_LENGTH:
+      params[0] = static_cast<GLint>(block.name.size() + 1);
+      return;
+    case GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS:
+      params[0] = static_cast<GLint>(block.members.size());
+      return;
+    case GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES:
+      for (size_t i = 0; i < block.members.size(); ++i)
+        params[i] = block.members[i].uniform_index;
+      return;
+    case GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER:
+      params[0] = block.vertex_stage ? GL_TRUE : GL_FALSE;
+      return;
+    case GL_UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER:
+      params[0] = block.fragment_stage ? GL_TRUE : GL_FALSE;
+      return;
+    default:
+      context->SetError(GL_INVALID_ENUM);
+      return;
+  }
+}
+
 void glGetActiveUniformsiv(GLuint program,
                            GLsizei count,
                            const GLuint* indices,
                            GLenum pname,
                            GLint* params) {
-  (void)program;
-  (void)count;
-  (void)indices;
-  (void)pname;
-  (void)params;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object || !object->program || !object->linked) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (count < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!indices || !params)
+    return;
+  const auto& uniforms = object->program->uniforms();
+  switch (pname) {
+    case GL_UNIFORM_BLOCK_INDEX:
+    case GL_UNIFORM_OFFSET:
+    case GL_UNIFORM_ARRAY_STRIDE:
+    case GL_UNIFORM_MATRIX_STRIDE:
+    case GL_UNIFORM_IS_ROW_MAJOR:
+      break;
+    default:
+      context->SetError(GL_INVALID_ENUM);
+      return;
+  }
+  for (GLsizei i = 0; i < count; ++i) {
+    if (indices[i] >= uniforms.size()) {
+      context->SetError(GL_INVALID_VALUE);
+      return;
+    }
+    const zgl::glsl::UniformInfo& uniform = uniforms[indices[i]];
+    switch (pname) {
+      case GL_UNIFORM_BLOCK_INDEX:
+        params[i] = uniform.block_index;
+        break;
+      case GL_UNIFORM_OFFSET:
+        params[i] = uniform.block_index >= 0 ? uniform.block_offset : -1;
+        break;
+      case GL_UNIFORM_ARRAY_STRIDE:
+        params[i] = 0;
+        break;
+      case GL_UNIFORM_MATRIX_STRIDE:
+        params[i] = uniform.type.is_matrix() ? 16 : 0;
+        break;
+      case GL_UNIFORM_IS_ROW_MAJOR:
+        params[i] = 0;
+        break;
+      default:
+        break;
+    }
+  }
 }
 
 // ---- Uniform values -------------------------------------------------------
@@ -926,26 +1051,72 @@ void glGetUniformuiv(GLuint program, GLint location, GLuint* params) {
 void glUniformBlockBinding(GLuint program,
                            GLuint block_index,
                            GLuint block_binding) {
-  (void)program;
-  (void)block_index;
-  (void)block_binding;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object || !object->program || !object->linked) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (block_binding >=
+      static_cast<GLuint>(zgl::kMaxUniformBufferBindings)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!object->program->SetUniformBlockBinding(
+          static_cast<int>(block_index), static_cast<int>(block_binding))) {
+    context->SetError(GL_INVALID_VALUE);
+  }
 }
 
 GLuint glGetUniformBlockIndex(GLuint program, const GLchar* name) {
-  (void)program;
-  (void)name;
-  return GL_INVALID_INDEX;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return GL_INVALID_INDEX;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object || !object->program || !object->linked) {
+    context->SetError(GL_INVALID_OPERATION);
+    return GL_INVALID_INDEX;
+  }
+  if (!name) {
+    context->SetError(GL_INVALID_VALUE);
+    return GL_INVALID_INDEX;
+  }
+  const int index = object->program->UniformBlockIndex(name);
+  return index < 0 ? GL_INVALID_INDEX : static_cast<GLuint>(index);
 }
 
 void glGetUniformIndices(GLuint program,
                          GLsizei count,
                          const GLchar* const* names,
                          GLuint* indices) {
-  (void)program;
-  (void)count;
-  (void)names;
-  for (GLsizei i = 0; i < count && indices; ++i)
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object || !object->program || !object->linked) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (count < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!names || !indices)
+    return;
+  const auto& uniforms = object->program->uniforms();
+  for (GLsizei i = 0; i < count; ++i) {
     indices[i] = GL_INVALID_INDEX;
+    if (!names[i])
+      continue;
+    for (size_t u = 0; u < uniforms.size(); ++u) {
+      if (uniforms[u].name == names[i]) {
+        indices[i] = static_cast<GLuint>(u);
+        break;
+      }
+    }
+  }
 }
 
 }  // extern "C"

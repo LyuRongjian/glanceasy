@@ -5,6 +5,7 @@
 #ifndef ZGL_SRC_ZGL_CONTEXT_H_
 #define ZGL_SRC_ZGL_CONTEXT_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <memory>
@@ -319,6 +320,12 @@ struct PixelStoreState {
   int unpack_skip_pixels = 0;
 };
 
+struct IndexedBufferBinding {
+  GLuint buffer = 0;
+  size_t offset = 0;
+  size_t size = 0;
+};
+
 struct State {
   Rect viewport;
   float depth_range[2] = {0.0f, 1.0f};
@@ -365,6 +372,8 @@ struct State {
   GLuint element_buffer = 0;
   GLuint copy_read_buffer = 0;
   GLuint copy_write_buffer = 0;
+  GLuint uniform_buffer = 0;
+  IndexedBufferBinding uniform_buffers[kMaxUniformBufferBindings];
   GLuint vertex_array = 0;
   GLuint program = 0;
   GLuint framebuffer = 0;

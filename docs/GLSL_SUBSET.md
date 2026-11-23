@@ -31,9 +31,34 @@ and avoids a second register file.
   variables with `layout(location = N)`; locations 0 to 3.
 - `uniform` declarations of scalar, vector, matrix and sampler types.
 
-Arrays, structures, interface blocks and uniform blocks are not part of the
-grammar. `layout(location = ...)` is accepted on vertex inputs and fragment
-outputs.
+Arrays, structures and interface blocks are not part of the grammar.
+`layout(location = ...)` is accepted on vertex inputs and fragment outputs.
+
+## Uniform blocks
+
+A `layout(std140) uniform` block may contain scalar, vector and matrix members.
+Block members cannot be samplers, arrays or structures. Both spellings are
+accepted:
+
+```
+layout(std140) uniform Tint { vec4 color; };             // color is global
+layout(std140) uniform Tint { vec4 color; } tint;         // tint.color
+```
+
+Members are assigned std140 offsets: scalars are 4-byte aligned, `vec2` 8-byte,
+`vec3`, `vec4` and matrices 16-byte. A matrix occupies `columns * 16` bytes and
+each column starts at a 16-byte boundary. The block size is rounded up to 16
+bytes. `glGetActiveUniformBlockiv`, `glGetActiveUniformsiv` and
+`glGetActiveUniformBlockName` report the resulting layout. A block with the same
+name in both stages must have an identical layout or linking fails.
+
+The engine refreshes every block from the buffer bound to the block's binding
+point before each draw. `glUniformBlockBinding` selects the point and
+`glBindBufferBase` / `glBindBufferRange` supply the data. `glGetUniformLocation`
+returns -1 for block members; `glGetUniformBlockIndex` and
+`glGetUniformIndices` are the reflection entry points. Block buffers are copied
+into the program's uniform values, so the interpreter and the SLJIT tier see
+the same data.
 
 ## Statements
 
@@ -97,7 +122,7 @@ Matrices are received in column-major order unless the `transpose` flag is set.
 - Arrays, structures, and `const` arrays.
 - `out` and `inout` parameters.
 - Function overloading and recursion.
-- Uniform blocks and shader storage blocks.
+- Arrays or structures inside uniform blocks, and shader storage blocks.
 - Implicit LOD selection: `texture2D` samples level zero, `textureLod` selects a
   level explicitly. `dFdx`, `dFdy` and `fwidth` return zero.
 - Integer bit operations, packing functions and precision qualifiers are

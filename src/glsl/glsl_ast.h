@@ -172,8 +172,24 @@ struct Variable {
   Storage storage = Storage::kLocal;
   int index = -1;           // Slot / attribute location / uniform index.
   int varying_offset = -1;  // Float offset inside the varying array.
+  int ubo_block = -1;       // Uniform block owning this uniform, or -1.
+  int ubo_offset = 0;       // Byte offset inside the std140 block.
   BuiltinId builtin = BuiltinId::kNone;
   bool read_only = false;
+};
+
+struct UniformBlockMember {
+  std::string name;
+  Type type;
+  int offset = 0;         // Byte offset inside the std140 block.
+  int uniform_index = -1;  // Index into ShaderAst::uniforms.
+};
+
+struct UniformBlock {
+  std::string name;
+  std::string instance_name;  // Empty for unnamed blocks.
+  int size = 0;               // std140 block size, rounded up to 16.
+  std::vector<UniformBlockMember> members;
 };
 
 struct Expr;
@@ -203,6 +219,9 @@ struct Expr {
   Storage storage = Storage::kLocal;
   int index = -1;
   BuiltinId builtin = BuiltinId::kNone;
+  // Set when this variable is a uniform block instance; field access resolves
+  // the member to its uniform slot.
+  int ubo_block = -1;
 
   // kField: |text| is the swizzle or field name.
   // kCall: |text| is the function name; |builtin_func| is kNone for user
@@ -281,6 +300,7 @@ struct ShaderAst {
 
   std::vector<Variable> globals;  // Storage::kGlobal and built-ins.
   std::vector<Variable> uniforms;
+  std::vector<UniformBlock> uniform_blocks;
   std::vector<Variable> attributes;
   std::vector<Variable> varyings;  // Outputs for VS, inputs for FS.
   std::vector<FragmentOut> outputs;  // Fragment shader colour outputs.

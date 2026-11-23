@@ -77,22 +77,24 @@ TEST(IndexedBufferBindingsAndWideQueries) {
   glGenBuffers(1, &buffer);
   glBindBuffer(GL_ARRAY_BUFFER, buffer);
   glBindBufferBase(GL_ARRAY_BUFFER, 0, buffer);
-  EXPECT_EQ(glGetError(), GL_NO_ERROR);
+  EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, buffer);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glBindBufferBase(GL_UNIFORM_BUFFER, 0, buffer);
-  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, buffer);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
 
   glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, buffer, 0, 16);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  const unsigned char bytes[16] = {};
+  glBindBuffer(GL_UNIFORM_BUFFER, buffer);
+  glBufferData(GL_UNIFORM_BUFFER, 16, bytes, GL_STATIC_DRAW);
   glBindBufferRange(GL_UNIFORM_BUFFER, 0, buffer, 0, 16);
-  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, buffer, 0, 16);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
 
-  const unsigned char bytes[16] = {};
   glBufferData(GL_ARRAY_BUFFER, 16, bytes, GL_STATIC_DRAW);
   GLint64 size64 = 0;
   glGetBufferParameteri64v(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &size64);
@@ -103,13 +105,15 @@ TEST(IndexedBufferBindingsAndWideQueries) {
   EXPECT_EQ(integer64, 4096);
   glGetInteger64v(GL_MAX_TEXTURE_SIZE, nullptr);
   GLint indexed = 0;
-  glGetIntegeri_v(GL_MAX_VERTEX_ATTRIBS, 0, &indexed);
+  glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, 0, &indexed);
+  EXPECT_EQ(indexed, buffer);
+  glGetIntegeri_v(GL_UNIFORM_BUFFER_SIZE, 0, &indexed);
   EXPECT_EQ(indexed, 16);
-  glGetIntegeri_v(GL_MAX_VERTEX_ATTRIBS, 0, nullptr);
+  glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, 0, nullptr);
   GLint64 indexed64 = 0;
-  glGetInteger64i_v(GL_MAX_VERTEX_ATTRIBS, 0, &indexed64);
-  EXPECT_EQ(indexed64, 16);
-  glGetInteger64i_v(GL_MAX_VERTEX_ATTRIBS, 0, nullptr);
+  glGetInteger64i_v(GL_UNIFORM_BUFFER_BINDING, 0, &indexed64);
+  EXPECT_EQ(indexed64, buffer);
+  glGetInteger64i_v(GL_UNIFORM_BUFFER_BINDING, 0, nullptr);
   GLboolean boolean_value = GL_FALSE;
   glGetBooleani_v(GL_BLEND, 0, &boolean_value);
   EXPECT_EQ(boolean_value, GL_FALSE);
@@ -160,14 +164,15 @@ TEST(UniformBlockAndProgramInterfaceQueriesReturnEmpty) {
   GLsizei length = 8;
   GLchar name[8] = "garbage";
   glGetActiveUniformBlockName(0, 0, 8, &length, name);
-  EXPECT_EQ(length, 0);
-  EXPECT_EQ(name[0], '\0');
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glGetActiveUniformBlockName(0, 0, 0, nullptr, nullptr);
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
 
   GLint value = 8;
   glGetActiveUniformBlockiv(0, 0, GL_UNIFORM_BLOCK_DATA_SIZE, &value);
-  EXPECT_EQ(value, 0);
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glGetActiveUniformBlockiv(0, 0, GL_UNIFORM_BLOCK_DATA_SIZE, nullptr);
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
 
   value = 8;
   glGetActiveAtomicCounterBufferiv(0, 0, GL_ATOMIC_COUNTER_BUFFER_SIZE, &value);

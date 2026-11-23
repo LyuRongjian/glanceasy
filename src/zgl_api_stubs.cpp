@@ -102,12 +102,33 @@ void glDrawTransformFeedback(GLenum mode, GLuint id) {
 // ---- Buffer binding points and 64-bit queries -----------------------------
 
 void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
-  (void)index;
-  (void)buffer;
-  if (target == GL_TRANSFORM_FEEDBACK_BUFFER || target == GL_UNIFORM_BUFFER ||
-      target == GL_SHADER_STORAGE_BUFFER) {
-    zgl::Reject();
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (target != GL_UNIFORM_BUFFER) {
+    if (target == GL_TRANSFORM_FEEDBACK_BUFFER ||
+        target == GL_SHADER_STORAGE_BUFFER) {
+      zgl::Reject();
+    } else {
+      context->SetError(GL_INVALID_ENUM);
+    }
+    return;
   }
+  if (index >= static_cast<GLuint>(zgl::kMaxUniformBufferBindings)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  zgl::IndexedBufferBinding binding;
+  if (buffer != 0) {
+    zgl::Buffer* object = context->buffers.Get(buffer);
+    if (!object) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    binding.buffer = buffer;
+    binding.size = object->data.size();
+  }
+  context->state.uniform_buffers[index] = binding;
 }
 
 void glBindBufferRange(GLenum target,
@@ -115,14 +136,44 @@ void glBindBufferRange(GLenum target,
                        GLuint buffer,
                        GLintptr offset,
                        GLsizeiptr size) {
-  (void)index;
-  (void)buffer;
-  (void)offset;
-  (void)size;
-  if (target == GL_TRANSFORM_FEEDBACK_BUFFER || target == GL_UNIFORM_BUFFER ||
-      target == GL_SHADER_STORAGE_BUFFER) {
-    zgl::Reject();
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (target != GL_UNIFORM_BUFFER) {
+    if (target == GL_TRANSFORM_FEEDBACK_BUFFER ||
+        target == GL_SHADER_STORAGE_BUFFER) {
+      zgl::Reject();
+    } else {
+      context->SetError(GL_INVALID_ENUM);
+    }
+    return;
   }
+  if (index >= static_cast<GLuint>(zgl::kMaxUniformBufferBindings)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (offset < 0 || size < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  zgl::IndexedBufferBinding binding;
+  if (buffer != 0) {
+    zgl::Buffer* object = context->buffers.Get(buffer);
+    if (!object) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    const size_t begin = static_cast<size_t>(offset);
+    const size_t length = static_cast<size_t>(size);
+    if (length == 0 || begin + length > object->data.size()) {
+      context->SetError(GL_INVALID_VALUE);
+      return;
+    }
+    binding.buffer = buffer;
+    binding.offset = begin;
+    binding.size = length;
+  }
+  context->state.uniform_buffers[index] = binding;
 }
 
 void glGetBufferParameteri64v(GLenum target, GLenum pname, GLint64* params) {
@@ -140,17 +191,36 @@ void glGetInteger64v(GLenum pname, GLint64* data) {
 }
 
 void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
-  (void)index;
-  GLint value = 0;
-  glGetIntegerv(pname, &value);
-  if (data)
-    data[0] = value;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context || !data)
+    return;
+  switch (pname) {
+    case GL_UNIFORM_BUFFER_BINDING:
+    case GL_UNIFORM_BUFFER_START:
+    case GL_UNIFORM_BUFFER_SIZE:
+      if (index >= static_cast<GLuint>(zgl::kMaxUniformBufferBindings)) {
+        context->SetError(GL_INVALID_VALUE);
+        return;
+      }
+      if (pname == GL_UNIFORM_BUFFER_BINDING) {
+        data[0] =
+            static_cast<GLint>(context->state.uniform_buffers[index].buffer);
+      } else if (pname == GL_UNIFORM_BUFFER_START) {
+        data[0] =
+            static_cast<GLint>(context->state.uniform_buffers[index].offset);
+      } else {
+        data[0] = static_cast<GLint>(context->state.uniform_buffers[index].size);
+      }
+      return;
+    default:
+      context->SetError(GL_INVALID_ENUM);
+      return;
+  }
 }
 
 void glGetInteger64i_v(GLenum pname, GLuint index, GLint64* data) {
-  (void)index;
   GLint value = 0;
-  glGetIntegerv(pname, &value);
+  glGetIntegeri_v(pname, index, &value);
   if (data)
     data[0] = value;
 }
@@ -255,30 +325,6 @@ void glShaderStorageBlockBinding(GLuint program,
 }
 
 // ---- Uniform blocks -------------------------------------------------------
-
-void glGetActiveUniformBlockName(GLuint program,
-                                 GLuint block_index,
-                                 GLsizei buffer_size,
-                                 GLsizei* length,
-                                 GLchar* name) {
-  (void)program;
-  (void)block_index;
-  if (length)
-    *length = 0;
-  if (name && buffer_size > 0)
-    name[0] = '\0';
-}
-
-void glGetActiveUniformBlockiv(GLuint program,
-                               GLuint block_index,
-                               GLenum pname,
-                               GLint* params) {
-  (void)program;
-  (void)block_index;
-  (void)pname;
-  if (params)
-    params[0] = 0;
-}
 
 void glGetActiveAtomicCounterBufferiv(GLuint program,
                                       GLuint buffer_index,

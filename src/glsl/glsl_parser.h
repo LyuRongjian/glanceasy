@@ -38,6 +38,7 @@ class Parser {
     bool is_out = false;
     bool is_inout = false;
     bool is_invariant = false;
+    bool is_std140 = false;
     int location = -1;
   };
 
@@ -55,6 +56,7 @@ class Parser {
   bool ParseQualifiers(Qualifiers* qualifiers);
   bool ParseTypeSpec(Type* type);
   bool ParseGlobalDeclaration();
+  bool ParseUniformBlock(const Qualifiers& qualifiers, int line);
   bool ParseFunction(const std::string& name,
                      const Type& return_type,
                      const Qualifiers& qualifiers,
@@ -124,6 +126,8 @@ class Parser {
   std::vector<std::pair<std::string, int>> attribute_names_;
   std::vector<std::pair<std::string, int>> varying_names_;
   std::vector<std::pair<std::string, int>> function_names_;
+  std::vector<std::pair<std::string, int>> block_instances_;
+  std::vector<std::string> block_names_;
   int next_attribute_location_ = 0;
 };
 
