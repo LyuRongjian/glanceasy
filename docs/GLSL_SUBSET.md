@@ -52,6 +52,12 @@ Angle and exponential: `radians`, `degrees`, `sin`, `cos`, `tan`, `asin`,
 `acos`, `atan` (one and two arguments), `pow`, `exp`, `log`, `exp2`, `log2`,
 `sqrt`, `inversesqrt`.
 
+These are evaluated with the approximations in `src/zgl_fastmath.*` rather than
+libm. The polynomial fits keep the error well under one 8-bit output LSB for
+the ranges exercised by the test and visual suites, and `sin` / `cos` process
+four components at a time with NEON on ARMv7. The exact integer, depth,
+stencil and blend paths never call the approximation layer.
+
 Common: `abs`, `sign`, `floor`, `ceil`, `fract`, `mod`, `min`, `max`, `clamp`,
 `mix`, `step`, `smoothstep`.
 
@@ -90,7 +96,6 @@ Matrices are received in column-major order unless the `transpose` flag is set.
 - `out` and `inout` parameters.
 - Function overloading and recursion.
 - Uniform blocks and shader storage blocks.
-- Multiple fragment outputs beyond the first.
 - Implicit LOD selection: `texture2D` samples level zero, `textureLod` selects a
   level explicitly. `dFdx`, `dFdy` and `fwidth` return zero.
 - Integer bit operations, packing functions and precision qualifiers are

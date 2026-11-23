@@ -157,6 +157,24 @@ TEST(TrigonometricAndExponentialBuiltins) {
   zglDestroyContext();
 }
 
+TEST(VectorTrigonometricBuiltinsEvaluateAllLanes) {
+  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  const char* fragment =
+      "#version 100\n"
+      "precision mediump float;\n"
+      "void main() {\n"
+      "  vec4 s = sin(vec4(0.0, 0.5235988, 1.0471976, 1.5707963));\n"
+      "  vec3 c = cos(vec3(0.0, 1.0471976, 1.5707963));\n"
+      "  gl_FragColor = vec4(s.x, c.x, s.y, 1.0);\n"
+      "}\n";
+  const GLuint program = BuildProgram(fragment);
+  unsigned char rgba[4] = {};
+  RenderAndRead(program, rgba);
+  ExpectPixel(rgba, 0.0f, 1.0f, 0.5f);
+  glDeleteProgram(program);
+  zglDestroyContext();
+}
+
 TEST(CommonBuiltinsHandleEdgeCases) {
   EXPECT_EQ(zglCreateContext(32, 32), 1);
   const char* fragment =

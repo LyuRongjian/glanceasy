@@ -13,11 +13,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 #include "src/glsl/glsl_builtins.h"
 #include "src/glsl/glsl_jit.h"
 #include "src/glsl/glsl_program.h"
+#include "src/zgl_fastmath.h"
 
 namespace zgl {
 namespace glsl {
@@ -42,6 +44,33 @@ Value MapScalars(const Value& a, const Type& type, F fn) {
   const int count = type.components();
   for (int i = 0; i < count; ++i)
     out.data[i] = fn(ComponentAt(a, i));
+  return out;
+}
+
+// Vector-width fast-math map.  Four lanes are evaluated at a time where the
+// target provides NEON; the scalar tail and the two-component case stay on the
+// scalar approximation.
+Value MapFastScalars(const Value& a,
+                     const Type& type,
+                     float (*scalar)(float),
+                     void (*vector)(const float*, float*)) {
+  Value out(type);
+  const int count = type.components();
+  if (vector && count >= 3) {
+    for (int i = 0; i < count; i += 4) {
+      const int lanes = std::min(4, count - i);
+      float in[4] = {};
+      for (int lane = 0; lane < lanes; ++lane)
+        in[lane] = ComponentAt(a, i + lane);
+      float result[4];
+      vector(in, result);
+      for (int lane = 0; lane < lanes; ++lane)
+        out.data[i + lane] = result[lane];
+    }
+    return out;
+  }
+  for (int i = 0; i < count; ++i)
+    out.data[i] = scalar(ComponentAt(a, i));
   return out;
 }
 
@@ -79,7 +108,7 @@ float DotProduct(const Value& a, const Value& b) {
 }
 
 float LengthOf(const Value& v) {
-  return std::sqrt(DotProduct(v, v));
+  return fastmath::Sqrt(DotProduct(v, v));
 }
 
 // Column-major helpers for the matrix built-ins.
@@ -1103,36 +1132,37 @@ Value Evaluator::EvaluateBuiltinMath(const BuiltinFunc function,
     case BuiltinFunc::kDegrees:
       return MapScalars(a, type, [](float v) { return v * (180.0f / kPi); });
     case BuiltinFunc::kSin:
-      return MapScalars(a, type, [](float v) { return std::sin(v); });
+      return MapFastScalars(a, type, fastmath::Sin, fastmath::Sin4);
     case BuiltinFunc::kCos:
-      return MapScalars(a, type, [](float v) { return std::cos(v); });
+      return MapFastScalars(a, type, fastmath::Cos, fastmath::Cos4);
     case BuiltinFunc::kTan:
-      return MapScalars(a, type, [](float v) { return std::tan(v); });
+      return MapScalars(a, type, [](float v) { return fastmath::Tan(v); });
     case BuiltinFunc::kAsin:
-      return MapScalars(a, type, [](float v) { return std::asin(v); });
+      return MapScalars(a, type, [](float v) { return fastmath::Asin(v); });
     case BuiltinFunc::kAcos:
-      return MapScalars(a, type, [](float v) { return std::acos(v); });
+      return MapScalars(a, type, [](float v) { return fastmath::Acos(v); });
     case BuiltinFunc::kAtan:
       if (args.size() == 2) {
         return MapPairs(args[0], args[1], type,
-                        [](float y, float x) { return std::atan2(y, x); });
+                        [](float y, float x) { return fastmath::Atan2(y, x); });
       }
-      return MapScalars(a, type, [](float v) { return std::atan(v); });
+      return MapScalars(a, type, [](float v) { return fastmath::Atan(v); });
     case BuiltinFunc::kPow:
       return MapPairs(args[0], args[1], type,
-                      [](float x, float y) { return std::pow(x, y); });
+                      [](float x, float y) { return fastmath::Pow(x, y); });
     case BuiltinFunc::kExp:
-      return MapScalars(a, type, [](float v) { return std::exp(v); });
+      return MapScalars(a, type, [](float v) { return fastmath::Exp(v); });
     case BuiltinFunc::kLog:
-      return MapScalars(a, type, [](float v) { return std::log(v); });
+      return MapScalars(a, type, [](float v) { return fastmath::Log(v); });
     case BuiltinFunc::kExp2:
-      return MapScalars(a, type, [](float v) { return std::exp2(v); });
+      return MapScalars(a, type, [](float v) { return fastmath::Exp2(v); });
     case BuiltinFunc::kLog2:
-      return MapScalars(a, type, [](float v) { return std::log2(v); });
+      return MapScalars(a, type, [](float v) { return fastmath::Log2(v); });
     case BuiltinFunc::kSqrt:
-      return MapScalars(a, type, [](float v) { return std::sqrt(v); });
+      return MapScalars(a, type, [](float v) { return fastmath::Sqrt(v); });
     case BuiltinFunc::kInverseSqrt:
-      return MapScalars(a, type, [](float v) { return 1.0f / std::sqrt(v); });
+      return MapScalars(a, type,
+                        [](float v) { return fastmath::InverseSqrt(v); });
     case BuiltinFunc::kAbs:
       return MapScalars(a, type, [](float v) { return std::fabs(v); });
     case BuiltinFunc::kSign:
@@ -1217,7 +1247,15 @@ Value Evaluator::EvaluateBuiltinMath(const BuiltinFunc function,
     }
     case BuiltinFunc::kNormalize: {
       Value out(type);
-      const float length = LengthOf(a);
+      const float squared = DotProduct(a, a);
+      if (squared > 0.0f &&
+          squared < std::numeric_limits<float>::max()) {
+        const float inverse = fastmath::InverseSqrt(squared);
+        for (int i = 0; i < type.components(); ++i)
+          out.data[i] = a.data[i] * inverse;
+        return out;
+      }
+      const float length = fastmath::Sqrt(squared);
       if (length > 0.0f) {
         for (int i = 0; i < type.components(); ++i)
           out.data[i] = a.data[i] / length;
@@ -1247,7 +1285,7 @@ Value Evaluator::EvaluateBuiltinMath(const BuiltinFunc function,
       const float k = 1.0f - eta * eta * (1.0f - dot * dot);
       if (k < 0.0f)
         return out;
-      const float scale = eta * dot + std::sqrt(k);
+      const float scale = eta * dot + fastmath::Sqrt(k);
       for (int i = 0; i < type.components(); ++i)
         out.data[i] =
             eta * ComponentAt(args[0], i) - scale * ComponentAt(args[1], i);
