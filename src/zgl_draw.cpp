@@ -1210,7 +1210,8 @@ void Pipeline::Shade(const Fragment& fragment) {
   const bool has_depth = target_.depth != nullptr;
   if (state.depth.test && has_depth && !writes_depth) {
     const float stored = Unorm16ToFloat(target_.depth[pixel]);
-    if (!DepthTestPasses(state.depth.func, interpolated_depth, stored)) {
+    const float incoming = Unorm16ToFloat(ToDepth16(interpolated_depth));
+    if (!DepthTestPasses(state.depth.func, incoming, stored)) {
       if (state.stencil.test && has_stencil)
         ApplyStencilOp(face->op_depth_fail, pixel, reference);
       return;
@@ -1242,7 +1243,8 @@ void Pipeline::Shade(const Fragment& fragment) {
   if (output.writes_depth) {
     depth = Clamp01(output.depth);
     if (state.depth.test && has_depth &&
-        !DepthTestPasses(state.depth.func, depth,
+        !DepthTestPasses(state.depth.func,
+                         Unorm16ToFloat(ToDepth16(depth)),
                          Unorm16ToFloat(target_.depth[pixel]))) {
       if (state.stencil.test && has_stencil)
         ApplyStencilOp(face->op_depth_fail, pixel, reference);
