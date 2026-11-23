@@ -33,6 +33,11 @@ the actual output of the ARM32 build executed under
 `qemu-arm-static -cpu cortex-a7`; every one of them is bit-identical to the
 host build, which is the regression guarantee the suite provides.
 
+These fifteen cases are the complete visual set, one screenshot per case. The
+API-level suite has 148 cases; many of them exercise state transitions, invalid
+enums and error paths that never touch a framebuffer, so those are asserted in
+code instead of captured as images.
+
 | Case | Screenshot | What it exercises |
 | --- | --- | --- |
 | `01_gradient` | <img src="docs/visual/01_gradient.png" width="320"> | Full-screen triangle, interpolated vertex colours plus a fragment-shader vignette |
