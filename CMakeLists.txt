@@ -15,6 +15,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(ZGL_COVERAGE "Instrument the library for gcov coverage" OFF)
 option(ZGL_BUILD_TESTS "Build the unit test binary" ON)
+option(ZGL_BUILD_EXAMPLES "Build the example programs" ON)
 
 set(ZGL_SOURCES
     src/zgl_context.cpp
@@ -62,7 +63,7 @@ if(ZGL_BUILD_TESTS)
       tests/test_state.cpp
       tests/test_program.cpp
       tests/test_glsl.cpp
-        tests/test_objects.cpp
+      tests/test_objects.cpp
       tests/test_texture2.cpp
       tests/test_types.cpp
       tests/test_uniform.cpp
@@ -80,3 +81,8 @@ if(ZGL_BUILD_TESTS)
   endif()
 endif()
 
+if(ZGL_BUILD_EXAMPLES)
+  add_executable(zgl_cube_demo examples/render_cube.cpp)
+  target_link_libraries(zgl_cube_demo PRIVATE zcat_gles)
+  target_compile_options(zgl_cube_demo PRIVATE -Wall -Wextra)
+endif()

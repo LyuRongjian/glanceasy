@@ -22,4 +22,4 @@ if [[ ! -x "$qemu" ]]; then
 fi
 
 python3 "$repo_root/tools/fix_tls_align.py" "$binary"
-exec "$qemu" -cpu cortex-a15 "$binary" "$@"
+exec "$qemu" -cpu cortex-a7 "$binary" "$@"

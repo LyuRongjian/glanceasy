@@ -13,6 +13,12 @@ the embedder can blit or upload wherever it likes.
 The code and comments follow the Chromium C++ style, and all comments are in
 English.
 
+The reference target is the Rockchip RV1106, a single-core Cortex-A7 with NEON.
+The screenshot below was rendered by the ARM32 build running under
+`qemu-arm-static -cpu cortex-a7`:
+
+![ZCat-GLES rendering a colour cube](docs/screenshot.png)
+
 ## Status
 
 | Area | State |
@@ -56,8 +62,9 @@ ANDROID_NDK_ROOT=$HOME/android-ndk-r27c tools/build_android.sh
 ```
 
 The result is a statically linked `ELF 32-bit ARM EABI5` executable. The script
-uses `-mfpu=neon -mfloat-abi=softfp`, keeps the ARMv7-A baseline, and does not
-rely on any x86 SSE code.
+uses `-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=softfp`, which matches the
+RV1106 core while staying valid on the wider ARMv7-A family. It does not rely on
+any x86 SSE code.
 
 ## Running the ARM32 binary under QEMU
 
@@ -73,6 +80,21 @@ tools/run_qemu_arm.sh build-arm/zgl_unittests
 `QEMU_ARM_STATIC` selects the emulator (default `~/qemu-local/usr/bin/qemu-arm-static`).
 A system-mode QEMU installation can also boot a full ARM image, but the
 user-mode emulator is what the test suite is verified against.
+
+## Rendering the demo
+
+`examples/render_cube.cpp` draws a perspective-projected, depth-tested cube into
+an offscreen buffer and writes a binary PPM file. It uses only the public API:
+
+```sh
+cmake --build build --target zgl_cube_demo
+./build/zgl_cube_demo cube.ppm 800 600
+tools/run_qemu_arm.sh build-arm/zgl_cube_demo cube.ppm 800 600
+```
+
+The second command is the one that produced `docs/screenshot.png`; it took about
+eight seconds under qemu-user on the development machine, which says nothing
+about native RV1106 performance.
 
 ## Testing and coverage
 
@@ -100,6 +122,7 @@ include/zgl/zgl.h              Public C API of the software renderer
 src/                           Context, rasteriser, texture pipeline, draw pipeline
 src/glsl/                      Lexer, parser and interpreter for the GLSL subset
 src/zgl_api_*.cpp              GLES entry points
+examples/                      Standalone rendering demo
 tests/                         Unit tests and the test harness
 tools/                         NDK build, QEMU runner, TLS patch, coverage
 docs/                          GLSL subset and porting notes
@@ -151,6 +174,11 @@ ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、�
 
 代码与注释遵循 Chromium C++ 风格，所有注释均为英文。
 
+参考目标芯片是 Rockchip RV1106（单核 Cortex-A7，带 NEON）。下图由 ARM32 构建
+在 `qemu-arm-static -cpu cortex-a7` 下实际渲染得到：
+
+![ZCat-GLES 渲染的彩色立方体](docs/screenshot.png)
+
 ## 状态
 
 | 范围 | 状态 |
@@ -180,7 +208,8 @@ ANDROID_NDK_ROOT=$HOME/android-ndk-r27c tools/build_android.sh
 
 脚本面向 `armeabi-v7a`，开启 NEON，使用静态 C++ 运行库，产物是
 `ELF 32-bit ARM EABI5` 静态可执行文件；编译参数为
-`-mfpu=neon -mfloat-abi=softfp`，保持 ARMv7-A 基线，不依赖任何 x86 SSE 代码。
+`-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=softfp`，与 RV1106 的 Cortex-A7
+核心匹配，同时仍适用于整个 ARMv7-A 系列，不依赖任何 x86 SSE 代码。
 
 ## 在 QEMU 下运行 ARM32 产物
 
@@ -193,6 +222,20 @@ tools/run_qemu_arm.sh build-arm/zgl_unittests
 
 `QEMU_ARM_STATIC` 可指定模拟器路径，默认
 `~/qemu-local/usr/bin/qemu-arm-static`。
+
+## 渲染示例
+
+`examples/render_cube.cpp` 使用公开 API 绘制一个带透视投影和深度测试的立方体，
+渲染到离屏缓冲后写出二进制 PPM 文件：
+
+```sh
+cmake --build build --target zgl_cube_demo
+./build/zgl_cube_demo cube.ppm 800 600
+tools/run_qemu_arm.sh build-arm/zgl_cube_demo cube.ppm 800 600
+```
+
+`docs/screenshot.png` 由第二条命令生成；在开发机上 qemu-user 耗时约 8 秒，这不
+代表 RV1106 实机性能。
 
 ## 测试与覆盖率
 
@@ -216,6 +259,7 @@ include/zgl/zgl.h              软件渲染器的公共 C API
 src/                           上下文、光栅化、纹理管线、绘制管线
 src/glsl/                      GLSL 子集的词法、语法与解释执行
 src/zgl_api_*.cpp              GLES 入口实现
+examples/                      独立渲染示例
 tests/                         单元测试与测试框架
 tools/                         NDK 构建、QEMU 运行、TLS 修补、覆盖率
 docs/                          GLSL 子集与移植说明

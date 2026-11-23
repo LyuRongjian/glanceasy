@@ -21,8 +21,9 @@ if [[ ! -d "$ndk" ]]; then
   exit 1
 fi
 
-# -mfpu=neon -mfloat-abi=softfp keeps the code float-ABI compatible with the
-# ARMv7-A baseline while still allowing NEON intrinsics in hot loops.
+# The RV1106 uses a single Cortex-A7 with NEON and VFPv4. Tuning for that core
+# keeps the generated code valid on the whole ARMv7-A family; softfp preserves
+# compatibility with the Android armeabi-v7a ABI.
 cmake -S "$repo_root" -B "$build_dir" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=armeabi-v7a \
@@ -30,8 +31,8 @@ cmake -S "$repo_root" -B "$build_dir" -G Ninja \
   -DANDROID_STL=c++_static \
   -DCMAKE_BUILD_TYPE=Release \
   -DZGL_BUILD_TESTS=ON \
-  -DCMAKE_C_FLAGS="-mfpu=neon -mfloat-abi=softfp" \
-  -DCMAKE_CXX_FLAGS="-mfpu=neon -mfloat-abi=softfp" \
+  -DCMAKE_C_FLAGS="-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=softfp" \
+  -DCMAKE_CXX_FLAGS="-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=softfp" \
   -DCMAKE_EXE_LINKER_FLAGS="-static"
 
 cmake --build "$build_dir"
