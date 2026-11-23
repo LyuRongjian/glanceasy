@@ -10,9 +10,16 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+
+#include <algorithm>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "GLES3/gl32.h"
 #include "src/zgl_api_common.h"
+#include "src/zgl_draw.h"
 
 namespace zgl {
 namespace {
@@ -21,6 +28,17 @@ void Reject() {
   Context* context = ApiContext();
   if (context)
     context->SetError(GL_INVALID_OPERATION);
+}
+
+GLenum TypeToGlEnum(const glsl::Type& type) {
+  switch (type.base()) {
+    case glsl::BaseType::kInt:
+      return GL_INT;
+    case glsl::BaseType::kBool:
+      return GL_BOOL;
+    default:
+      return GL_FLOAT;
+  }
 }
 
 }  // namespace
@@ -34,45 +52,186 @@ void glGenTransformFeedbacks(GLsizei n, GLuint* ids) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !ids)
     return;
+  if (n < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   for (GLsizei i = 0; i < n; ++i)
-    ids[i] = 0;
+    ids[i] = context->transform_feedbacks.Create();
 }
 
 void glDeleteTransformFeedbacks(GLsizei n, const GLuint* ids) {
-  (void)n;
-  (void)ids;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context || !ids)
+    return;
+  if (n < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  for (GLsizei i = 0; i < n; ++i) {
+    if (ids[i] == 0)
+      continue;
+    zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+    if (current && current->active &&
+        context->state.transform_feedback == ids[i]) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    context->transform_feedbacks.Delete(ids[i]);
+    if (context->state.transform_feedback == ids[i])
+      context->state.transform_feedback = 0;
+  }
 }
 
 GLboolean glIsTransformFeedback(GLuint id) {
-  (void)id;
-  return GL_FALSE;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context || id == 0)
+    return GL_FALSE;
+  return context->transform_feedbacks.Get(id) ? GL_TRUE : GL_FALSE;
 }
 
 void glBindTransformFeedback(GLenum target, GLuint id) {
-  (void)target;
-  if (id != 0)
-    zgl::Reject();
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (target != GL_TRANSFORM_FEEDBACK) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (id != 0 && !context->transform_feedbacks.Get(id)) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  if (current && current->active) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  context->state.transform_feedback = id;
 }
 
 void glBeginTransformFeedback(GLenum primitive_mode) {
-  (void)primitive_mode;
-  zgl::Reject();
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  switch (primitive_mode) {
+    case GL_POINTS:
+    case GL_LINES:
+    case GL_TRIANGLES:
+      break;
+    default:
+      context->SetError(GL_INVALID_ENUM);
+      return;
+  }
+  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  if (!current || current->active) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  zgl::ProgramObject* object = context->programs.Get(context->state.program);
+  if (!object || !object->linked || !object->program ||
+      object->program->transform_feedback_varyings().empty()) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  for (const auto& varying :
+       object->program->transform_feedback_varyings()) {
+    const int buffer_index = varying.buffer_index;
+    if (buffer_index < 0 ||
+        buffer_index >= zgl::kMaxTransformFeedbackBuffers ||
+        current->buffers[buffer_index].buffer == 0) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+  }
+  current->active = true;
+  current->paused = false;
+  current->primitive_mode = primitive_mode;
+  current->vertex_count = 0;
+  for (int i = 0; i < zgl::kMaxTransformFeedbackBuffers; ++i)
+    current->cursors[i] = 0;
 }
 
-void glEndTransformFeedback(void) {}
+void glEndTransformFeedback(void) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  if (!current || !current->active)
+    return;
+  for (int name = 1; name <= context->queries.size(); ++name) {
+    const zgl::Query* query =
+        context->queries.Get(static_cast<GLuint>(name));
+    if (query && query->active &&
+        query->target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+  }
+  current->active = false;
+  current->paused = false;
+}
 
-void glPauseTransformFeedback(void) {}
+void glPauseTransformFeedback(void) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  if (!current || !current->active || current->paused) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  current->paused = true;
+}
 
-void glResumeTransformFeedback(void) {}
+void glResumeTransformFeedback(void) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  if (!current || !current->active || !current->paused) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  current->paused = false;
+}
 
 void glTransformFeedbackVaryings(GLuint program,
                                  GLsizei count,
                                  const GLchar* const* varyings,
                                  GLenum buffer_mode) {
-  (void)program;
-  (void)count;
-  (void)varyings;
-  (void)buffer_mode;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (count < 0 || (count > 0 && !varyings)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (buffer_mode != GL_INTERLEAVED_ATTRIBS &&
+      buffer_mode != GL_SEPARATE_ATTRIBS) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (buffer_mode == GL_SEPARATE_ATTRIBS &&
+      count > zgl::kMaxTransformFeedbackBuffers) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  std::vector<std::string> names;
+  for (GLsizei i = 0; i < count; ++i) {
+    if (!varyings[i]) {
+      context->SetError(GL_INVALID_VALUE);
+      return;
+    }
+    names.push_back(varyings[i]);
+  }
+  object->transform_feedback_varyings = std::move(names);
+  object->transform_feedback_mode = buffer_mode;
 }
 
 void glGetTransformFeedbackVarying(GLuint program,
@@ -82,21 +241,60 @@ void glGetTransformFeedbackVarying(GLuint program,
                                    GLsizei* size,
                                    GLenum* type,
                                    GLchar* name) {
-  (void)program;
-  (void)index;
-  (void)buffer_size;
-  (void)size;
-  (void)type;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object || !object->program || !object->linked) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const auto& varyings = object->program->transform_feedback_varyings();
+  if (index >= varyings.size()) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const zgl::glsl::TransformFeedbackVaryingInfo& varying = varyings[index];
   if (length)
-    *length = 0;
-  if (name && buffer_size > 0)
-    name[0] = '\0';
+    *length = static_cast<GLsizei>(varying.name.size());
+  if (size)
+    *size = 1;
+  if (type)
+    *type = zgl::TypeToGlEnum(varying.type);
+  if (name && buffer_size > 0) {
+    const int copy = std::min(static_cast<int>(varying.name.size()),
+                              static_cast<int>(buffer_size) - 1);
+    memcpy(name, varying.name.c_str(), static_cast<size_t>(copy));
+    name[copy] = '\0';
+  }
 }
 
 void glDrawTransformFeedback(GLenum mode, GLuint id) {
-  (void)mode;
-  (void)id;
-  zgl::Reject();
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::TransformFeedback* feedback = context->transform_feedbacks.Get(id);
+  if (!feedback) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (feedback->active) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const bool compatible =
+      (feedback->primitive_mode == GL_POINTS && mode == GL_POINTS) ||
+      (feedback->primitive_mode == GL_LINES &&
+       (mode == GL_LINES || mode == GL_LINE_STRIP ||
+        mode == GL_LINE_LOOP)) ||
+      (feedback->primitive_mode == GL_TRIANGLES &&
+       (mode == GL_TRIANGLES || mode == GL_TRIANGLE_STRIP ||
+        mode == GL_TRIANGLE_FAN));
+  if (!compatible || feedback->vertex_count <= 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  zgl::Draw(mode, 0, feedback->vertex_count, GL_NONE, nullptr, 1);
 }
 
 // ---- Buffer binding points and 64-bit queries -----------------------------
@@ -105,17 +303,26 @@ void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  if (target != GL_UNIFORM_BUFFER) {
-    if (target == GL_TRANSFORM_FEEDBACK_BUFFER ||
-        target == GL_SHADER_STORAGE_BUFFER) {
+  const bool transform_feedback = target == GL_TRANSFORM_FEEDBACK_BUFFER;
+  if (target != GL_UNIFORM_BUFFER && !transform_feedback) {
+    if (target == GL_SHADER_STORAGE_BUFFER) {
       zgl::Reject();
     } else {
       context->SetError(GL_INVALID_ENUM);
     }
     return;
   }
-  if (index >= static_cast<GLuint>(zgl::kMaxUniformBufferBindings)) {
+  const GLuint limit = static_cast<GLuint>(
+      transform_feedback ? zgl::kMaxTransformFeedbackBuffers
+                         : zgl::kMaxUniformBufferBindings);
+  if (index >= limit) {
     context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  zgl::TransformFeedback* feedback =
+      transform_feedback ? zgl::CurrentTransformFeedback(context) : nullptr;
+  if (transform_feedback && (!feedback || feedback->active)) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   zgl::IndexedBufferBinding binding;
@@ -128,7 +335,10 @@ void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
     binding.buffer = buffer;
     binding.size = object->data.size();
   }
-  context->state.uniform_buffers[index] = binding;
+  if (transform_feedback)
+    feedback->buffers[index] = binding;
+  else
+    context->state.uniform_buffers[index] = binding;
 }
 
 void glBindBufferRange(GLenum target,
@@ -139,21 +349,34 @@ void glBindBufferRange(GLenum target,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  if (target != GL_UNIFORM_BUFFER) {
-    if (target == GL_TRANSFORM_FEEDBACK_BUFFER ||
-        target == GL_SHADER_STORAGE_BUFFER) {
+  const bool transform_feedback = target == GL_TRANSFORM_FEEDBACK_BUFFER;
+  if (target != GL_UNIFORM_BUFFER && !transform_feedback) {
+    if (target == GL_SHADER_STORAGE_BUFFER) {
       zgl::Reject();
     } else {
       context->SetError(GL_INVALID_ENUM);
     }
     return;
   }
-  if (index >= static_cast<GLuint>(zgl::kMaxUniformBufferBindings)) {
+  const GLuint limit = static_cast<GLuint>(
+      transform_feedback ? zgl::kMaxTransformFeedbackBuffers
+                         : zgl::kMaxUniformBufferBindings);
+  if (index >= limit) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
   if (offset < 0 || size < 0) {
     context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (transform_feedback && ((offset % 4) != 0 || (size % 4) != 0)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  zgl::TransformFeedback* feedback =
+      transform_feedback ? zgl::CurrentTransformFeedback(context) : nullptr;
+  if (transform_feedback && (!feedback || feedback->active)) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   zgl::IndexedBufferBinding binding;
@@ -173,7 +396,10 @@ void glBindBufferRange(GLenum target,
     binding.offset = begin;
     binding.size = length;
   }
-  context->state.uniform_buffers[index] = binding;
+  if (transform_feedback)
+    feedback->buffers[index] = binding;
+  else
+    context->state.uniform_buffers[index] = binding;
 }
 
 void glGetBufferParameteri64v(GLenum target, GLenum pname, GLint64* params) {
@@ -209,9 +435,30 @@ void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
         data[0] =
             static_cast<GLint>(context->state.uniform_buffers[index].offset);
       } else {
-        data[0] = static_cast<GLint>(context->state.uniform_buffers[index].size);
+        data[0] =
+            static_cast<GLint>(context->state.uniform_buffers[index].size);
       }
       return;
+    case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
+    case GL_TRANSFORM_FEEDBACK_BUFFER_START:
+    case GL_TRANSFORM_FEEDBACK_BUFFER_SIZE: {
+      if (index >= static_cast<GLuint>(zgl::kMaxTransformFeedbackBuffers)) {
+        context->SetError(GL_INVALID_VALUE);
+        return;
+      }
+      zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+      if (!feedback) {
+        context->SetError(GL_INVALID_OPERATION);
+        return;
+      }
+      if (pname == GL_TRANSFORM_FEEDBACK_BUFFER_BINDING)
+        data[0] = static_cast<GLint>(feedback->buffers[index].buffer);
+      else if (pname == GL_TRANSFORM_FEEDBACK_BUFFER_START)
+        data[0] = static_cast<GLint>(feedback->buffers[index].offset);
+      else
+        data[0] = static_cast<GLint>(feedback->buffers[index].size);
+      return;
+    }
     default:
       context->SetError(GL_INVALID_ENUM);
       return;

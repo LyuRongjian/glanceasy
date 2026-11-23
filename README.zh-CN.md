@@ -28,7 +28,7 @@ ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、�
 与 SLJIT 后端的输出相对宿主机构建均在 1 个 8 位 LSB 以内，这正是该套件提供的
 回归保障。
 
-这十五个用例构成完整的可视化集合，每个用例一张截图。API 层测试共 169 个，
+这十五个用例构成完整的可视化集合，每个用例一张截图。API 层测试共 173 个，
 其中不少只验证状态迁移、非法枚举和错误路径，根本不会触碰帧缓冲，因此这些
 用例只用代码断言，不做截图。
 
@@ -64,13 +64,14 @@ cmake --build build --target zgl_visual_tests
 | 范围 | 状态 |
 | --- | --- |
 | GLES 2.0 API | 完整：缓冲、顶点数组、纹理、帧缓冲、着色器、状态、绘制 |
-| GLES 3.0 API | 核心子集：VAO、instancing、primitive restart、query、fence、sampler object、blit、invalidate、uniform block。仍缺 MSAA、transform feedback 与压缩/浮点纹理格式 |
+| GLES 3.0 API | 核心子集：VAO、instancing、primitive restart、query、fence、sampler object、blit、invalidate、uniform block、transform feedback。仍缺 MSAA 与压缩/浮点纹理格式 |
 | Uniform block | `layout(std140)` 块，支持标量、向量、矩阵成员与可选实例名，支持每程序 binding point 和带范围的 `GL_UNIFORM_BUFFER` 绑定；块内数组与结构体尚未支持 |
+| Transform feedback | 命名的 feedback 对象、interleaved / separate varyings、`GL_TRANSFORM_FEEDBACK_BUFFER` 的 base / range 绑定、begin/end/pause/resume、primitive query 与 `glDrawTransformFeedback`。varying 仅支持浮点标量或向量；尚不支持 instanced feedback 绘制 |
 | GLSL | 支持 ES 1.00 / 3.00 的解释执行与 SLJIT 分层编译；不支持的构造按 stage 回退，见 [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
 | 着色器数学 | 超越函数使用 minimax 近似；ARMv7 上 `sin` / `cos` 每次并行计算四个 lane（NEON）。整数、深度、模板与混合路径保持精确 |
 | 固定功能 SIMD | `dot` / `normalize`、颜色/深度/模板的 clear 填充、同尺寸 blit 的行拷贝在 ARMv7 上走四 lane NEON；部分颜色掩码仍走标量路径 |
 | 多重渲染目标 | 最多四个颜色输出，可用 `layout(location = N)`、`gl_FragData[0..3]` 或顺序 `out` 变量；`glDrawBuffers` 决定每个输出写到哪个附件 |
-| Transform feedback、compute、SSBO、image load/store | 纯桩；会影响输出的调用返回 `GL_INVALID_OPERATION` |
+| compute、SSBO、image load/store | 纯桩；会影响输出的调用返回 `GL_INVALID_OPERATION` |
 | 细分 / 几何着色器 | 不属于 GLES；入口为桩 |
 | 平台集成 | 有意不做；表面归集成方所有 |
 
@@ -162,7 +163,7 @@ tools/coverage.sh build-cov
 ```
 
 脚本会配置 gcov 构建、运行测试，并把逐文件行覆盖率写入
-`build-cov/coverage/summary.txt`。当前共 169 个 API 测试、0 个失败断言；
+`build-cov/coverage/summary.txt`。当前共 173 个 API 测试、0 个失败断言；
 `tools/coverage.sh` 会给出宿主机构建的行覆盖率。未覆盖部分主要是防御性错误
 分支、不支持的格式拒绝路径以及 GPU 专用桩，均如实列在覆盖率汇总中。
 
@@ -206,7 +207,9 @@ zglDestroyContext();
   占用同一 location 会链接失败。
 - 数组、结构体、uniform block 内部的数组/结构体、`out`/`inout` 参数、递归函数
   不在解释器子集内；uniform block 本身支持标量、向量与矩阵成员。
-- MSAA、transform feedback 与压缩/浮点纹理格式尚未实现。
+- MSAA 与压缩/浮点纹理格式尚未实现。
+- transform feedback 的 varying 仅支持浮点标量/向量；instanced feedback 绘制
+  尚未实现。反馈开启但未丢弃光栅化时，顶点着色器会为捕获和光栅化各执行一次。
 - 纹理图像按 top-down 存储，`v = 0` 对应第一条存储的行。
 - `dFdx`、`dFdy`、`fwidth` 恒为 0，不计算隐式 LOD；`textureLod` 可显式选级。
 - 恰好落在视口底边或右边的线与点会被非对称裁剪，因为 NDC 的 `y = -1` 映射到

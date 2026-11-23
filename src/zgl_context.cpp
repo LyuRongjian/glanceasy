@@ -96,6 +96,14 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
   return target;
 }
 
+TransformFeedback* CurrentTransformFeedback(Context* context) {
+  if (!context)
+    return nullptr;
+  if (context->state.transform_feedback == 0)
+    return &context->default_transform_feedback;
+  return context->transform_feedbacks.Get(context->state.transform_feedback);
+}
+
 void Surface::AllocateColor(int w, int h) {
   width = w;
   height = h;

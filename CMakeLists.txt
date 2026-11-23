@@ -107,7 +107,8 @@ if(ZGL_BUILD_TESTS)
       tests/test_jit.cpp
       tests/test_fastmath.cpp
       tests/test_simd.cpp
-      tests/test_uniform_block.cpp)
+      tests/test_uniform_block.cpp
+      tests/test_transform_feedback.cpp)
   target_link_libraries(zgl_unittests PRIVATE zcat_gles)
   target_include_directories(zgl_unittests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   if(ZGL_ENABLE_JIT)

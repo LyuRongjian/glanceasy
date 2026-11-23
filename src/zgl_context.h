@@ -178,6 +178,8 @@ class ProgramObject {
   std::string log;
   std::vector<std::pair<std::string, int>> bindings;
   std::vector<std::pair<std::string, int>> frag_data_bindings;
+  std::vector<std::string> transform_feedback_varyings;
+  GLenum transform_feedback_mode = GL_INTERLEAVED_ATTRIBS;
 };
 
 class Query {
@@ -186,6 +188,7 @@ class Query {
   GLuint result = 0;
   bool active = false;
   uint32_t start_fragments = 0;
+  uint32_t start_primitives = 0;
 };
 
 class Sampler {
@@ -326,6 +329,17 @@ struct IndexedBufferBinding {
   size_t size = 0;
 };
 
+class TransformFeedback {
+ public:
+  IndexedBufferBinding buffers[kMaxTransformFeedbackBuffers];
+  size_t cursors[kMaxTransformFeedbackBuffers] = {};
+  bool active = false;
+  bool paused = false;
+  GLenum primitive_mode = 0;
+  int vertex_count = 0;
+  uint32_t primitives_written = 0;
+};
+
 struct State {
   Rect viewport;
   float depth_range[2] = {0.0f, 1.0f};
@@ -374,6 +388,8 @@ struct State {
   GLuint copy_write_buffer = 0;
   GLuint uniform_buffer = 0;
   IndexedBufferBinding uniform_buffers[kMaxUniformBufferBindings];
+  GLuint transform_feedback = 0;
+  GLuint transform_feedback_buffer = 0;
   GLuint vertex_array = 0;
   GLuint program = 0;
   GLuint framebuffer = 0;
@@ -424,6 +440,8 @@ class Context {
   ObjectTable<ShaderObject> shaders;
   ObjectTable<ProgramObject> programs;
   ObjectTable<Query> queries;
+  ObjectTable<TransformFeedback> transform_feedbacks;
+  TransformFeedback default_transform_feedback;
   ObjectTable<Sampler> samplers;
   ObjectTable<SyncObject> syncs;
 
@@ -447,6 +465,9 @@ class Context {
 // Resolves a framebuffer name into pointers.  Name 0 is the default
 // framebuffer; a non-zero name is looked up in |context|.
 RenderTarget ResolveFramebuffer(Context* context, GLuint name);
+
+// The transform feedback object bound to the context, or the default object.
+TransformFeedback* CurrentTransformFeedback(Context* context);
 
 // The context bound to the calling thread, or nullptr.
 Context* CurrentContext();

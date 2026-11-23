@@ -32,10 +32,10 @@ Buffer* BoundBuffer(Context* context, GLenum target) {
     return context->buffers.Get(context->state.copy_write_buffer);
   if (target == GL_UNIFORM_BUFFER)
     return context->buffers.Get(context->state.uniform_buffer);
-  if (target == GL_PIXEL_PACK_BUFFER || target == GL_PIXEL_UNPACK_BUFFER ||
-      target == GL_TRANSFORM_FEEDBACK_BUFFER) {
+  if (target == GL_TRANSFORM_FEEDBACK_BUFFER)
+    return context->buffers.Get(context->state.transform_feedback_buffer);
+  if (target == GL_PIXEL_PACK_BUFFER || target == GL_PIXEL_UNPACK_BUFFER)
     return nullptr;
-  }
   return nullptr;
 }
 
@@ -153,10 +153,23 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
     }
     if (context->state.uniform_buffer == name)
       context->state.uniform_buffer = 0;
+    if (context->state.transform_feedback_buffer == name)
+      context->state.transform_feedback_buffer = 0;
     for (int i = 0; i < zgl::kMaxUniformBufferBindings; ++i) {
       if (context->state.uniform_buffers[i].buffer == name)
         context->state.uniform_buffers[i] = zgl::IndexedBufferBinding();
     }
+    auto clear_feedback = [name](zgl::TransformFeedback* feedback) {
+      if (!feedback)
+        return;
+      for (int i = 0; i < zgl::kMaxTransformFeedbackBuffers; ++i) {
+        if (feedback->buffers[i].buffer == name)
+          feedback->buffers[i] = zgl::IndexedBufferBinding();
+      }
+    };
+    clear_feedback(&context->default_transform_feedback);
+    for (int i = 1; i <= context->transform_feedbacks.size(); ++i)
+      clear_feedback(context->transform_feedbacks.Get(static_cast<GLuint>(i)));
   }
 }
 
@@ -192,6 +205,8 @@ void glBindBuffer(GLenum target, GLuint buffer) {
     context->state.copy_write_buffer = buffer;
   } else if (target == GL_UNIFORM_BUFFER) {
     context->state.uniform_buffer = buffer;
+  } else if (target == GL_TRANSFORM_FEEDBACK_BUFFER) {
+    context->state.transform_feedback_buffer = buffer;
   }
 }
 
@@ -202,12 +217,8 @@ void glBufferData(GLenum target,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  if (!zgl::ValidBufferTarget(target) ||
-      target == GL_TRANSFORM_FEEDBACK_BUFFER) {
-    if (!zgl::ValidBufferTarget(target))
-      context->SetError(GL_INVALID_ENUM);
-    else
-      context->SetError(GL_INVALID_OPERATION);
+  if (!zgl::ValidBufferTarget(target)) {
+    context->SetError(GL_INVALID_ENUM);
     return;
   }
   if (size < 0) {

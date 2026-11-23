@@ -31,7 +31,8 @@ and avoids a second register file.
   variables with `layout(location = N)`; locations 0 to 3.
 - `uniform` declarations of scalar, vector, matrix and sampler types.
 
-Arrays, structures and interface blocks are not part of the grammar.
+Arrays and structures are not part of the grammar. `layout(std140) uniform`
+interface blocks are the exception described below.
 `layout(location = ...)` is accepted on vertex inputs and fragment outputs.
 
 ## Uniform blocks
@@ -59,6 +60,29 @@ returns -1 for block members; `glGetUniformBlockIndex` and
 `glGetUniformIndices` are the reflection entry points. Block buffers are copied
 into the program's uniform values, so the interpreter and the SLJIT tier see
 the same data.
+
+## Transform feedback
+
+`glTransformFeedbackVaryings` selects vertex outputs before linking.
+`GL_INTERLEAVED_ATTRIBS` packs the selected values into one record in the
+order supplied to `glTransformFeedbackVaryings`; `GL_SEPARATE_ATTRIBS` writes each
+varying to its own binding point.
+
+Float scalars and vectors are supported, with up to 64 interleaved components or
+four separate buffers. Names must match vertex `out` variables exactly.
+
+`glBeginTransformFeedback` accepts `GL_POINTS`, `GL_LINES` or `GL_TRIANGLES`;
+the draw mode must be compatible with the active mode. Capture writes the
+selected varying values into `GL_TRANSFORM_FEEDBACK_BUFFER` bindings, honouring
+the binding offset and size. `glPauseTransformFeedback` skips capture while the
+object stays bound, and `glResumeTransformFeedback` continues at the saved
+cursor. `glDrawTransformFeedback` replays the captured vertex count with the
+current vertex arrays.
+
+`glBeginQuery(GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN, ...)` counts primitives
+written while the query is active. The capture path calls the vertex shader
+independently of rasterisation, so combining feedback with normal drawing runs
+the vertex shader twice per vertex.
 
 ## Statements
 

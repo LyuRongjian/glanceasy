@@ -32,15 +32,16 @@ enum : int {
 
 }  // namespace
 
-TEST(TransformFeedbackEntryPointsAreRejected) {
+TEST(TransformFeedbackObjectsAndValidation) {
   EXPECT_EQ(zglCreateContext(32, 32), 1);
   GLuint ids[2] = {7, 7};
   glGenTransformFeedbacks(2, ids);
-  EXPECT_EQ(ids[0], 0);
-  EXPECT_EQ(ids[1], 0);
+  EXPECT_TRUE(ids[0] != 0);
+  EXPECT_TRUE(ids[1] != 0);
+  EXPECT_EQ(glIsTransformFeedback(ids[0]), GL_TRUE);
   glDeleteTransformFeedbacks(2, ids);
   glDeleteTransformFeedbacks(0, nullptr);
-  EXPECT_EQ(glIsTransformFeedback(1), GL_FALSE);
+  EXPECT_EQ(glIsTransformFeedback(ids[0]), GL_FALSE);
 
   glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, 0);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
@@ -50,24 +51,30 @@ TEST(TransformFeedbackEntryPointsAreRejected) {
   glBeginTransformFeedback(GL_TRIANGLES);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glEndTransformFeedback();
-  glPauseTransformFeedback();
-  glResumeTransformFeedback();
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
+  glPauseTransformFeedback();
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  glGetError();
+  glResumeTransformFeedback();
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  glGetError();
 
   glTransformFeedbackVaryings(0, 0, nullptr, GL_SEPARATE_ATTRIBS);
-  EXPECT_EQ(glGetError(), GL_NO_ERROR);
+  EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
 
   GLsizei length = 12;
   GLsizei size = 12;
   GLenum type = GL_FLOAT;
   GLchar name[8] = "garbage";
   glGetTransformFeedbackVarying(0, 0, 8, &length, &size, &type, name);
-  EXPECT_EQ(length, 0);
-  EXPECT_EQ(name[0], '\0');
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  EXPECT_EQ(length, 12);
+  EXPECT_EQ(name[0], 'g');
   glGetTransformFeedbackVarying(0, 0, 0, nullptr, nullptr, nullptr, nullptr);
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
 
   glDrawTransformFeedback(GL_TRIANGLES, 1);
-  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
   zglDestroyContext();
 }
 
@@ -79,14 +86,14 @@ TEST(IndexedBufferBindingsAndWideQueries) {
   glBindBufferBase(GL_ARRAY_BUFFER, 0, buffer);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, buffer);
-  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glBindBufferBase(GL_UNIFORM_BUFFER, 0, buffer);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, buffer);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
 
   glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, buffer, 0, 16);
-  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
   const unsigned char bytes[16] = {};
   glBindBuffer(GL_UNIFORM_BUFFER, buffer);
   glBufferData(GL_UNIFORM_BUFFER, 16, bytes, GL_STATIC_DRAW);

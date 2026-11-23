@@ -295,16 +295,20 @@ TEST(UnsupportedFeaturesReportInvalidOperation) {
   EXPECT_EQ(zglCreateContext(32, 32), 1);
   GLuint ids[2] = {7, 8};
   glGenTransformFeedbacks(2, ids);
-  EXPECT_EQ(ids[0], 0u);
+  EXPECT_TRUE(ids[0] != 0);
+  EXPECT_TRUE(ids[1] != 0);
   EXPECT_EQ(glIsTransformFeedback(11), GL_FALSE);
   glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, 5);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glBeginTransformFeedback(GL_TRIANGLES);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glEndTransformFeedback();
-  glPauseTransformFeedback();
-  glResumeTransformFeedback();
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
+  glPauseTransformFeedback();
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  glResumeTransformFeedback();
+  EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
+  glGetError();
 
   glDispatchCompute(1, 1, 1);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);

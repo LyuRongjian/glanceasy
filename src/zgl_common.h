@@ -26,6 +26,7 @@ constexpr int kMaxVaryingVectors = 15;
 constexpr int kMaxUniformVectors = 256;
 constexpr int kMaxDrawBuffers = 4;
 constexpr int kMaxUniformBufferBindings = 24;
+constexpr int kMaxTransformFeedbackBuffers = 4;
 constexpr int kMaxColorAttachments = 4;
 
 // Number of floats reserved for a single uniform / varying slot.  A mat4 is

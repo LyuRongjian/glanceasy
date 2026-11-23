@@ -39,12 +39,16 @@ bool Program::Link(
     ShaderAst* fragment,
     const std::vector<std::pair<std::string, int>>& bindings,
     const std::vector<std::pair<std::string, int>>& frag_bindings,
+    const std::vector<std::string>& transform_feedback_varyings,
+    bool transform_feedback_separate,
     std::string* log) {
   linked_ = false;
   attributes_.clear();
   uniforms_.clear();
   uniform_blocks_.clear();
   varyings_.clear();
+  transform_feedback_varyings_.clear();
+  transform_feedback_separate_ = transform_feedback_separate;
   uniform_values_.clear();
   vertex_uniform_map_.clear();
   fragment_uniform_map_.clear();
@@ -133,6 +137,51 @@ bool Program::Link(
   }
   if (varying_floats_ > kMaxVaryingVectors * 4)
     return fail("too many varying components");
+
+  // Transform feedback varyings.  Names must be vertex outputs, and the
+  // selected components have to fit the separate or interleaved limits.
+  {
+    if (transform_feedback_separate &&
+        transform_feedback_varyings.size() >
+            static_cast<size_t>(kMaxTransformFeedbackBuffers)) {
+      return fail("too many separate transform feedback varyings");
+    }
+    int interleaved_components = 0;
+    for (size_t i = 0; i < transform_feedback_varyings.size(); ++i) {
+      const std::string& name = transform_feedback_varyings[i];
+      const VaryingInfo* found = nullptr;
+      for (const VaryingInfo& varying : varyings_) {
+        if (varying.name == name) {
+          found = &varying;
+          break;
+        }
+      }
+      if (!found)
+        return fail("transform feedback varying '" + name +
+                    "' is not a vertex output");
+      for (const TransformFeedbackVaryingInfo& existing :
+           transform_feedback_varyings_) {
+        if (existing.name == name)
+          return fail("duplicate transform feedback varying '" + name + "'");
+      }
+      TransformFeedbackVaryingInfo info;
+      info.name = name;
+      info.type = found->type;
+      info.offset = found->offset;
+      info.components = found->components;
+      info.buffer_index =
+          transform_feedback_separate ? static_cast<int>(i) : 0;
+      if (transform_feedback_separate) {
+        if (info.components > 4)
+          return fail("separate transform feedback varying is too wide");
+      } else {
+        interleaved_components += info.components;
+      }
+      transform_feedback_varyings_.push_back(info);
+    }
+    if (!transform_feedback_separate && interleaved_components > 64)
+      return fail("too many interleaved transform feedback components");
+  }
 
   // Fragment colour outputs.  A layout(location) or glBindFragDataLocation()
   // binding selects the draw buffer; the slot is the global the shader writes.

@@ -53,6 +53,16 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_MAX_UNIFORM_BLOCK_SIZE:
       *first = 16384;
       return true;
+    case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS:
+    case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS:
+      *first = kMaxTransformFeedbackBuffers;
+      return true;
+    case GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS:
+      *first = 64;
+      return true;
+    case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.transform_feedback_buffer);
+      return true;
     case GL_MAX_VERTEX_UNIFORM_BLOCKS:
     case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:
       *first = kMaxUniformBufferBindings;
@@ -1127,10 +1137,6 @@ void glBeginQuery(GLenum target, GLuint id) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
-    context->SetError(GL_INVALID_OPERATION);
-    return;
-  }
   zgl::Query* query = context->queries.Get(id);
   if (!query) {
     context->SetError(GL_INVALID_OPERATION);
@@ -1139,6 +1145,14 @@ void glBeginQuery(GLenum target, GLuint id) {
   if (query->active) {
     context->SetError(GL_INVALID_OPERATION);
     return;
+  }
+  if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
+    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+    if (!feedback || !feedback->active || feedback->paused) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    query->start_primitives = feedback->primitives_written;
   }
   query->target = target;
   query->active = true;
@@ -1150,6 +1164,23 @@ void glEndQuery(GLenum target) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
+    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+    if (!feedback || !feedback->active) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    for (int name = 1; name <= context->queries.size(); ++name) {
+      zgl::Query* query = context->queries.Get(static_cast<GLuint>(name));
+      if (query && query->active && query->target == target) {
+        query->result = feedback->primitives_written - query->start_primitives;
+        query->active = false;
+        return;
+      }
+    }
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   for (int name = 1; name <= context->queries.size(); ++name) {
     zgl::Query* query = context->queries.Get(static_cast<GLuint>(name));
     if (query && query->active && query->target == target) {

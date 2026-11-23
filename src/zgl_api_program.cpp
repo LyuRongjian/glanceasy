@@ -399,9 +399,10 @@ void glLinkProgram(GLuint program) {
     return;
   }
   object->program.reset(new zgl::glsl::Program());
-  object->linked =
-      object->program->Link(vertex, fragment, object->bindings,
-                            object->frag_data_bindings, &object->log);
+  object->linked = object->program->Link(
+      vertex, fragment, object->bindings, object->frag_data_bindings,
+      object->transform_feedback_varyings,
+      object->transform_feedback_mode == GL_SEPARATE_ATTRIBS, &object->log);
 }
 
 void glGetProgramiv(GLuint program, GLenum pname, GLint* params) {
@@ -446,8 +447,11 @@ void glGetProgramiv(GLuint program, GLenum pname, GLint* params) {
       params[0] = GL_FALSE;
       return;
     case GL_TRANSFORM_FEEDBACK_VARYINGS:
+      params[0] = static_cast<GLint>(
+          object->transform_feedback_varyings.size());
+      return;
     case GL_TRANSFORM_FEEDBACK_BUFFER_MODE:
-      params[0] = 0;
+      params[0] = static_cast<GLint>(object->transform_feedback_mode);
       return;
     default:
       context->SetError(GL_INVALID_ENUM);

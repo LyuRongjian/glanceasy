@@ -336,6 +336,41 @@ float PlaneDistance(const float* position, int plane) {
   }
 }
 
+bool PrimitiveModeCompatible(GLenum draw_mode, GLenum capture_mode) {
+  switch (capture_mode) {
+    case GL_POINTS:
+      return draw_mode == GL_POINTS;
+    case GL_LINES:
+      return draw_mode == GL_LINES || draw_mode == GL_LINE_STRIP ||
+             draw_mode == GL_LINE_LOOP;
+    case GL_TRIANGLES:
+      return draw_mode == GL_TRIANGLES || draw_mode == GL_TRIANGLE_STRIP ||
+             draw_mode == GL_TRIANGLE_FAN;
+    default:
+      return false;
+  }
+}
+
+uint32_t PrimitiveCount(GLenum mode, size_t vertices) {
+  switch (mode) {
+    case GL_POINTS:
+      return static_cast<uint32_t>(vertices);
+    case GL_LINES:
+      return static_cast<uint32_t>(vertices / 2);
+    case GL_LINE_STRIP:
+      return vertices > 1 ? static_cast<uint32_t>(vertices - 1) : 0u;
+    case GL_LINE_LOOP:
+      return vertices > 1 ? static_cast<uint32_t>(vertices) : 0u;
+    case GL_TRIANGLES:
+      return static_cast<uint32_t>(vertices / 3);
+    case GL_TRIANGLE_STRIP:
+    case GL_TRIANGLE_FAN:
+      return vertices > 2 ? static_cast<uint32_t>(vertices - 2) : 0u;
+    default:
+      return 0u;
+  }
+}
+
 class Pipeline : public FragmentSink, public glsl::TextureSampler {
  public:
   explicit Pipeline(Context* context) : context_(context) {}
@@ -385,6 +420,8 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
   const State& state() const;
   void FetchAttributes(GLuint index, int instance, float* attributes) const;
   TransformedVertex AcquireVertex(GLuint index, int instance);
+  void CaptureVertex(GLuint index, int instance);
+  void WriteTransformFeedback(const float* varyings);
   void EmitPoint(GLuint index, int instance);
   void EmitLine(GLuint index_a, GLuint index_b, int instance);
   void EmitTriangle(GLuint index_a,
@@ -427,6 +464,7 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
   std::vector<float> scratch_;
   std::vector<RasterVertex> screen_;
   std::vector<float> varying_values_;
+  std::vector<float> tf_varyings_;
   float ndc_x_[kMaxClippedVertices] = {};
   float ndc_y_[kMaxClippedVertices] = {};
 
@@ -443,11 +481,18 @@ void Pipeline::Run(GLenum mode,
                    GLsizei instance_count) {
   if (!Prepare())
     return;
-  if (empty_clip_)
+  zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context_);
+  const bool capture =
+      feedback && feedback->active && !feedback->paused;
+  if (capture && !PrimitiveModeCompatible(mode, feedback->primitive_mode)) {
+    context_->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (empty_clip_ && !capture)
     return;
   if (instance_count <= 0)
     return;
-  if (state().rasterizer_discard)
+  if (state().rasterizer_discard && !capture)
     return;
 
   context_->stats.draw_calls++;
@@ -478,6 +523,21 @@ void Pipeline::Run(GLenum mode,
     *out = value;
     return IndexResult::kOk;
   };
+
+  if (capture) {
+    for (int instance = 0; instance < instance_count; ++instance) {
+      cursor = 0;
+      GLuint index;
+      while (next_index(&index) == IndexResult::kOk)
+        CaptureVertex(index, instance);
+    }
+    feedback->primitives_written +=
+        PrimitiveCount(mode, static_cast<size_t>(count)) *
+        static_cast<uint32_t>(instance_count);
+    cursor = 0;
+    if (state().rasterizer_discard || empty_clip_)
+      return;
+  }
 
   for (int instance = 0; instance < instance_count; ++instance) {
     cursor = 0;
@@ -669,6 +729,7 @@ bool Pipeline::Prepare() {
   scratch_.assign(static_cast<size_t>(kMaxClippedVertices + 1) * stride_, 0.0f);
   screen_.assign(kMaxClippedVertices, RasterVertex());
   varying_values_.assign(varying_floats_, 0.0f);
+  tf_varyings_.assign(varying_floats_, 0.0f);
 
   Rect viewport = state.viewport;
   Rect clip{viewport.x, target_.height - viewport.bottom(), viewport.width,
@@ -768,6 +829,79 @@ Pipeline::TransformedVertex Pipeline::AcquireVertex(GLuint index,
   vertex.data = destination;
   vertex.point_size = point_size;
   return vertex;
+}
+
+void Pipeline::CaptureVertex(GLuint index, int instance) {
+  float attributes[kMaxVertexAttribs * 4];
+  FetchAttributes(index, instance, attributes);
+  glsl::VertexInput input;
+  input.attributes = attributes;
+  input.vertex_id = static_cast<int>(index);
+  input.instance_id = instance;
+  input.uniforms = uniforms_;
+  float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  float point_size = 1.0f;
+  program_->RunVertex(input, position, &point_size, tf_varyings_.data());
+  if (program_->has_runtime_error()) {
+    context_->SetError(GL_INVALID_OPERATION);
+    context_->diagnostics = program_->runtime_error();
+    return;
+  }
+  WriteTransformFeedback(tf_varyings_.data());
+}
+
+void Pipeline::WriteTransformFeedback(const float* varyings) {
+  zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context_);
+  if (!feedback || !feedback->active || feedback->paused)
+    return;
+  const auto& outputs = program_->transform_feedback_varyings();
+  if (outputs.empty())
+    return;
+  const bool separate = program_->transform_feedback_separate();
+  size_t interleaved_stride = 0;
+  for (const auto& output : outputs) {
+    interleaved_stride +=
+        static_cast<size_t>(output.components) * sizeof(float);
+  }
+
+  size_t record_offset = 0;
+  for (const auto& output : outputs) {
+    const int buffer_index = separate ? output.buffer_index : 0;
+    const size_t bytes = static_cast<size_t>(output.components) * sizeof(float);
+    const size_t start_offset = record_offset;
+    if (!separate)
+      record_offset += bytes;
+    if (buffer_index < 0 ||
+        buffer_index >= zgl::kMaxTransformFeedbackBuffers) {
+      continue;
+    }
+    const zgl::IndexedBufferBinding& binding = feedback->buffers[buffer_index];
+    zgl::Buffer* buffer = context_->buffers.Get(binding.buffer);
+    if (!buffer)
+      continue;
+    size_t cursor = feedback->cursors[buffer_index];
+    const size_t start = binding.offset + cursor +
+                         (separate ? 0 : start_offset);
+    size_t end = buffer->data.size();
+    if (binding.size > 0)
+      end = std::min(end, binding.offset + binding.size);
+    if (start <= end && bytes <= end - start)
+      memcpy(buffer->data.data() + start, varyings + output.offset, bytes);
+  }
+
+  if (separate) {
+    for (const auto& output : outputs) {
+      const int buffer_index = output.buffer_index;
+      if (buffer_index >= 0 &&
+          buffer_index < zgl::kMaxTransformFeedbackBuffers) {
+        feedback->cursors[buffer_index] +=
+            static_cast<size_t>(output.components) * sizeof(float);
+      }
+    }
+  } else {
+    feedback->cursors[0] += interleaved_stride;
+  }
+  ++feedback->vertex_count;
 }
 
 void Pipeline::EmitPoint(GLuint index, int instance) {

@@ -58,6 +58,14 @@ struct VaryingInfo {
   int components = 0;
 };
 
+struct TransformFeedbackVaryingInfo {
+  std::string name;
+  Type type;
+  int offset = 0;  // Float offset inside the vertex varying array.
+  int components = 0;
+  int buffer_index = 0;  // Separate-attrib buffer, or 0 for interleaved.
+};
+
 // Sampling backend used by texture*() built-ins.  Lod bias is already
 // clamped by the caller; implementations may ignore it.
 class TextureSampler {
@@ -125,6 +133,8 @@ class Program {
             ShaderAst* fragment,
             const std::vector<std::pair<std::string, int>>& bindings,
             const std::vector<std::pair<std::string, int>>& frag_bindings,
+            const std::vector<std::string>& transform_feedback_varyings,
+            bool transform_feedback_separate,
             std::string* log);
   bool linked() const { return linked_; }
 
@@ -143,6 +153,13 @@ class Program {
   const std::vector<VaryingInfo>& varyings() const { return varyings_; }
   const std::vector<FragmentOutputInfo>& fragment_outputs() const {
     return fragment_outputs_;
+  }
+  const std::vector<TransformFeedbackVaryingInfo>&
+  transform_feedback_varyings() const {
+    return transform_feedback_varyings_;
+  }
+  bool transform_feedback_separate() const {
+    return transform_feedback_separate_;
   }
 
   int AttributeLocation(const std::string& name) const;
@@ -189,6 +206,8 @@ class Program {
   std::vector<UniformBlockInfo> uniform_blocks_;
   std::vector<VaryingInfo> varyings_;
   std::vector<FragmentOutputInfo> fragment_outputs_;
+  std::vector<TransformFeedbackVaryingInfo> transform_feedback_varyings_;
+  bool transform_feedback_separate_ = false;
   std::vector<Value> uniform_values_;
   std::vector<int> vertex_uniform_map_;
   std::vector<int> fragment_uniform_map_;
