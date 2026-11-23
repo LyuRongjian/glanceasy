@@ -209,6 +209,60 @@ std::string NormalizeMacroText(const std::string& text) {
   return out;
 }
 
+std::string SpliceLines(const std::string& source) {
+  std::string out;
+  for (size_t i = 0; i < source.size(); ++i) {
+    if (source[i] == '\\') {
+      if (i + 1 < source.size() && source[i + 1] == '\n') {
+        ++i;
+        continue;
+      }
+      if (i + 2 < source.size() && source[i + 1] == '\r' &&
+          source[i + 2] == '\n') {
+        i += 2;
+        continue;
+      }
+    }
+    out += source[i];
+  }
+  return out;
+}
+
+// Replace block comments with a single space. Newlines inside the comment are
+// deferred until the end of the logical line so that a multi-line comment does
+// not terminate a preprocessing directive, while line numbering is preserved.
+std::string StripBlockComments(const std::string& source) {
+  std::string out;
+  size_t pending_newlines = 0;
+  for (size_t i = 0; i < source.size(); ++i) {
+    if (i + 1 < source.size() && source[i] == '/' && source[i + 1] == '*') {
+      i += 2;
+      while (i + 1 < source.size() &&
+             !(source[i] == '*' && source[i + 1] == '/')) {
+        if (source[i] == '\n')
+          ++pending_newlines;
+        ++i;
+      }
+      if (i + 1 < source.size())
+        i += 1;
+      out += ' ';
+    } else if (source[i] == '\n') {
+      out += '\n';
+      while (pending_newlines > 0) {
+        out += '\n';
+        --pending_newlines;
+      }
+    } else {
+      out += source[i];
+    }
+  }
+  while (pending_newlines > 0) {
+    out += '\n';
+    --pending_newlines;
+  }
+  return out;
+}
+
 bool IsPreprocessorDefined(const std::map<std::string, Macro>& macros,
                            const std::string& name) {
   return macros.count(name) != 0 || name == "__LINE__" || name == "__FILE__" ||
@@ -538,6 +592,7 @@ bool EvaluateExpression(const std::string& expression,
 }
 
 std::string Preprocess(const std::string& source) {
+  const std::string input = StripBlockComments(SpliceLines(source));
   std::map<std::string, Macro> macros;
   struct Conditional {
     bool parent_active = true;
@@ -553,10 +608,10 @@ std::string Preprocess(const std::string& source) {
   bool code_seen = false;
   bool saw_statement = false;
   size_t pos = 0;
-  while (pos <= source.size()) {
-    const size_t end = source.find('\n', pos);
-    const size_t line_end = end == std::string::npos ? source.size() : end;
-    std::string line = source.substr(pos, line_end - pos);
+  while (pos <= input.size()) {
+    const size_t end = input.find('\n', pos);
+    const size_t line_end = end == std::string::npos ? input.size() : end;
+    std::string line = input.substr(pos, line_end - pos);
     const bool active =
         conditionals.empty() ? true : conditionals.back().active;
     size_t first = line.find_first_not_of(" \t");
