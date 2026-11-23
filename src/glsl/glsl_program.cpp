@@ -86,16 +86,15 @@ bool Program::Link(
     std::vector<int> used;
     for (const Variable& attribute : vertex->attributes) {
       int location = attribute.index;
-      for (const auto& binding : bindings) {
-        if (binding.first == attribute.name)
-          location = binding.second;
+      if (!attribute.explicit_location) {
+        for (const auto& binding : bindings) {
+          if (binding.first == attribute.name)
+            location = binding.second;
+        }
       }
       if (location < 0 || location >= kMaxVertexAttribs)
         return fail("attribute '" + attribute.name +
                     "' has an invalid location");
-      if (std::find(used.begin(), used.end(), location) != used.end())
-        return fail("two attributes share location " +
-                    std::to_string(location));
       used.push_back(location);
       AttributeInfo info;
       info.name = attribute.name;

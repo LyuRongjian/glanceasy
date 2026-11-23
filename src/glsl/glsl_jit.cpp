@@ -628,9 +628,12 @@ ShaderJit::Impl::Temp ShaderJit::Impl::EmitVariable(const Expr& expr) {
     case Storage::kAttribute: {
       sljit_emit_op1(compiler_, SLJIT_MOV, SLJIT_R0, 0,
                      SLJIT_MEM1(SLJIT_S0), offsetof(JitRuntime, attributes));
+      const int rows = expr.type.is_matrix() ? expr.type.rows() : components;
       for (int i = 0; i < components; ++i) {
-        const int offset =
-            (expr.index * 4 + i) * static_cast<int>(sizeof(float));
+        const int column = expr.type.is_matrix() ? i / rows : 0;
+        const int row = expr.type.is_matrix() ? i % rows : i;
+        const int offset = ((expr.index + column) * 4 + row) *
+                           static_cast<int>(sizeof(float));
         sljit_emit_fop1(compiler_, SLJIT_MOV_F32, SLJIT_FR3, 0,
                         SLJIT_MEM1(SLJIT_R0), offset);
         EmitStoreComponent(result.slot, i, SLJIT_FR3);

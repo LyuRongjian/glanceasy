@@ -699,7 +699,8 @@ std::string Preprocess(const std::string& source) {
       while (arg < line.size() && (line[arg] == ' ' || line[arg] == '\t'))
         ++arg;
       if (directive == "version") {
-        if (saw_statement || Trim(line.substr(arg)) != "300 es") {
+        const std::string version = Trim(line.substr(arg));
+        if (saw_statement || (version != "300 es" && version != "100")) {
           out += "__zgl_invalid_version_directive__\n";
         } else {
           version_seen = true;

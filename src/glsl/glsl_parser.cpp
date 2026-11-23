@@ -504,15 +504,36 @@ bool Parser::AddGlobalVariable(const std::string& name,
     if (type.is_sampler())
       return FailAt(line, "attribute '" + name + "' cannot be a sampler");
     variable.storage = Storage::kAttribute;
-    variable.index = qualifiers.location >= 0 ? qualifiers.location
-                                              : next_attribute_location_++;
-    if (variable.index >= kMaxVertexAttribs)
+    variable.explicit_location = qualifiers.location >= 0;
+    const int slots = type.is_matrix() ? type.columns()
+                     : type.is_array() ? type.array_size()
+                                       : 1;
+    int location = qualifiers.location;
+    if (location < 0) {
+      location = next_attribute_location_;
+      bool free = false;
+      while (location + slots <= kMaxVertexAttribs && !free) {
+        free = true;
+        for (const auto& entry : attribute_names_) {
+          if (entry.second >= location && entry.second < location + slots) {
+            free = false;
+            break;
+          }
+        }
+        if (!free)
+          ++location;
+      }
+    }
+    if (location < 0 || location + slots > kMaxVertexAttribs)
       return FailAt(line, "too many vertex attributes");
     for (const auto& entry : attribute_names_) {
-      if (entry.second == variable.index)
+      if (entry.second >= location && entry.second < location + slots)
         return FailAt(line, "duplicate attribute location");
     }
-    attribute_names_.push_back({name, variable.index});
+    variable.index = location;
+    next_attribute_location_ = location + slots;
+    for (int slot = 0; slot < slots; ++slot)
+      attribute_names_.push_back({name, location + slot});
     ast_->attributes.push_back(variable);
     return true;
   }

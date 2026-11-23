@@ -113,9 +113,15 @@ void SetAttributePointer(GLuint index,
   attribute.normalized = normalized != GL_FALSE;
   attribute.integer = integer != GL_FALSE;
   attribute.stride = stride;
-  attribute.offset = 0;
-  attribute.client_pointer = static_cast<const uint8_t*>(pointer);
   attribute.buffer = context->state.array_buffer;
+  if (attribute.buffer != 0) {
+    // A pointer argument names a byte offset inside the bound buffer.
+    attribute.offset = reinterpret_cast<intptr_t>(pointer);
+    attribute.client_pointer = nullptr;
+  } else {
+    attribute.offset = 0;
+    attribute.client_pointer = static_cast<const uint8_t*>(pointer);
+  }
 }
 
 }  // namespace

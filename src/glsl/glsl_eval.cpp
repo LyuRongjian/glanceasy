@@ -606,8 +606,18 @@ Value Evaluator::ReadVariable(const Expr& expr) {
     case Storage::kAttribute: {
       Value value(expr.type);
       if (attributes_) {
-        for (int i = 0; i < std::min(4, expr.type.components()); ++i)
-          value.data[i] = attributes_[expr.index * 4 + i];
+        if (expr.type.is_matrix()) {
+          const int rows = expr.type.rows();
+          for (int c = 0; c < expr.type.columns(); ++c) {
+            for (int r = 0; r < rows; ++r) {
+              value.data[c * rows + r] =
+                  attributes_[(expr.index + c) * 4 + r];
+            }
+          }
+        } else {
+          for (int i = 0; i < std::min(4, expr.type.components()); ++i)
+            value.data[i] = attributes_[expr.index * 4 + i];
+        }
       }
       return value;
     }

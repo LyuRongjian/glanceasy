@@ -718,7 +718,7 @@ void glGetActiveAttrib(GLuint program,
   }
   const zgl::glsl::AttributeInfo& attribute = attributes[index];
   if (size)
-    *size = attribute.type.components();
+    *size = attribute.type.is_array() ? attribute.type.array_size() : 1;
   if (type)
     *type = zgl::GlslTypeToGlEnum(attribute.type);
   const int copy = buffer_size > 0

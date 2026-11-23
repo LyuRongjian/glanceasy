@@ -178,6 +178,7 @@ struct Variable {
   int varying_offset = -1;  // Float offset inside the varying array.
   int ubo_block = -1;       // Uniform block owning this uniform, or -1.
   int ubo_offset = 0;       // Byte offset inside the std140 block.
+  bool explicit_location = false;  // layout(location) was declared.
   BuiltinId builtin = BuiltinId::kNone;
   bool read_only = false;
 };
