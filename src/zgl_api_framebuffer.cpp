@@ -885,6 +885,40 @@ int ColorComponentBits(GLenum format, int channel) {
   return bits[channel];
 }
 
+uint8_t QuantizeChannel(uint8_t value, int bits) {
+  const int maximum = (1 << bits) - 1;
+  const int quantized = (static_cast<int>(value) * maximum + 127) / 255;
+  return static_cast<uint8_t>((quantized * 255 + maximum / 2) / maximum);
+}
+
+void QuantizeColorFormat(uint8_t components[4], GLenum format) {
+  switch (format) {
+    case GL_RGB565:
+      components[0] = QuantizeChannel(components[0], 5);
+      components[1] = QuantizeChannel(components[1], 6);
+      components[2] = QuantizeChannel(components[2], 5);
+      components[3] = 255;
+      break;
+    case GL_RGB5_A1:
+      components[0] = QuantizeChannel(components[0], 5);
+      components[1] = QuantizeChannel(components[1], 5);
+      components[2] = QuantizeChannel(components[2], 5);
+      components[3] = QuantizeChannel(components[3], 1);
+      break;
+    case GL_RGBA4:
+      components[0] = QuantizeChannel(components[0], 4);
+      components[1] = QuantizeChannel(components[1], 4);
+      components[2] = QuantizeChannel(components[2], 4);
+      components[3] = QuantizeChannel(components[3], 4);
+      break;
+    case GL_RGB10_A2:
+      components[3] = QuantizeChannel(components[3], 2);
+      break;
+    default:
+      break;
+  }
+}
+
 bool HasColorStorage(const zgl::FramebufferAttachment* slot, GLenum format) {
   if (slot->texture) {
     const zgl::Texture* texture = zgl::ApiContext()->textures.Get(slot->texture);
@@ -1640,11 +1674,71 @@ void glBlitFramebuffer(GLint src_x0,
     const int src_height = src_y1 - src_y0;
     if (dst_width > 0 && dst_height > 0 && src_width > 0 &&
         src_height > 0) {
+      if (source.read_integer &&
+          destination.color_is_integer[0]) {
+        for (int row = 0; row < dst_height; ++row) {
+          for (int column = 0; column < dst_width; ++column) {
+            const int destination_x = dst_x0 + column;
+            const int destination_y = dst_y0 + row;
+            const int gl_y = destination.height - 1 - destination_y;
+            if (destination_x < 0 || destination_x >= destination.width ||
+                gl_y < 0 || gl_y >= destination.height)
+              continue;
+            const int source_offset_x =
+                src_x0 + (column * src_width) / dst_width;
+            const int source_offset_y =
+                src_y0 + (row * src_height) / dst_height;
+            if (source_offset_x < 0 || source_offset_x >= source.width ||
+                source_offset_y < 0 || source_offset_y >= source.height)
+              continue;
+            const size_t source_index =
+                (static_cast<size_t>(source.height - 1 - source_offset_y) *
+                     source.width +
+                 static_cast<size_t>(source_offset_x)) *
+                4;
+            const uint32_t* incoming =
+                reinterpret_cast<const uint32_t*>(source.color) + source_index;
+            const size_t destination_index =
+                static_cast<size_t>(gl_y) * destination.width + destination_x;
+            uint32_t* outgoing =
+                reinterpret_cast<uint32_t*>(destination.color) +
+                destination_index * 4;
+            for (int channel = 0; channel < 4; ++channel) {
+              int64_t value = 0;
+              if (channel < source.read_channels)
+                value = static_cast<int64_t>(incoming[channel]);
+              else if (channel == 3)
+                value = 1;
+              if (!destination.color_is_unsigned[0] && channel < 4)
+                value = static_cast<int32_t>(static_cast<uint32_t>(value));
+              const int bits = zgl::FormatIntegerBits(
+                  destination.color_format[0], channel);
+              if (bits < 32) {
+                const int64_t minimum =
+                    destination.color_is_unsigned[0] ? 0 : -(1LL << (bits - 1));
+                const int64_t maximum = destination.color_is_unsigned[0]
+                                            ? (1LL << bits) - 1
+                                            : (1LL << (bits - 1)) - 1;
+                value = std::max(minimum, std::min(maximum, value));
+              }
+              outgoing[channel] = static_cast<uint32_t>(value);
+            }
+          }
+        }
+      } else {
       const bool writes_all_channels =
           context->state.color_mask[0] && context->state.color_mask[1] &&
           context->state.color_mask[2] && context->state.color_mask[3];
       const bool copy_rows =
-          writes_all_channels && src_width == dst_width &&
+          writes_all_channels && source.read_channels == 4 &&
+          destination.color_channels[0] == 4 &&
+          source.read_format != GL_SRGB8_ALPHA8 &&
+          destination.color_format[0] != GL_SRGB8_ALPHA8 &&
+          destination.color_format[0] != GL_RGB565 &&
+          destination.color_format[0] != GL_RGB5_A1 &&
+          destination.color_format[0] != GL_RGBA4 &&
+          destination.color_format[0] != GL_RGB10_A2 &&
+          src_width == dst_width &&
           src_height == dst_height && src_x0 >= 0 &&
           src_x0 + dst_width <= source.width && dst_x0 >= 0 &&
           dst_x0 + dst_width <= destination.width && src_y0 >= 0 &&
@@ -1653,7 +1747,7 @@ void glBlitFramebuffer(GLint src_x0,
       if (copy_rows) {
         const size_t row_bytes = static_cast<size_t>(dst_width) * 4;
         for (int row = 0; row < dst_height; ++row) {
-          const int source_y = src_y1 - 1 - row;
+          const int source_y = src_y0 + row;
           const int destination_y = dst_y0 + row;
           const int gl_y = destination.height - 1 - destination_y;
           const size_t source_index =
@@ -1681,7 +1775,7 @@ void glBlitFramebuffer(GLint src_x0,
             const int source_offset_x =
                 src_x0 + (column * src_width) / dst_width;
             const int source_offset_y =
-                src_y1 - 1 - (row * src_height) / dst_height;
+                src_y0 + (row * src_height) / dst_height;
             if (source_offset_x < 0 || source_offset_x >= source.width ||
                 source_offset_y < 0 || source_offset_y >= source.height) {
               continue;
@@ -1700,21 +1794,43 @@ void glBlitFramebuffer(GLint src_x0,
                    sizeof(existing));
             const zgl::Rgba previous = zgl::UnpackRgba(existing);
             const zgl::Rgba incoming = zgl::UnpackRgba(value);
+            const uint8_t source_channels[4] = {
+                incoming.r, incoming.g, incoming.b, incoming.a};
+            uint8_t components[4] = {0, 0, 0, 255};
+            for (int channel = 0; channel < 4; ++channel) {
+              if (channel < source.read_channels)
+                components[channel] = source_channels[channel];
+            }
+            QuantizeColorFormat(components, source.read_format);
+            const bool source_srgb = source.read_format == GL_SRGB8_ALPHA8;
+            const bool destination_srgb =
+                destination.color_format[0] == GL_SRGB8_ALPHA8;
+            if (source_srgb != destination_srgb) {
+              for (int channel = 0; channel < 3; ++channel) {
+                components[channel] = source_srgb
+                    ? static_cast<uint8_t>(
+                          zgl::SrgbToLinear(components[channel]) * 255.0f +
+                          0.5f)
+                    : zgl::LinearToSrgb8(components[channel] / 255.0f);
+              }
+            }
+            QuantizeColorFormat(components, destination.color_format[0]);
             uint8_t merged[4];
             merged[0] =
-                context->state.color_mask[0] ? incoming.r : previous.r;
+                context->state.color_mask[0] ? components[0] : previous.r;
             merged[1] =
-                context->state.color_mask[1] ? incoming.g : previous.g;
+                context->state.color_mask[1] ? components[1] : previous.g;
             merged[2] =
-                context->state.color_mask[2] ? incoming.b : previous.b;
+                context->state.color_mask[2] ? components[2] : previous.b;
             merged[3] =
-                context->state.color_mask[3] ? incoming.a : previous.a;
+                context->state.color_mask[3] ? components[3] : previous.a;
             const uint32_t packed =
                 zgl::PackRgba(merged[0], merged[1], merged[2], merged[3]);
             memcpy(destination.color + destination_index * 4, &packed,
                    sizeof(packed));
           }
         }
+      }
       }
     }
   }
@@ -1726,7 +1842,7 @@ void glBlitFramebuffer(GLint src_x0,
             gl_y >= destination.height)
           continue;
         const GLint source_x = src_x0 + (x - dst_x0);
-        const GLint source_y = src_y1 - 1 - (y - dst_y0);
+        const GLint source_y = src_y0 + (y - dst_y0);
         if (source_x < 0 || source_x >= source.width || source_y < 0 ||
             source_y >= source.height)
           continue;
@@ -1745,7 +1861,7 @@ void glBlitFramebuffer(GLint src_x0,
             gl_y >= destination.height)
           continue;
         const GLint source_x = src_x0 + (x - dst_x0);
-        const GLint source_y = src_y1 - 1 - (y - dst_y0);
+        const GLint source_y = src_y0 + (y - dst_y0);
         if (source_x < 0 || source_x >= source.width || source_y < 0 ||
             source_y >= source.height)
           continue;

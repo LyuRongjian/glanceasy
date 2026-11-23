@@ -23,6 +23,7 @@ namespace zgl {
 
 // Returns the number of color channels carried by an internal format.
 int FormatColorChannels(GLenum format);
+int FormatIntegerBits(GLenum format, int channel);
 
 // A rectangular block of pixels used by textures, renderbuffers and the
 // default framebuffer.  Colour is always stored as RGBA8; depth and stencil
@@ -63,7 +64,9 @@ struct RenderTarget {
   bool color_is_unsigned[kMaxColorAttachments] = {};
   bool color_has_alpha[kMaxColorAttachments] = {true, true, true, true};
   bool color_is_srgb[kMaxColorAttachments] = {};
+  GLenum color_format[kMaxColorAttachments] = {};
   int color_channels[kMaxColorAttachments] = {4, 4, 4, 4};
+  int color_integer_bits[kMaxColorAttachments] = {32, 32, 32, 32};
   int color_bytes[kMaxColorAttachments] = {4, 4, 4, 4};
   // draw_buffers[i] selects the attachment that fragment output i writes.
   GLenum draw_buffers[kMaxColorAttachments] = {

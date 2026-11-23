@@ -99,6 +99,33 @@ bool FormatHasAlpha(GLenum format) {
 
 }  // namespace
 
+int FormatIntegerBits(GLenum format, int channel) {
+  if (format == GL_RGB10_A2UI || format == GL_RGB10_A2)
+    return channel < 3 ? 10 : 2;
+  switch (format) {
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+      return 8;
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+      return 16;
+    default:
+      return 32;
+  }
+}
+
 int FormatColorChannels(GLenum format) {
   switch (format) {
     case GL_RGBA:
@@ -231,7 +258,9 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
       target.color_is_unsigned[i] = IsUnsignedIntegerFormat(format);
       target.color_has_alpha[i] = FormatHasAlpha(format);
       target.color_is_srgb[i] = format == GL_SRGB8_ALPHA8;
+      target.color_format[i] = format;
       target.color_channels[i] = FormatColorChannels(format);
+      target.color_integer_bits[i] = FormatIntegerBits(format, 0);
       target.color_bytes[i] = integer ? 16 : 4;
       if (integer) {
         target.integer_colors[i] = const_cast<uint32_t*>(
