@@ -1,0 +1,139 @@
+// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "GLES3/gl32.h"
+#include "tests/zgl_test.h"
+#include "zgl/zgl.h"
+
+#if defined(ZGL_ENABLE_JIT)
+
+namespace {
+
+bool JitDisabled() {
+  const char* value = getenv("ZGL_DISABLE_JIT");
+  return value && *value && strcmp(value, "0") != 0;
+}
+
+const char* kVertex =
+    "#version 100\n"
+    "attribute vec2 a_pos;\n"
+    "void main() {\n"
+    "  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
+    "}\n";
+
+const float kTriangle[6] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+
+GLuint Compile(GLenum type, const char* source) {
+  const GLuint shader = glCreateShader(type);
+  glShaderSource(shader, 1, &source, nullptr);
+  glCompileShader(shader);
+  return shader;
+}
+
+GLuint BuildProgram(const char* vertex, const char* fragment) {
+  const GLuint vs = Compile(GL_VERTEX_SHADER, vertex);
+  const GLuint fs = Compile(GL_FRAGMENT_SHADER, fragment);
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vs);
+  glAttachShader(program, fs);
+  glLinkProgram(program);
+  glDeleteShader(vs);
+  glDeleteShader(fs);
+  return program;
+}
+
+void DrawFullscreen(GLuint program) {
+  glUseProgram(program);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, kTriangle);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+
+}  // namespace
+
+TEST(SljitCompilesAndDispatchesArithmeticShader) {
+  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  zglResetJitStats();
+
+  const char* fragment =
+      "#version 100\n"
+      "precision mediump float;\n"
+      "void main() {\n"
+      "  float a = 0.5;\n"
+      "  vec3 v = vec3(0.1, 0.2, 0.3);\n"
+      "  vec3 w = v.zyx * 2.0 + vec3(a, 0.0, -a);\n"
+      "  gl_FragColor = vec4(w.x, w.y, w.z, 1.0);\n"
+      "}\n";
+  const GLuint program = BuildProgram(kVertex, fragment);
+  GLint linked = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &linked);
+  EXPECT_TRUE(linked == GL_TRUE);
+
+  ZglJitStats stats = {};
+  if (!JitDisabled()) {
+    zglGetJitStats(&stats);
+    EXPECT_TRUE(stats.stages_compiled >= 2);
+    EXPECT_EQ(stats.fallback_stages, 0);
+  }
+
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  DrawFullscreen(program);
+
+  unsigned char rgba[4] = {};
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_EQ(rgba[0], 255);
+  EXPECT_NEAR(static_cast<float>(rgba[1]) / 255.0f, 0.4f, 0.02f);
+  EXPECT_EQ(rgba[2], 0);
+
+  if (!JitDisabled()) {
+    zglGetJitStats(&stats);
+    EXPECT_TRUE(stats.dispatches > 0);
+  }
+  glDeleteProgram(program);
+  zglDestroyContext();
+}
+
+TEST(SljitFallsBackForLoopingShader) {
+  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  zglResetJitStats();
+
+  const char* fragment =
+      "#version 100\n"
+      "precision mediump float;\n"
+      "void main() {\n"
+      "  float total = 0.0;\n"
+      "  for (int i = 0; i < 4; ++i) total += 0.25;\n"
+      "  gl_FragColor = vec4(total, 0.0, 0.0, 1.0);\n"
+      "}\n";
+  const GLuint program = BuildProgram(kVertex, fragment);
+  GLint linked = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &linked);
+  EXPECT_TRUE(linked == GL_TRUE);
+
+  ZglJitStats stats = {};
+  zglGetJitStats(&stats);
+  if (JitDisabled()) {
+    EXPECT_EQ(stats.stages_compiled, 0);
+    EXPECT_TRUE(stats.fallback_stages >= 2);
+  } else {
+    EXPECT_TRUE(stats.fallback_stages >= 1);
+    EXPECT_TRUE(stats.stages_compiled >= 1);
+  }
+
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  DrawFullscreen(program);
+  unsigned char rgba[4] = {};
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_NEAR(static_cast<float>(rgba[0]) / 255.0f, 1.0f, 0.02f);
+  glDeleteProgram(program);
+  zglDestroyContext();
+}
+
+#endif  // ZGL_ENABLE_JIT

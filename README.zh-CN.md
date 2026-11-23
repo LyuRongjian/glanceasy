@@ -24,10 +24,11 @@ ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、�
 
 `tests/visual` 包含十五个渲染用例。每个用例都通过公开 GLES API 自建着色器和
 顶点数据，渲染一帧 640x480 画面，校验少量像素，并把画面写成 PPM 文件。下面的
-图片全部是 ARM32 构建在 `qemu-arm-static -cpu cortex-a7` 下的真实输出，并且
-与宿主机构建逐像素一致，这正是该套件提供的回归保障。
+图片全部是 ARM32 构建在 `qemu-arm-static -cpu cortex-a7` 下的真实输出；解释器
+与 SLJIT 后端的输出相对宿主机构建均在 1 个 8 位 LSB 以内，这正是该套件提供的
+回归保障。
 
-这十五个用例构成完整的可视化集合，每个用例一张截图。API 层测试共 148 个，
+这十五个用例构成完整的可视化集合，每个用例一张截图。API 层测试共 150 个，
 其中不少只验证状态迁移、非法枚举和错误路径，根本不会触碰帧缓冲，因此这些
 用例只用代码断言，不做截图。
 
@@ -63,8 +64,8 @@ cmake --build build --target zgl_visual_tests
 | 范围 | 状态 |
 | --- | --- |
 | GLES 2.0 API | 完整：缓冲、顶点数组、纹理、帧缓冲、着色器、状态、绘制 |
-| GLES 3.0 API | 解释器子集内完整：VAO、instancing、primitive restart、query、fence、sampler object、blit、invalidate |
-| GLSL | 支持 ES 1.00 / 3.00 着色器解释执行，见 [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
+| GLES 3.0 API | 核心子集：VAO、instancing、primitive restart、query、fence、sampler object、blit、invalidate。仍缺 MRT、MSAA、UBO、transform feedback 与压缩/浮点纹理格式 |
+| GLSL | 支持 ES 1.00 / 3.00 的解释执行与 SLJIT 分层编译；不支持的构造按 stage 回退，见 [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
 | 多重渲染目标 | 只写入一个颜色附件；`gl_FragData[i]` 与第一个之外的 `out` 变量会被编译器拒绝 |
 | Transform feedback、compute、SSBO、image load/store | 纯桩；会影响输出的调用返回 `GL_INVALID_OPERATION` |
 | 细分 / 几何着色器 | 不属于 GLES；入口为桩 |
@@ -88,7 +89,23 @@ cmake --build build-asan
 ./build-asan/zgl_unittests
 ```
 
-Windows 上请在 WSL 中执行上述命令，Windows 侧只用 `wsl.exe` 启动。
+ARM32 目标在 Linux 上使用 Luckfox SDK 工具链与 qemu-user 验证，不以 Windows
+作为构建或测试环境。
+
+## 使用 Luckfox SDK 编译 RV1106 目标
+
+`tools/build_luckfox_arm.sh` 使用
+[Luckfox Pico RV1106 SDK](https://wiki.luckfox.com/zh/Luckfox-Pico-RV1106/SDK)
+自带的交叉编译器。把 `LUCKFOX_TOOLCHAIN` 指向 SDK 工具链目录，或把
+`LUCKFOX_SDK` 指向 SDK 根目录：
+
+```sh
+LUCKFOX_TOOLCHAIN=$HOME/luckfox-pico/tools/linux/toolchain/arm-rockchip830-linux-uclibcgnueabihf \
+  tools/build_luckfox_arm.sh build-rv1106
+```
+
+脚本使用 `-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard`，并静态链接 SDK
+的 uClibc 与 libstdc++。
 
 ## 使用 Android NDK 交叉编译 ARM32
 
@@ -105,17 +122,18 @@ ANDROID_NDK_ROOT=$HOME/android-ndk-r27c tools/build_android.sh
 
 ## 在 QEMU 下运行 ARM32 产物
 
-NDK 生成的静态 bionic 程序需要 32 字节对齐的 TLS 段，否则 bionic 在 qemu-user
-下启动即中止。`tools/run_qemu_arm.sh` 会先修补 `PT_TLS` 程序头，再启动模拟器：
+`tools/run_qemu_arm.sh` 以 `qemu-arm-static -cpu cortex-a7` 运行任意 ARM32 ELF。
+Luckfox 的 uClibc 产物无需修补；Android NDK 的 bionic 产物需要 32 字节对齐的
+TLS 段，此时设置 `ZGL_PATCH_TLS=1`：
 
 ```sh
-tools/run_qemu_arm.sh build-arm/zgl_unittests
-tools/run_qemu_arm.sh build-arm/zgl_visual_tests visual-out 640 480
+tools/run_qemu_arm.sh build-rv1106/zgl_unittests
+tools/run_qemu_arm.sh build-rv1106/zgl_visual_tests visual-out 640 480
 ```
 
-`QEMU_ARM_STATIC` 可指定模拟器路径，默认
-`~/qemu-local/usr/bin/qemu-arm-static`。系统模式的 QEMU 也可以启动完整 ARM
-镜像，但测试套件验证使用的是用户模式模拟器。
+`QEMU_ARM_STATIC` 可指定模拟器路径；未设置时从 `PATH` 中查找
+`qemu-arm-static`。系统模式的 QEMU 也可以启动完整 ARM 镜像，但本套件验证使用
+的是用户模式模拟器。
 
 ## 渲染示例
 
@@ -125,7 +143,7 @@ tools/run_qemu_arm.sh build-arm/zgl_visual_tests visual-out 640 480
 ```sh
 cmake --build build --target zgl_cube_demo
 ./build/zgl_cube_demo cube.ppm 800 600
-tools/run_qemu_arm.sh build-arm/zgl_cube_demo cube.ppm 800 600
+tools/run_qemu_arm.sh build-rv1106/zgl_cube_demo cube.ppm 800 600
 ```
 
 `docs/screenshot.png` 由第二条命令生成；在开发机上 qemu-user 耗时约 8 秒，这不
@@ -141,9 +159,9 @@ tools/coverage.sh build-cov
 ```
 
 脚本会配置 gcov 构建、运行测试，并把逐文件行覆盖率写入
-`build-cov/coverage/summary.txt`。当前共 148 个 API 测试、0 个失败断言；行覆盖率
-为 8590 行中的 75.1%。未覆盖部分主要是防御性错误分支、不支持的格式拒绝路径
-以及 GPU 专用桩，均如实列在覆盖率汇总中。
+`build-cov/coverage/summary.txt`。当前共 150 个 API 测试、0 个失败断言；
+`tools/coverage.sh` 会给出宿主机构建的行覆盖率。未覆盖部分主要是防御性错误
+分支、不支持的格式拒绝路径以及 GPU 专用桩，均如实列在覆盖率汇总中。
 
 上面的十五个可视化用例是第二层验证：它们既校验像素，又把渲染结果作为产物保留，
 因此光栅化回归既表现为断言失败，也表现为肉眼可见的画面变化。这些用例不计入
@@ -152,7 +170,7 @@ gcov 数字，覆盖率只统计通过 API 测试执行到的库代码。
 ## 目录结构
 
 ```
-include/GLES2, include/GLES3   Khronos 原始头文件
+include/GLES2, GLES3, KHR     Khronos 原始头文件
 include/zgl/zgl.h              软件渲染器的公共 C API
 src/                           上下文、光栅化、纹理管线、绘制管线
 src/glsl/                      GLSL 子集的词法、语法与解释执行
@@ -160,7 +178,7 @@ src/zgl_api_*.cpp              GLES 入口实现
 examples/                      独立渲染示例
 tests/                         单元测试与测试框架
 tests/visual/                  可视化回归用例与 PPM 写出
-tools/                         NDK 构建、QEMU 运行、TLS 修补、覆盖率
+tools/                         Luckfox/NDK 构建、QEMU 运行、TLS 修补、覆盖率
 docs/                          GLSL 子集、移植说明与渲染截图
 ```
 
@@ -182,6 +200,7 @@ zglDestroyContext();
 - 片元着色器只能写一个颜色输出；`gl_FragData` 仅允许下标 0，额外的 `out` 变量
   会被编译错误拒绝。
 - 数组、结构体、uniform block、`out`/`inout` 参数、递归函数不在解释器子集内。
+- MRT、MSAA、UBO、transform feedback 与压缩/浮点纹理格式尚未实现。
 - 纹理图像按 top-down 存储，`v = 0` 对应第一条存储的行。
 - `dFdx`、`dFdy`、`fwidth` 恒为 0，不计算隐式 LOD；`textureLod` 可显式选级。
 - 恰好落在视口底边或右边的线与点会被非对称裁剪，因为 NDC 的 `y = -1` 映射到
@@ -190,4 +209,4 @@ zglDestroyContext();
 
 ## 许可证
 
-BSD-3-Clause，见 [LICENSE](LICENSE)。
+BSD-3-Clause，见 [LICENSE](LICENSE)。第三方代码：`deps/sljit` 下的 SLJIT，采用 Simplified BSD License。

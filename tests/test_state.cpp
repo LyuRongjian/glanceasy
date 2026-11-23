@@ -32,8 +32,8 @@ TEST(ContextStringsDescribeTheBackend) {
   EXPECT_TRUE(version != nullptr);
   EXPECT_TRUE(language != nullptr);
   EXPECT_TRUE(Contains(vendor, "ZCat"));
-  EXPECT_TRUE(Contains(version, "OpenGL ES"));
-  EXPECT_TRUE(Contains(language, "GLSL"));
+  EXPECT_TRUE(Contains(version, "OpenGL ES 3.0"));
+  EXPECT_TRUE(Contains(language, "GLSL ES 3.00"));
   EXPECT_TRUE(glGetString(0x1234) == nullptr);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
 

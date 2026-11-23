@@ -9,7 +9,11 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(_WIN32)
+#include <direct.h>
+#else
 #include <sys/stat.h>
+#endif
 
 #include <string>
 #include <vector>
@@ -967,7 +971,11 @@ int main(int argc, char** argv) {
   const char* output_dir = argc > 1 ? argv[1] : "visual-out";
   const int width = argc > 2 ? atoi(argv[2]) : 640;
   const int height = argc > 3 ? atoi(argv[3]) : 480;
+#if defined(_WIN32)
+  _mkdir(output_dir);
+#else
   mkdir(output_dir, 0755);
+#endif
   int failures = 0;
   for (const VisualCase& visual_case : kCases) {
     std::string path =

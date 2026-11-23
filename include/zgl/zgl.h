@@ -97,6 +97,19 @@ typedef struct ZglStats {
 ZGL_EXPORT void zglGetStats(ZglStats* stats);
 ZGL_EXPORT void zglResetStats(void);
 
+// Native shader compiler counters.  These are process-wide because a program
+// can outlive the context that linked it.  A fallback means the stage uses a
+// construct outside the JIT fast path and the GLSL evaluator ran instead.
+typedef struct ZglJitStats {
+  uint64_t compile_attempts;
+  uint64_t stages_compiled;
+  uint64_t fallback_stages;
+  uint64_t dispatches;
+} ZglJitStats;
+
+ZGL_EXPORT void zglGetJitStats(ZglJitStats* stats);
+ZGL_EXPORT void zglResetJitStats(void);
+
 // Number of contexts alive in the process, useful for leak checks.
 ZGL_EXPORT int zglLiveContextCount(void);
 

@@ -10,3 +10,16 @@ coverage/
 .cache/
 compile_commands.json
 *.user
+
+build-arm*/
+build-rv1106/
+build-host/
+build-host-*/
+visual-out/
+*.ppm
+zgl_cube.ppm
+build-win/
+*.exe
+*.pdb
+*.obj
+*.ilk

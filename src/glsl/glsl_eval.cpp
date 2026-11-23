@@ -15,6 +15,8 @@
 #include <cstdio>
 #include <vector>
 
+#include "src/glsl/glsl_builtins.h"
+#include "src/glsl/glsl_jit.h"
 #include "src/glsl/glsl_program.h"
 
 namespace zgl {
@@ -212,6 +214,12 @@ class Evaluator {
   // values of const globals at link time.
   Value EvalExpression(const Expr& expr) { return Eval(expr); }
 
+  // Pure built-in math shared with the SLJIT backend.  The function has no
+  // evaluator state, so the JIT can call it for built-ins that are not worth
+  // lowering to machine code.
+  static Value EvaluateBuiltinMath(const BuiltinFunc function,
+                                   const std::vector<Value>& args);
+
   // Fills the built-in variables that are inputs to the current stage.
   void PrepareBuiltins();
 
@@ -251,7 +259,6 @@ class Evaluator {
   Value Multiply(const Value& left, const Value& right, const Type& type);
 
   Value BuiltinTexture(const Expr& expr);
-  Value BuiltinMath(const BuiltinFunc function, const std::vector<Value>& args);
   Value BuiltinRelational(BuiltinFunc function, const std::vector<Value>& args);
 
   void StoreBuiltin(BuiltinId id, const Value& value);
@@ -1084,8 +1091,8 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
   return out;
 }
 
-Value Evaluator::BuiltinMath(const BuiltinFunc function,
-                             const std::vector<Value>& args) {
+Value Evaluator::EvaluateBuiltinMath(const BuiltinFunc function,
+                                     const std::vector<Value>& args) {
   if (args.empty())
     return Value(Type::Float());
   const Type type = args[0].type;
@@ -1366,7 +1373,7 @@ Value Evaluator::EvalBuiltin(const Expr& expr) {
     default:
       break;
   }
-  return BuiltinMath(expr.builtin_func, args);
+  return EvaluateBuiltinMath(expr.builtin_func, args);
 }
 
 // ---- Program entry points ------------------------------------------------
@@ -1392,7 +1399,25 @@ void Program::RunVertex(const VertexInput& input,
                            input.instance_id);
   evaluator.set_varyings(nullptr, out_varyings);
   evaluator.set_sampler(input.sampler);
-  if (!evaluator.RunMain()) {
+
+  bool used_jit = false;
+#if defined(ZGL_ENABLE_JIT)
+  if (vertex_jit_) {
+    // Built-ins live in the global slot array for both backends.  Filling them
+    // here keeps the JIT from needing a second copy of the GLSL input rules.
+    evaluator.PrepareBuiltins();
+    JitRunInputs jit_inputs;
+    jit_inputs.uniforms = input.uniforms;
+    jit_inputs.uniform_map = vertex_uniform_map_.data();
+    jit_inputs.attributes = input.attributes;
+    jit_inputs.varyings_out = out_varyings;
+    jit_inputs.sampler = input.sampler;
+    jit_inputs.globals = vertex_globals_.data();
+    bool discarded = false;
+    used_jit = vertex_jit_->Run(jit_inputs, &discarded);
+  }
+#endif
+  if (!used_jit && !evaluator.RunMain()) {
     runtime_error_ = evaluator.error();
     return;
   }
@@ -1431,11 +1456,30 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
   evaluator.set_fragment_coord(input.frag_coord);
   evaluator.set_front_facing(input.front_facing);
   evaluator.set_point_coord(input.point_coord);
-  if (!evaluator.RunMain()) {
+
+  bool used_jit = false;
+#if defined(ZGL_ENABLE_JIT)
+  if (fragment_jit_) {
+    evaluator.PrepareBuiltins();
+    JitRunInputs jit_inputs;
+    jit_inputs.uniforms = input.uniforms;
+    jit_inputs.uniform_map = fragment_uniform_map_.data();
+    jit_inputs.varyings_in = input.varyings;
+    jit_inputs.sampler = input.sampler;
+    jit_inputs.globals = fragment_globals_.data();
+    bool discarded = false;
+    used_jit = fragment_jit_->Run(jit_inputs, &discarded);
+    if (used_jit && discarded) {
+      output->discarded = true;
+      return true;
+    }
+  }
+#endif
+  if (!used_jit && !evaluator.RunMain()) {
     runtime_error_ = evaluator.error();
     return false;
   }
-  if (evaluator.discarded()) {
+  if (!used_jit && evaluator.discarded()) {
     output->discarded = true;
     return true;
   }
@@ -1483,6 +1527,11 @@ bool EvaluateGlobalInitializers(ShaderAst* ast,
     (*globals)[init.slot] = Convert(value, (*globals)[init.slot].type);
   }
   return true;
+}
+
+Value EvaluateBuiltinMath(const BuiltinFunc function,
+                          const std::vector<Value>& args) {
+  return Evaluator::EvaluateBuiltinMath(function, args);
 }
 
 }  // namespace glsl

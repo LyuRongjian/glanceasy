@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <vector>
 
@@ -74,7 +76,10 @@ bool ExpectNear(double actual,
 }
 
 int RunAllTests() {
+  const char* filter = getenv("ZGL_TEST_FILTER");
   for (const TestCase& test : Registry()) {
+    if (filter && *filter && strstr(test.name, filter) == nullptr)
+      continue;
     const int before = FailureCount();
     fprintf(stderr, "RUN %s\n", test.name);
     test.function();

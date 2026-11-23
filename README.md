@@ -30,11 +30,12 @@ The screenshot below was rendered by the ARM32 build running under
 program and vertex data through the public GLES API, renders a 640x480 frame,
 checks a few pixels, and writes the frame to a PPM file. The images below are
 the actual output of the ARM32 build executed under
-`qemu-arm-static -cpu cortex-a7`; every one of them is bit-identical to the
-host build, which is the regression guarantee the suite provides.
+`qemu-arm-static -cpu cortex-a7`; the interpreter and SLJIT backends agree with
+the host build within one 8-bit LSB, which is the regression guarantee the
+suite provides.
 
 These fifteen cases are the complete visual set, one screenshot per case. The
-API-level suite has 148 cases; many of them exercise state transitions, invalid
+API-level suite has 150 cases; many of them exercise state transitions, invalid
 enums and error paths that never touch a framebuffer, so those are asserted in
 code instead of captured as images.
 
@@ -70,8 +71,8 @@ The second argument is the output directory; one PPM per case is written there.
 | Area | State |
 | --- | --- |
 | GLES 2.0 API | Complete: buffers, vertex arrays, textures, framebuffers, shaders, state, draws |
-| GLES 3.0 API | Complete for the interpreted subset: VAOs, instancing, primitive restart, queries, fences, sampler objects, blit, invalidate |
-| GLSL | Interpreter for ES 1.00 / 3.00 shaders, see [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
+| GLES 3.0 API | Core subset: VAOs, instancing, primitive restart, queries, fences, sampler objects, blit, invalidate. Still missing: MRT, MSAA, UBOs, transform feedback and compressed/float texture formats |
+| GLSL | Interpreter and SLJIT tier for ES 1.00 / 3.00 shaders; unsupported constructs fall back per stage, see [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
 | Multiple render targets | One colour attachment is written; `gl_FragData[i]` and `out` variables beyond the first are rejected by the compiler |
 | Transform feedback, compute, SSBO, image load/store | Accepted stubs; report `GL_INVALID_OPERATION` where output would change |
 | Tessellation / geometry shaders | Not part of GLES; entry points are stubs |
@@ -96,8 +97,23 @@ cmake --build build-asan
 ./build-asan/zgl_unittests
 ```
 
-On Windows the repository is built from WSL; the Windows shell is only used to
-launch `wsl.exe`.
+The ARM32 target is validated on Linux with the Luckfox SDK toolchain and
+qemu-user; it is not a Windows build target.
+
+## Building for RV1106 with the Luckfox SDK
+
+`tools/build_luckfox_arm.sh` uses the compiler shipped by the
+[Luckfox Pico RV1106 SDK](https://wiki.luckfox.com/zh/Luckfox-Pico-RV1106/SDK).
+Point `LUCKFOX_TOOLCHAIN` at the SDK toolchain directory, or set
+`LUCKFOX_SDK` to the SDK root:
+
+```sh
+LUCKFOX_TOOLCHAIN=$HOME/luckfox-pico/tools/linux/toolchain/arm-rockchip830-linux-uclibcgnueabihf \
+  tools/build_luckfox_arm.sh build-rv1106
+```
+
+The script uses `-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard` and links
+statically against the SDK uClibc and libstdc++.
 
 ## Building for ARM32 with the Android NDK
 
@@ -115,19 +131,18 @@ any x86 SSE code.
 
 ## Running the ARM32 binary under QEMU
 
-Static bionic executables need a 32-byte aligned TLS segment; the NDK linker
-does not always provide one, and bionic aborts at start-up under qemu-user.
-`tools/run_qemu_arm.sh` patches the `PT_TLS` program header and then runs the
-binary:
+`tools/run_qemu_arm.sh` runs any ARM32 ELF with `qemu-arm-static -cpu cortex-a7`.
+The Luckfox uClibc binaries need no patching. Android NDK bionic binaries need
+a 32-byte aligned TLS segment, so pass `ZGL_PATCH_TLS=1` for those:
 
 ```sh
-tools/run_qemu_arm.sh build-arm/zgl_unittests
-tools/run_qemu_arm.sh build-arm/zgl_visual_tests visual-out 640 480
+tools/run_qemu_arm.sh build-rv1106/zgl_unittests
+tools/run_qemu_arm.sh build-rv1106/zgl_visual_tests visual-out 640 480
 ```
 
-`QEMU_ARM_STATIC` selects the emulator (default `~/qemu-local/usr/bin/qemu-arm-static`).
-A system-mode QEMU installation can also boot a full ARM image, but the
-user-mode emulator is what the test suite is verified against.
+`QEMU_ARM_STATIC` selects the emulator; otherwise `qemu-arm-static` is looked up
+in `PATH`. A system-mode QEMU installation can boot a full ARM image, but the
+user-mode emulator is what this suite is verified against.
 
 ## Rendering the demo
 
@@ -137,7 +152,7 @@ an offscreen buffer and writes a binary PPM file. It uses only the public API:
 ```sh
 cmake --build build --target zgl_cube_demo
 ./build/zgl_cube_demo cube.ppm 800 600
-tools/run_qemu_arm.sh build-arm/zgl_cube_demo cube.ppm 800 600
+tools/run_qemu_arm.sh build-rv1106/zgl_cube_demo cube.ppm 800 600
 ```
 
 The second command is the one that produced `docs/screenshot.png`; it took about
@@ -156,9 +171,9 @@ tools/coverage.sh build-cov
 ```
 
 The script configures a gcov build, runs the tests, and prints per-file line
-coverage into `build-cov/coverage/summary.txt`. The current tree executes 148
-API tests with zero failed checks; line coverage is reported as 75.1% of 8590
-instrumented lines. The uncovered remainder is dominated by defensive error
+coverage into `build-cov/coverage/summary.txt`. The current tree executes 150
+API tests with zero failed checks; `tools/coverage.sh` reports line coverage for
+the host build. The uncovered remainder is dominated by defensive error
 branches, unsupported-format rejection paths and the GPU-only stubs, which are
 listed in the coverage summary rather than hidden.
 
@@ -170,7 +185,7 @@ gcov figures, which measure the library through the API tests only.
 ## Directory layout
 
 ```
-include/GLES2, include/GLES3   Khronos headers (unmodified)
+include/GLES2, GLES3, KHR     Khronos headers (unmodified)
 include/zgl/zgl.h              Public C API of the software renderer
 src/                           Context, rasteriser, texture pipeline, draw pipeline
 src/glsl/                      Lexer, parser and interpreter for the GLSL subset
@@ -178,7 +193,7 @@ src/zgl_api_*.cpp              GLES entry points
 examples/                      Standalone rendering demo
 tests/                         Unit tests and the test harness
 tests/visual/                  Visual regression cases and the PPM writer
-tools/                         NDK build, QEMU runner, TLS patch, coverage
+tools/                         Luckfox/NDK builds, QEMU runner, TLS patch, coverage
 docs/                          GLSL subset, porting notes and rendered screenshots
 ```
 
@@ -211,4 +226,4 @@ image, draw statistics or the last shader log.
 
 ## License
 
-BSD-3-Clause. See [LICENSE](LICENSE).
+BSD-3-Clause. See [LICENSE](LICENSE). Third-party code: SLJIT under `deps/sljit`, Simplified BSD License.

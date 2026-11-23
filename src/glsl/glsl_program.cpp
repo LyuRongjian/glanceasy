@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <string>
 
+#include "src/glsl/glsl_jit.h"
+
 namespace zgl {
 namespace glsl {
 
@@ -40,6 +42,8 @@ bool Program::Link(ShaderAst* vertex,
   uniform_values_.clear();
   vertex_uniform_map_.clear();
   fragment_uniform_map_.clear();
+  vertex_jit_.reset();
+  fragment_jit_.reset();
   varying_floats_ = 0;
   runtime_error_.clear();
   uses_frag_depth_ = false;
@@ -196,6 +200,14 @@ bool Program::Link(ShaderAst* vertex,
   uses_discard_ = fragment->uses_discard;
   uses_point_size_ = vertex->uses_point_size;
   linked_ = true;
+
+#if defined(ZGL_ENABLE_JIT)
+  // The JIT is an optimisation, not part of link validation.  A construct the
+  // native backend cannot lower only means that stage keeps the evaluator.
+  vertex_jit_ = ShaderJit::Compile(*vertex, nullptr);
+  fragment_jit_ = ShaderJit::Compile(*fragment, nullptr);
+#endif
+
   if (log)
     log->clear();
   return true;

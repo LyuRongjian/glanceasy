@@ -286,7 +286,7 @@ const GLubyte* glGetString(GLenum name) {
     case GL_RENDERER:
       return reinterpret_cast<const GLubyte*>("ZCat CPU rasteriser");
     case GL_VERSION:
-      return reinterpret_cast<const GLubyte*>("OpenGL ES 3.2 ZCat-GLES 0.1.0");
+      return reinterpret_cast<const GLubyte*>("OpenGL ES 3.0 ZCat-GLES 0.1.0");
     case GL_SHADING_LANGUAGE_VERSION:
       return reinterpret_cast<const GLubyte*>(
           "OpenGL ES GLSL ES 3.00 ZCat-GLES");

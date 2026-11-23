@@ -16,6 +16,8 @@
 namespace zgl {
 namespace glsl {
 
+class ShaderJit;
+
 struct AttributeInfo {
   std::string name;
   Type type;
@@ -107,6 +109,11 @@ class Program {
   bool uses_discard() const { return uses_discard_; }
   bool uses_point_size() const { return uses_point_size_; }
 
+  // True when at least one stage was compiled to native code at link time.
+  // The counterpart, whether a particular draw took the JIT path, is exposed
+  // through the process-wide ZglJitStats counters.
+  bool has_native_stage() const { return vertex_jit_ || fragment_jit_; }
+
   Value* uniform_value(int index) {
     if (index < 0 || index >= static_cast<int>(uniform_values_.size()))
       return nullptr;
@@ -147,6 +154,12 @@ class Program {
   bool uses_frag_depth_ = false;
   bool uses_discard_ = false;
   bool uses_point_size_ = false;
+
+  // Native versions of the stages.  Null means "use the AST evaluator", either
+  // because the shader uses a construct the JIT does not cover or because the
+  // library was built with ZGL_ENABLE_JIT=0.
+  std::unique_ptr<ShaderJit> vertex_jit_;
+  std::unique_ptr<ShaderJit> fragment_jit_;
 
   std::string runtime_error_;
   friend class Evaluator;
