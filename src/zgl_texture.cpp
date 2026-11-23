@@ -346,7 +346,9 @@ void SampleTextureCube(const Texture& texture,
     return;
   const GLenum filter = lod > 0.0f ? BaseFilter(min_filter) : mag_filter;
   const float s = Clamp01((u * 0.5f) + 0.5f);
-  const float t = Clamp01((v * 0.5f) + 0.5f);
+  float t = Clamp01((v * 0.5f) + 0.5f);
+  if (texture.render_target_flip_y)
+    t = 1.0f - t;
   if (filter == GL_NEAREST) {
     const int x =
         std::min(image->width - 1, static_cast<int>(s * image->width));
@@ -404,7 +406,9 @@ void SampleTexture3D(const Texture& texture,
     return;
   const int depth = std::max(1, image->depth);
   const float s = WrapCoordinate(position[0], wrap_s);
-  const float t = WrapCoordinate(position[1], wrap_t);
+  const float t = WrapCoordinate(
+      texture.render_target_flip_y ? 1.0f - position[1] : position[1],
+      wrap_t);
   const float r = WrapCoordinate(position[2], wrap_r);
   if (s < 0.0f || t < 0.0f || r < 0.0f)
     return;

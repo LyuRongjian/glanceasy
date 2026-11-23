@@ -74,3 +74,7 @@
 35	3072	1795460879795309000	CMakeFiles/zcat_gles.dir/src/zgl_draw.cpp.o	b05be5cd49ca1772
 36	3287	1795460880011039000	CMakeFiles/zcat_gles.dir/src/zgl_api_program.cpp.o	6e65dd229b13e493
 3288	3449	1795460880176494000	libzcat_gles.a	837a1ee6bff33d58
+65	1479	1795474133305080000	CMakeFiles/zcat_gles.dir/src/zgl_texture.cpp.o	c201653c3d30320d
+1481	1708	1795474133538197000	libzcat_gles.a	837a1ee6bff33d58
+54	1283	1795474165447621000	CMakeFiles/zcat_gles.dir/src/zgl_texture.cpp.o	c201653c3d30320d
+1286	1441	1795474165608500000	libzcat_gles.a	837a1ee6bff33d58
