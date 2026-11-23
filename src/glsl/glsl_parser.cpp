@@ -505,8 +505,13 @@ bool Parser::AddGlobalVariable(const std::string& name,
   }
 
   if (stage_ == Stage::kFragment && qualifiers.is_out) {
-    if (!(type == Type::Vec(4)))
-      return FailAt(line, "fragment output '" + name + "' must be a vec4");
+    const bool valid_output =
+        type.columns() == 1 && type.rows() == 4 &&
+        (type.base() == BaseType::kFloat || type.base() == BaseType::kInt ||
+         type.base() == BaseType::kUInt);
+    if (!valid_output)
+      return FailAt(line, "fragment output '" + name +
+                             "' must be a vec4, ivec4 or uvec4");
     int location = qualifiers.location;
     if (location < 0) {
       for (int candidate = 0; candidate < kMaxFragmentOutputs; ++candidate) {
@@ -538,6 +543,7 @@ bool Parser::AddGlobalVariable(const std::string& name,
     output.name = name;
     output.location = location;
     output.slot = slot;
+    output.base = type.base();
     ast_->outputs.push_back(output);
     global_names_.push_back({name, slot});
     ast_->uses_frag_color = true;

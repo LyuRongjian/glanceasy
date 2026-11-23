@@ -64,6 +64,39 @@ bool IsCompressedFormat(GLenum format) {
   }
 }
 
+bool IsIntegerInternalFormat(GLenum format) {
+  switch (format) {
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_RGB10_A2UI:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool IsFloatInternalFormat(GLenum format) {
   switch (format) {
     case GL_RGBA16F:
@@ -595,7 +628,11 @@ void SetTextureImage(GLenum target,
   image->height = height;
   image->depth = texture->target == GL_TEXTURE_3D ? depth : 1;
   const size_t texels = static_cast<size_t>(width) * height * image->depth;
-  image->rgba.assign(texels, PackRgba(0, 0, 0, 0));
+  if (IsIntegerInternalFormat(internal_format)) {
+    image->integer_rgba.assign(texels * 4, 0u);
+  } else {
+    image->rgba.assign(texels, PackRgba(0, 0, 0, 0));
+  }
   if (pixels) {
     const PixelStoreState& store = context->state.pixel_store;
     if (texture->target == GL_TEXTURE_3D) {
@@ -664,9 +701,15 @@ void SetMultisampleTextureStorage(GLenum target,
     image->height = height;
     image->depth = 1;
     image->samples = std::max(1, samples);
-    image->rgba.assign(texels, 0u);
-    if (samples > 0)
-      image->sample_rgba.assign(sample_texels, 0u);
+    if (IsIntegerInternalFormat(internal_format)) {
+      image->integer_rgba.assign(texels * 4, 0u);
+      if (samples > 0)
+        image->sample_integer_rgba.assign(sample_texels * 4, 0u);
+    } else {
+      image->rgba.assign(texels, 0u);
+      if (samples > 0)
+        image->sample_rgba.assign(sample_texels, 0u);
+    }
   }
 }
 
@@ -719,6 +762,9 @@ void SetTextureStorage(GLenum target,
       if (IsFloatInternalFormat(internal_format)) {
         image->rgba.clear();
         image->float_rgba.assign(texels * 4, 0.0f);
+      } else if (IsIntegerInternalFormat(internal_format)) {
+        image->float_rgba.clear();
+        image->integer_rgba.assign(texels * 4, 0u);
       } else {
         image->float_rgba.clear();
         image->rgba.assign(texels, 0u);

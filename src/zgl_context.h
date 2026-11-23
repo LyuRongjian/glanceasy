@@ -50,6 +50,14 @@ struct RenderTarget {
   int height = 0;
   // Storage for every colour attachment of the current framebuffer.
   uint8_t* colors[kMaxColorAttachments] = {};
+  // Integer colour attachments store four 32-bit words per texel.  The
+  // |colors| entry points at the same storage for compatibility with generic
+  // code paths, while |integer_colors| and the flags below describe its type.
+  uint32_t* integer_colors[kMaxColorAttachments] = {};
+  uint32_t* resolved_integer_colors[kMaxColorAttachments] = {};
+  bool color_is_integer[kMaxColorAttachments] = {};
+  bool color_is_unsigned[kMaxColorAttachments] = {};
+  int color_bytes[kMaxColorAttachments] = {4, 4, 4, 4};
   // draw_buffers[i] selects the attachment that fragment output i writes.
   GLenum draw_buffers[kMaxColorAttachments] = {
       GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2,
@@ -57,6 +65,10 @@ struct RenderTarget {
   int draw_buffer_count = 1;
   // The colour buffer selected for reads, or draw buffer 0 for draws.
   uint8_t* color = nullptr;
+  // Type of the currently selected read colour buffer.
+  bool read_integer = false;
+  bool read_unsigned = false;
+  int read_color_bytes = 4;
   uint16_t* depth = nullptr;
   uint8_t* stencil = nullptr;
 
@@ -124,6 +136,9 @@ struct TextureImage {
   // Floating point colour storage (RGBA, four floats per texel).  Non-empty
   // only for float internal formats.
   std::vector<float> float_rgba;
+  // Integer colour storage, four 32-bit words per texel.
+  std::vector<uint32_t> integer_rgba;
+  std::vector<uint32_t> sample_integer_rgba;
 };
 
 class Texture {
@@ -411,6 +426,8 @@ struct State {
   float polygon_offset_factor = 0.0f;
   float polygon_offset_units = 0.0f;
   bool rasterizer_discard = false;
+  GLenum generate_mipmap_hint = GL_DONT_CARE;
+  GLenum fragment_shader_derivative_hint = GL_DONT_CARE;
   bool primitive_restart = false;
   bool primitive_restart_fixed_index = false;
   GLuint primitive_restart_index = 0;
@@ -423,6 +440,8 @@ struct State {
   GLuint element_buffer = 0;
   GLuint copy_read_buffer = 0;
   GLuint copy_write_buffer = 0;
+  GLuint pixel_pack_buffer = 0;
+  GLuint pixel_unpack_buffer = 0;
   GLuint uniform_buffer = 0;
   IndexedBufferBinding uniform_buffers[kMaxUniformBufferBindings];
   GLuint transform_feedback = 0;

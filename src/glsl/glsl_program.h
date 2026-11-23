@@ -112,12 +112,16 @@ struct FragmentOutputInfo {
   std::string name;
   int location = -1;
   int slot = -1;
+  BaseType base = BaseType::kFloat;
 };
 
 struct FragmentOutput {
   // Indexed by fragment output location.  |color[i]| is only meaningful when
   // |written[i]| is true; outputs the shader does not declare stay untouched.
   float color[kMaxFragmentOutputs][4] = {};
+  BaseType color_base[kMaxFragmentOutputs] = {BaseType::kFloat, BaseType::kFloat,
+                                             BaseType::kFloat,
+                                             BaseType::kFloat};
   bool written[kMaxFragmentOutputs] = {};
   float depth = 0.0f;
   bool writes_depth = false;

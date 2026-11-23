@@ -34,8 +34,10 @@ Buffer* BoundBuffer(Context* context, GLenum target) {
     return context->buffers.Get(context->state.uniform_buffer);
   if (target == GL_TRANSFORM_FEEDBACK_BUFFER)
     return context->buffers.Get(context->state.transform_feedback_buffer);
-  if (target == GL_PIXEL_PACK_BUFFER || target == GL_PIXEL_UNPACK_BUFFER)
-    return nullptr;
+  if (target == GL_PIXEL_PACK_BUFFER)
+    return context->buffers.Get(context->state.pixel_pack_buffer);
+  if (target == GL_PIXEL_UNPACK_BUFFER)
+    return context->buffers.Get(context->state.pixel_unpack_buffer);
   return nullptr;
 }
 
@@ -155,6 +157,14 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
       context->state.uniform_buffer = 0;
     if (context->state.transform_feedback_buffer == name)
       context->state.transform_feedback_buffer = 0;
+    if (context->state.copy_read_buffer == name)
+      context->state.copy_read_buffer = 0;
+    if (context->state.copy_write_buffer == name)
+      context->state.copy_write_buffer = 0;
+    if (context->state.pixel_pack_buffer == name)
+      context->state.pixel_pack_buffer = 0;
+    if (context->state.pixel_unpack_buffer == name)
+      context->state.pixel_unpack_buffer = 0;
     for (int i = 0; i < zgl::kMaxUniformBufferBindings; ++i) {
       if (context->state.uniform_buffers[i].buffer == name)
         context->state.uniform_buffers[i] = zgl::IndexedBufferBinding();
@@ -207,6 +217,10 @@ void glBindBuffer(GLenum target, GLuint buffer) {
     context->state.uniform_buffer = buffer;
   } else if (target == GL_TRANSFORM_FEEDBACK_BUFFER) {
     context->state.transform_feedback_buffer = buffer;
+  } else if (target == GL_PIXEL_PACK_BUFFER) {
+    context->state.pixel_pack_buffer = buffer;
+  } else if (target == GL_PIXEL_UNPACK_BUFFER) {
+    context->state.pixel_unpack_buffer = buffer;
   }
 }
 

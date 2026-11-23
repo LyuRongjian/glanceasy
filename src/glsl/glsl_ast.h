@@ -58,6 +58,7 @@ struct FragmentOut {
   std::string name;
   int location = -1;
   int slot = -1;
+  BaseType base = BaseType::kFloat;
 };
 
 // Operator codes, indexed by precedence level in the parser.

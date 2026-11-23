@@ -15,6 +15,12 @@
 
 namespace zgl {
 
+int FloatBits(float value) {
+  int32_t bits = 0;
+  memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
 bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
   const State& state = context->state;
   *count = 1;
@@ -100,10 +106,12 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_MAX_SAMPLES:
       *first = kMaxSamples;
       return true;
-    case GL_SAMPLES:
-    case GL_SAMPLE_BUFFERS:
     case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
       *first = 10;
+      return true;
+    case GL_SAMPLES:
+    case GL_SAMPLE_BUFFERS:
+      *first = 0;
       return true;
     case GL_NUM_SHADER_BINARY_FORMATS:
     case GL_NUM_EXTENSIONS:
@@ -215,17 +223,96 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_IMPLEMENTATION_COLOR_READ_TYPE:
       *first = GL_UNSIGNED_BYTE;
       return true;
+    case GL_MAX_ELEMENTS_INDICES:
+    case GL_MAX_ELEMENTS_VERTICES:
+      *first = 1 << 20;
+      return true;
+    case GL_MAX_ELEMENT_INDEX:
+      *first = 0x7FFFFFFF;
+      return true;
+    case GL_MAX_VERTEX_UNIFORM_COMPONENTS:
+    case GL_MAX_FRAGMENT_UNIFORM_COMPONENTS:
+      *first = 4096;
+      return true;
+    case GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:
+    case GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:
+      *first = 4096;
+      return true;
+    case GL_MAX_VARYING_COMPONENTS:
+    case GL_MAX_VERTEX_OUTPUT_COMPONENTS:
+    case GL_MAX_FRAGMENT_INPUT_COMPONENTS:
+      *first = 256;
+      return true;
+    case GL_MAX_PROGRAM_TEXEL_OFFSET:
+      *first = 7;
+      return true;
+    case GL_MIN_PROGRAM_TEXEL_OFFSET:
+      *first = -8;
+      return true;
+    case GL_MAX_SERVER_WAIT_TIMEOUT:
+      *first = 0;
+      return true;
+    case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT:
+      *first = 4;
+      return true;
+    case GL_TRANSFORM_FEEDBACK_BINDING:
+      *first = static_cast<GLint>(state.transform_feedback);
+      return true;
+    case GL_GENERATE_MIPMAP_HINT:
+      *first = static_cast<GLint>(state.generate_mipmap_hint);
+      return true;
+    case GL_FRAGMENT_SHADER_DERIVATIVE_HINT:
+      *first = static_cast<GLint>(state.fragment_shader_derivative_hint);
+      return true;
+    case GL_UNPACK_IMAGE_HEIGHT:
+      *first = state.pixel_store.unpack_image_height;
+      return true;
+    case GL_UNPACK_SKIP_IMAGES:
+      *first = state.pixel_store.unpack_skip_images;
+      return true;
+    case GL_PIXEL_PACK_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.pixel_pack_buffer);
+      return true;
+    case GL_PIXEL_UNPACK_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.pixel_unpack_buffer);
+      return true;
+    case GL_COPY_READ_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.copy_read_buffer);
+      return true;
+    case GL_COPY_WRITE_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.copy_write_buffer);
+      return true;
+    case GL_READ_BUFFER: {
+      const Framebuffer* framebuffer = context->framebuffers.Get(state.read_framebuffer);
+      *first = framebuffer ? static_cast<GLint>(framebuffer->read_buffer)
+                           : static_cast<GLint>(state.default_read_buffer);
+      return true;
+    }
+    case GL_DRAW_BUFFER0:
+    case GL_DRAW_BUFFER1:
+    case GL_DRAW_BUFFER2:
+    case GL_DRAW_BUFFER3: {
+      const int index = pname - GL_DRAW_BUFFER0;
+      const Framebuffer* framebuffer = context->framebuffers.Get(state.framebuffer);
+      *first = framebuffer ? static_cast<GLint>(framebuffer->draw_buffers[index])
+                           : (index == 0 ? static_cast<GLint>(state.default_draw_buffer)
+                                         : static_cast<GLint>(GL_NONE));
+      return true;
+    }
+    case GL_PROGRAM_BINARY_FORMATS:
+      *first = 0;
+      return true;
     case GL_DEPTH_FUNC:
       *first = static_cast<GLint>(state.depth.func);
       return true;
     case GL_DEPTH_CLEAR_VALUE:
-      *first = static_cast<GLint>(state.clear_depth > 0.0f ? 1 : 0);
+      *first = FloatBits(state.clear_depth);
       return true;
     case GL_STENCIL_CLEAR_VALUE:
       *first = state.clear_stencil;
       return true;
     case GL_COLOR_CLEAR_VALUE:
-      *first = static_cast<GLint>(state.clear_color[0] > 0.5f ? 1 : 0);
+      *first = FloatBits(state.clear_color[0]);
       *count = 4;
       return true;
     case GL_COLOR_WRITEMASK:
@@ -335,7 +422,32 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = static_cast<GLint>(state.line_width + 0.5f);
       return true;
     case GL_SAMPLE_COVERAGE_VALUE:
-      *first = state.sample_coverage_value >= 0.5f ? 1 : 0;
+      *first = FloatBits(state.sample_coverage_value);
+      return true;
+    case GL_BLEND_COLOR:
+      *first = FloatBits(state.blend.color[0]);
+      *count = 4;
+      return true;
+    case GL_DEPTH_RANGE:
+      *first = FloatBits(state.depth.range_near);
+      *count = 2;
+      return true;
+    case GL_ALIASED_LINE_WIDTH_RANGE:
+      *first = FloatBits(1.0f);
+      *count = 2;
+      return true;
+    case GL_ALIASED_POINT_SIZE_RANGE:
+      *first = FloatBits(1.0f);
+      *count = 2;
+      return true;
+    case GL_MAX_TEXTURE_LOD_BIAS:
+      *first = FloatBits(2.0f);
+      return true;
+    case GL_POLYGON_OFFSET_FACTOR:
+      *first = FloatBits(state.polygon_offset_factor);
+      return true;
+    case GL_POLYGON_OFFSET_UNITS:
+      *first = FloatBits(state.polygon_offset_units);
       return true;
     case GL_SAMPLE_COVERAGE_INVERT:
       *first = state.invert_coverage ? GL_TRUE : GL_FALSE;
@@ -417,8 +529,31 @@ void glGetIntegerv(GLenum pname, GLint* data) {
   }
   if (pname == GL_COLOR_CLEAR_VALUE) {
     for (int i = 0; i < 4; ++i)
-      data[i] =
-          static_cast<GLint>(context->state.clear_color[i] * 255.0f + 0.5f);
+      data[i] = zgl::FloatBits(context->state.clear_color[i]);
+    return;
+  }
+  if (pname == GL_BLEND_COLOR) {
+    for (int i = 0; i < 4; ++i)
+      data[i] = zgl::FloatBits(context->state.blend.color[i]);
+    return;
+  }
+  if (pname == GL_DEPTH_RANGE) {
+    data[0] = zgl::FloatBits(context->state.depth.range_near);
+    data[1] = zgl::FloatBits(context->state.depth.range_far);
+    return;
+  }
+  if (pname == GL_ALIASED_LINE_WIDTH_RANGE ||
+      pname == GL_ALIASED_POINT_SIZE_RANGE) {
+    data[0] = zgl::FloatBits(1.0f);
+    data[1] = pname == GL_ALIASED_POINT_SIZE_RANGE ? zgl::FloatBits(64.0f)
+                                                   : zgl::FloatBits(1.0f);
+    return;
+  }
+  if (pname == GL_COMPRESSED_TEXTURE_FORMATS) {
+    // The backend advertises format count but does not expose a compressed
+    // format list; fill the array with the first supported ETC2 format so
+    // callers that iterate the result remain in bounds.
+    data[0] = GL_COMPRESSED_RGB8_ETC2;
     return;
   }
   if (pname == GL_MAX_VIEWPORT_DIMS) {
@@ -454,6 +589,18 @@ void glGetFloatv(GLenum pname, GLfloat* data) {
       return;
     case GL_SAMPLE_COVERAGE_VALUE:
       data[0] = context->state.sample_coverage_value;
+      return;
+    case GL_POLYGON_OFFSET_FACTOR:
+      data[0] = context->state.polygon_offset_factor;
+      return;
+    case GL_POLYGON_OFFSET_UNITS:
+      data[0] = context->state.polygon_offset_units;
+      return;
+    case GL_MAX_TEXTURE_LOD_BIAS:
+      data[0] = 2.0f;
+      return;
+    case GL_SAMPLE_COVERAGE_INVERT:
+      data[0] = context->state.invert_coverage ? 1.0f : 0.0f;
       return;
     case GL_ALIASED_LINE_WIDTH_RANGE:
       data[0] = 1.0f;
@@ -1105,10 +1252,19 @@ void glSampleCoverage(GLfloat value, GLboolean invert) {
 }
 
 void glHint(GLenum target, GLenum mode) {
-  (void)mode;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (mode != GL_FASTEST && mode != GL_NICEST && mode != GL_DONT_CARE) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   switch (target) {
     case GL_GENERATE_MIPMAP_HINT:
+      context->state.generate_mipmap_hint = mode;
+      return;
     case GL_FRAGMENT_SHADER_DERIVATIVE_HINT:
+      context->state.fragment_shader_derivative_hint = mode;
       return;
     default: {
       zgl::Context* context = zgl::ApiContext();

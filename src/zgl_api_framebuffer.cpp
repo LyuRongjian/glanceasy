@@ -257,6 +257,20 @@ GLenum CheckCompleteness(Context* context, const Framebuffer& framebuffer) {
 }
 
 size_t PixelBytes(GLenum format, GLenum type) {
+  if (type == GL_INT || type == GL_UNSIGNED_INT) {
+    switch (format) {
+      case GL_RGBA_INTEGER:
+        return 16;
+      case GL_RGB_INTEGER:
+        return 12;
+      case GL_RG_INTEGER:
+        return 8;
+      case GL_RED_INTEGER:
+        return 4;
+      default:
+        return 4;
+    }
+  }
   if (type == GL_UNSIGNED_BYTE) {
     switch (format) {
       case GL_RGBA:
@@ -355,6 +369,27 @@ void WritePixel(const uint8_t* source,
   }
 }
 
+void WriteIntegerPixel(const uint32_t* source,
+                       GLenum format,
+                       GLenum type,
+                       uint8_t* destination) {
+  const int count = format == GL_RGBA_INTEGER
+                        ? 4
+                        : format == GL_RGB_INTEGER
+                              ? 3
+                              : format == GL_RG_INTEGER ? 2 : 1;
+  if (type == GL_INT) {
+    for (int i = 0; i < count; ++i) {
+      const int32_t value = static_cast<int32_t>(source[i]);
+      memcpy(destination + i * sizeof(int32_t), &value, sizeof(value));
+    }
+  } else {
+    for (int i = 0; i < count; ++i)
+      memcpy(destination + i * sizeof(uint32_t), &source[i],
+             sizeof(uint32_t));
+  }
+}
+
 // Writes |packed| to every pixel of the colour draw target after checking that
 // the requested draw buffer exists in the currently bound draw framebuffer.
 void ClearColourBuffer(Context* context, GLint drawbuffer, uint32_t packed) {
@@ -398,6 +433,65 @@ void ClearColourBuffer(Context* context, GLint drawbuffer, uint32_t packed) {
         resolved[i] = packed;
     }
   }
+}
+
+void ClearIntegerColourBuffer(Context* context,
+                              GLint drawbuffer,
+                              const uint32_t values[4]) {
+  if (drawbuffer < 0 || drawbuffer >= kMaxColorAttachments) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const Framebuffer* framebuffer =
+      context->framebuffers.Get(context->state.framebuffer);
+  if (framebuffer && !framebuffer->colors[drawbuffer].bound()) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  RenderTarget target = context->GetDrawTarget();
+  if (!target.valid()) {
+    context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
+    return;
+  }
+  const GLenum buffer = target.draw_buffers[drawbuffer];
+  if (buffer == GL_NONE)
+    return;
+  if (buffer < GL_COLOR_ATTACHMENT0 ||
+      buffer >= GL_COLOR_ATTACHMENT0 + kMaxColorAttachments) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const int attachment = buffer - GL_COLOR_ATTACHMENT0;
+  uint32_t* const destination = target.integer_colors[attachment];
+  if (!destination) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const size_t texels = static_cast<size_t>(target.width) * target.height;
+  const int planes = target.multisampled() ? target.samples : 1;
+  for (int sample = 0; sample < planes; ++sample) {
+    uint32_t* plane = destination + static_cast<size_t>(sample) * texels * 4;
+    for (size_t texel = 0; texel < texels; ++texel)
+      memcpy(plane + texel * 4, values, sizeof(uint32_t) * 4);
+  }
+  if (target.multisampled()) {
+    uint32_t* resolved = target.resolved_integer_colors[attachment];
+    if (resolved) {
+      for (size_t texel = 0; texel < texels; ++texel)
+        memcpy(resolved + texel * 4, values, sizeof(uint32_t) * 4);
+    }
+  }
+}
+
+bool DrawBufferIsInteger(Context* context, GLint drawbuffer) {
+  if (drawbuffer < 0 || drawbuffer >= kMaxColorAttachments)
+    return false;
+  RenderTarget target = context->GetDrawTarget();
+  const GLenum buffer = target.draw_buffers[drawbuffer];
+  if (buffer < GL_COLOR_ATTACHMENT0 ||
+      buffer >= GL_COLOR_ATTACHMENT0 + kMaxColorAttachments)
+    return false;
+  return target.color_is_integer[buffer - GL_COLOR_ATTACHMENT0];
 }
 
 // Validates the attachment list passed to glInvalidate* and reports whether
@@ -1058,6 +1152,8 @@ void AllocateRenderbufferStorage(zgl::Renderbuffer* renderbuffer,
   image.sample_rgba.clear();
   image.sample_depth16.clear();
   image.sample_stencil8.clear();
+  image.integer_rgba.clear();
+  image.sample_integer_rgba.clear();
   const size_t texels =
       static_cast<size_t>(std::max(0, width)) *
       static_cast<size_t>(std::max(0, height));
@@ -1086,9 +1182,16 @@ void AllocateRenderbufferStorage(zgl::Renderbuffer* renderbuffer,
       }
       break;
     default:
-      image.rgba.assign(texels, zgl::PackRgba(0, 0, 0, 0));
-      if (image.samples > 1)
-        image.sample_rgba.assign(sample_texels, zgl::PackRgba(0, 0, 0, 0));
+      if (zgl::IsSignedIntegerFormat(internal_format) ||
+          zgl::IsUnsignedIntegerFormat(internal_format)) {
+        image.integer_rgba.assign(texels * 4, 0u);
+        if (image.samples > 1)
+          image.sample_integer_rgba.assign(sample_texels * 4, 0u);
+      } else {
+        image.rgba.assign(texels, zgl::PackRgba(0, 0, 0, 0));
+        if (image.samples > 1)
+          image.sample_rgba.assign(sample_texels, zgl::PackRgba(0, 0, 0, 0));
+      }
       break;
   }
 }
@@ -1213,6 +1316,12 @@ void glReadPixels(GLint x,
     case GL_LUMINANCE_ALPHA:
       supported = type == GL_UNSIGNED_BYTE || type == GL_FLOAT;
       break;
+    case GL_RGBA_INTEGER:
+    case GL_RGB_INTEGER:
+    case GL_RG_INTEGER:
+    case GL_RED_INTEGER:
+      supported = type == GL_INT || type == GL_UNSIGNED_INT;
+      break;
     default:
       supported = false;
       break;
@@ -1241,6 +1350,13 @@ void glReadPixels(GLint x,
       static_cast<uint8_t*>(pixels) +
       static_cast<size_t>(store.pack_skip_rows) * row_stride +
       static_cast<size_t>(store.pack_skip_pixels) * bytes;
+  const bool integer_read = target.read_integer;
+  if ((format == GL_RGBA_INTEGER || format == GL_RGB_INTEGER ||
+       format == GL_RG_INTEGER || format == GL_RED_INTEGER) &&
+      !integer_read) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   for (GLsizei row = 0; row < height; ++row) {
     // The color surface is stored top-down; GL window y=0 is the bottom row.
     const GLint source_y = target.height - 1 - (y + row);
@@ -1252,13 +1368,19 @@ void glReadPixels(GLint x,
       if (source_x < 0 || source_x >= target.width)
         continue;
       const uint8_t* source =
-          target.color + (static_cast<size_t>(source_y) * target.width +
-                          static_cast<size_t>(source_x)) *
-                             4;
+          target.color +
+          (static_cast<size_t>(source_y) * target.width +
+           static_cast<size_t>(source_x)) *
+              static_cast<size_t>(target.read_color_bytes);
 
-      zgl::WritePixel(source, format, type,
-                      row_start + static_cast<size_t>(column) * bytes);
-
+      if (integer_read) {
+        zgl::WriteIntegerPixel(reinterpret_cast<const uint32_t*>(source),
+                              format, type,
+                              row_start + static_cast<size_t>(column) * bytes);
+      } else {
+        zgl::WritePixel(source, format, type,
+                        row_start + static_cast<size_t>(column) * bytes);
+      }
     }
   }
 }
@@ -1416,6 +1538,13 @@ void glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint* value) {
   if (!context || !value)
     return;
   if (buffer == GL_COLOR) {
+    if (zgl::DrawBufferIsInteger(context, drawbuffer)) {
+      const uint32_t values[4] = {
+          static_cast<uint32_t>(value[0]), static_cast<uint32_t>(value[1]),
+          static_cast<uint32_t>(value[2]), static_cast<uint32_t>(value[3])};
+      zgl::ClearIntegerColourBuffer(context, drawbuffer, values);
+      return;
+    }
     const zgl::Rgba color =
         zgl::Rgba{static_cast<uint8_t>(zgl::ClampInt(value[0], 0, 255)),
                   static_cast<uint8_t>(zgl::ClampInt(value[1], 0, 255)),
@@ -1451,6 +1580,11 @@ void glClearBufferuiv(GLenum buffer, GLint drawbuffer, const GLuint* value) {
   if (!context || !value)
     return;
   if (buffer == GL_COLOR) {
+    if (zgl::DrawBufferIsInteger(context, drawbuffer)) {
+      const uint32_t values[4] = {value[0], value[1], value[2], value[3]};
+      zgl::ClearIntegerColourBuffer(context, drawbuffer, values);
+      return;
+    }
     const zgl::Rgba color = zgl::Rgba{
         static_cast<uint8_t>(zgl::ClampInt(static_cast<int>(value[0]), 0, 255)),
         static_cast<uint8_t>(zgl::ClampInt(static_cast<int>(value[1]), 0, 255)),

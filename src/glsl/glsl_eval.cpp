@@ -1612,6 +1612,7 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
     output->color[i][1] = 0.0f;
     output->color[i][2] = 0.0f;
     output->color[i][3] = 1.0f;
+    output->color_base[i] = BaseType::kFloat;
     output->written[i] = false;
   }
   output->depth = 0.0f;
@@ -1666,6 +1667,7 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
     const Value& value = fragment_globals_[fragment_output.slot];
     for (int i = 0; i < 4; ++i)
       output->color[fragment_output.location][i] = value.data[i];
+    output->color_base[fragment_output.location] = fragment_output.base;
     output->written[fragment_output.location] = true;
   }
   if (uses_frag_depth_) {

@@ -438,7 +438,10 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
                   float* output) const;
   void ProjectVertices(const float* polygon, int count);
   void Interpolate(const Fragment& fragment, float* out) const;
-  void StoreFragmentColor(size_t pixel, int location, const float color[4]);
+  void StoreFragmentColor(size_t pixel,
+                          int location,
+                          const float color[4],
+                          glsl::BaseType base);
   void ApplyStencilOp(GLenum op, size_t pixel, uint8_t reference);
 
   Context* context_;
@@ -1248,7 +1251,8 @@ void Pipeline::Shade(const Fragment& fragment) {
   for (int location = 0; location < glsl::kMaxFragmentOutputs; ++location) {
     if (!output.written[location])
       continue;
-    StoreFragmentColor(pixel, location, output.color[location]);
+    StoreFragmentColor(pixel, location, output.color[location],
+                       output.color_base[location]);
     wrote_color = true;
   }
   if (wrote_color)
@@ -1295,18 +1299,44 @@ void Pipeline::Resolve() {
 
 void Pipeline::StoreFragmentColor(size_t pixel,
                                   int location,
-                                  const float color[4]) {
+                                  const float color[4],
+                                  glsl::BaseType base) {
   if (location < 0 || location >= target_.draw_buffer_count)
     return;
   const GLenum buffer = target_.draw_buffers[location];
   if (buffer < GL_COLOR_ATTACHMENT0 ||
       buffer >= GL_COLOR_ATTACHMENT0 + kMaxColorAttachments)
     return;
-  uint8_t* const destination =
-      target_.colors[buffer - GL_COLOR_ATTACHMENT0];
+  const int attachment = buffer - GL_COLOR_ATTACHMENT0;
+  uint8_t* const destination = target_.colors[attachment];
   if (!destination)
     return;
   const State& state = this->state();
+  if (target_.color_is_integer[attachment]) {
+    uint32_t values[4];
+    const bool unsigned_output =
+        target_.color_is_unsigned[attachment] || base == glsl::BaseType::kUInt;
+    for (int i = 0; i < 4; ++i) {
+      if (unsigned_output)
+        values[i] = static_cast<uint32_t>(color[i]);
+      else
+        values[i] = static_cast<uint32_t>(static_cast<int32_t>(color[i]));
+    }
+    uint32_t* const integer_destination =
+        target_.integer_colors[attachment];
+    if (!integer_destination)
+      return;
+    if (!(state.color_mask[0] && state.color_mask[1] &&
+          state.color_mask[2] && state.color_mask[3])) {
+      uint32_t existing[4];
+      memcpy(existing, integer_destination + pixel * 4, sizeof(existing));
+      for (int i = 0; i < 4; ++i)
+        if (!state.color_mask[i])
+          values[i] = existing[i];
+    }
+    memcpy(integer_destination + pixel * 4, values, sizeof(values));
+    return;
+  }
   if (state.blend.enabled) {
     float destination_color[4];
     uint32_t existing;

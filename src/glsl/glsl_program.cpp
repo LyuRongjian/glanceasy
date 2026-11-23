@@ -205,6 +205,7 @@ bool Program::Link(
       info.name = output.name;
       info.location = location;
       info.slot = output.slot;
+      info.base = output.base;
       fragment_outputs_.push_back(info);
     }
     if (fragment_outputs_.empty()) {

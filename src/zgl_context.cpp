@@ -21,6 +21,74 @@ thread_local Context* g_current_context = nullptr;
 std::unique_ptr<Context> g_default_context;
 int g_live_contexts = 0;
 
+GLenum AttachmentFormat(const Context& context,
+                        const FramebufferAttachment& attachment) {
+  if (attachment.texture) {
+    const Texture* texture = context.textures.Get(attachment.texture);
+    return texture ? texture->internal_format : 0;
+  }
+  if (attachment.renderbuffer) {
+    const Renderbuffer* renderbuffer =
+        context.renderbuffers.Get(attachment.renderbuffer);
+    return renderbuffer ? renderbuffer->format : 0;
+  }
+  return 0;
+}
+
+bool IsIntegerFormat(GLenum format) {
+  switch (format) {
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_RGB10_A2UI:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsUnsignedIntegerFormat(GLenum format) {
+  switch (format) {
+    case GL_R8UI:
+    case GL_R16UI:
+    case GL_R32UI:
+    case GL_RG8UI:
+    case GL_RG16UI:
+    case GL_RG32UI:
+    case GL_RGB8UI:
+    case GL_RGB16UI:
+    case GL_RGB32UI:
+    case GL_RGBA8UI:
+    case GL_RGBA16UI:
+    case GL_RGBA32UI:
+    case GL_RGB10_A2UI:
+      return true;
+    default:
+      return false;
+  }
+}
+
 const TextureImage* AttachmentImage(const Context& context,
                                     const FramebufferAttachment& attachment) {
   if (attachment.texture) {
@@ -56,6 +124,7 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
     for (int i = 1; i < kMaxColorAttachments; ++i)
       target.draw_buffers[i] = GL_NONE;
     target.draw_buffer_count = 1;
+    target.read_color_bytes = 4;
     return target;
   }
   const Framebuffer* framebuffer = context->framebuffers.Get(framebuffer_name);
@@ -70,7 +139,23 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
         color = image;
         samples = std::max(1, image->samples);
       }
-      if (image->samples > 1) {
+      const GLenum format = AttachmentFormat(*context, framebuffer->colors[i]);
+      const bool integer = IsIntegerFormat(format);
+      target.color_is_integer[i] = integer;
+      target.color_is_unsigned[i] = IsUnsignedIntegerFormat(format);
+      target.color_bytes[i] = integer ? 16 : 4;
+      if (integer) {
+        target.integer_colors[i] = const_cast<uint32_t*>(
+            (image->samples > 1 ? image->sample_integer_rgba
+                                : image->integer_rgba)
+                .data());
+        target.colors[i] =
+            reinterpret_cast<uint8_t*>(target.integer_colors[i]);
+        if (image->samples > 1) {
+          target.resolved_integer_colors[i] =
+              const_cast<uint32_t*>(image->integer_rgba.data());
+        }
+      } else if (image->samples > 1) {
         target.colors[i] = reinterpret_cast<uint8_t*>(
             const_cast<uint32_t*>(image->sample_rgba.data()));
         target.resolved_colors[i] =
@@ -104,8 +189,12 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
       break;
     }
   }
-  if (first >= 0 && target.colors[first])
+  if (first >= 0 && target.colors[first]) {
     target.color = target.colors[first];
+    target.read_integer = target.color_is_integer[first];
+    target.read_unsigned = target.color_is_unsigned[first];
+    target.read_color_bytes = target.color_bytes[first];
+  }
   if (depth && depth->width == target.width && depth->height == target.height) {
     target.depth = const_cast<uint16_t*>(depth->depth16.data());
     if (depth->samples > 1) {
@@ -250,9 +339,17 @@ RenderTarget Context::GetReadTarget() {
       const int index =
           static_cast<int>(framebuffer->read_buffer - GL_COLOR_ATTACHMENT0);
       target.color = target.colors[index];
-      if (target.multisampled() && target.resolved_colors[index])
+      target.read_integer = target.color_is_integer[index];
+      target.read_unsigned = target.color_is_unsigned[index];
+      target.read_color_bytes = target.color_bytes[index];
+      if (target.multisampled() &&
+          target.resolved_integer_colors[index]) {
+        target.color = reinterpret_cast<uint8_t*>(
+            target.resolved_integer_colors[index]);
+      } else if (target.multisampled() && target.resolved_colors[index]) {
         target.color =
             reinterpret_cast<uint8_t*>(target.resolved_colors[index]);
+      }
     }
   }
   return target;
