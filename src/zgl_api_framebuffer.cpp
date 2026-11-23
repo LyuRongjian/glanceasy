@@ -791,6 +791,109 @@ GLenum glCheckFramebufferStatus(GLenum target) {
   return zgl::CheckCompleteness(context, *framebuffer);
 }
 
+namespace {
+
+int ColorComponentBits(GLenum format, int channel) {
+  int bits[4] = {0, 0, 0, 0};
+  switch (format) {
+    case GL_R8:
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_RG8:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RGB8:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGBA8:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_SRGB8_ALPHA8:
+      bits[0] = bits[1] = bits[2] = bits[3] = 8;
+      if (format == GL_R8 || format == GL_R8I || format == GL_R8UI)
+        bits[1] = bits[2] = bits[3] = 0;
+      else if (format == GL_RG8 || format == GL_RG8I || format == GL_RG8UI)
+        bits[2] = bits[3] = 0;
+      else if (format == GL_RGB8 || format == GL_RGB8I || format == GL_RGB8UI)
+        bits[3] = 0;
+      break;
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA16F:
+      bits[0] = bits[1] = bits[2] = bits[3] = 16;
+      if (format == GL_R16I || format == GL_R16UI)
+        bits[1] = bits[2] = bits[3] = 0;
+      else if (format == GL_RG16I || format == GL_RG16UI)
+        bits[2] = bits[3] = 0;
+      break;
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_RGBA32F:
+      bits[0] = bits[1] = bits[2] = bits[3] = 32;
+      if (format == GL_R32I || format == GL_R32UI)
+        bits[1] = bits[2] = bits[3] = 0;
+      else if (format == GL_RG32I || format == GL_RG32UI)
+        bits[2] = bits[3] = 0;
+      break;
+    case GL_RGBA4:
+      bits[0] = bits[1] = bits[2] = bits[3] = 4;
+      break;
+    case GL_RGB5_A1:
+      bits[0] = bits[1] = bits[2] = 5;
+      bits[3] = 1;
+      break;
+    case GL_RGB565:
+      bits[0] = 5;
+      bits[1] = 6;
+      bits[2] = 5;
+      break;
+    case GL_RGB10_A2:
+    case GL_RGB10_A2UI:
+      bits[0] = bits[1] = bits[2] = 10;
+      bits[3] = 2;
+      break;
+    default:
+      break;
+  }
+  return bits[channel];
+}
+
+bool HasColorStorage(const zgl::FramebufferAttachment* slot, GLenum format) {
+  if (slot->texture) {
+    const zgl::Texture* texture = zgl::ApiContext()->textures.Get(slot->texture);
+    if (!texture)
+      return false;
+    int face = 0;
+    if (slot->cube_face >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+        slot->cube_face <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z) {
+      face = static_cast<int>(slot->cube_face - GL_TEXTURE_CUBE_MAP_POSITIVE_X);
+    }
+    const zgl::TextureImage* image = texture->image(slot->level, face);
+    return image && image->width > 0 && image->height > 0 &&
+           (!image->rgba.empty() || !image->integer_rgba.empty());
+  }
+  if (slot->renderbuffer) {
+    const zgl::Renderbuffer* renderbuffer =
+        zgl::ApiContext()->renderbuffers.Get(slot->renderbuffer);
+    if (!renderbuffer)
+      return false;
+    return renderbuffer->width > 0 && renderbuffer->height > 0 &&
+           (!renderbuffer->image.rgba.empty() ||
+            !renderbuffer->image.integer_rgba.empty());
+  }
+  return false;
+}
+
+}  // namespace
+
 void glGetFramebufferAttachmentParameteriv(GLenum target,
                                            GLenum attachment,
                                            GLenum pname,
@@ -893,11 +996,23 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
     case GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE:
     case GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE:
     case GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE:
-    case GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE:
-      params[0] = has_color ? 8 : 0;
+    case GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE: {
+      const bool stored = HasColorStorage(slot, format);
+      params[0] = stored
+                      ? ColorComponentBits(
+                            format, pname - GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE)
+                      : 0;
       return;
+    }
     case GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE:
-      params[0] = has_depth ? (format == GL_DEPTH_COMPONENT32F ? 32 : 16) : 0;
+      params[0] = has_depth ? (format == GL_DEPTH_COMPONENT32F ||
+                                       format == GL_DEPTH32F_STENCIL8
+                                   ? 32
+                                   : format == GL_DEPTH_COMPONENT24 ||
+                                             format == GL_DEPTH24_STENCIL8
+                                         ? 24
+                                         : 16)
+                            : 0;
       return;
     case GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE:
       params[0] = has_stencil ? 8 : 0;
@@ -907,6 +1022,8 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
         params[0] = GL_NONE;
       else if (has_depth || has_stencil)
         params[0] = GL_UNSIGNED_INT;
+      else if (has_color && !HasColorStorage(slot, format))
+        params[0] = GL_NONE;
       else if (zgl::IsSignedIntegerFormat(format))
         params[0] = GL_INT;
       else if (zgl::IsUnsignedIntegerFormat(format))
@@ -1267,11 +1384,85 @@ void glGetRenderbufferParameteriv(GLenum target, GLenum pname, GLint* params) {
     case GL_RENDERBUFFER_RED_SIZE:
     case GL_RENDERBUFFER_GREEN_SIZE:
     case GL_RENDERBUFFER_BLUE_SIZE:
-    case GL_RENDERBUFFER_ALPHA_SIZE:
-      params[0] = renderbuffer->image.rgba.empty() ? 0 : 8;
+    case GL_RENDERBUFFER_ALPHA_SIZE: {
+      int bits[4] = {0, 0, 0, 0};
+      switch (renderbuffer->format) {
+        case GL_R8:
+        case GL_R8I:
+        case GL_R8UI:
+          bits[0] = 8;
+          break;
+        case GL_R16I:
+        case GL_R16UI:
+          bits[0] = 16;
+          break;
+        case GL_R32I:
+        case GL_R32UI:
+          bits[0] = 32;
+          break;
+        case GL_RG8:
+        case GL_RG8I:
+        case GL_RG8UI:
+          bits[0] = bits[1] = 8;
+          break;
+        case GL_RG16I:
+        case GL_RG16UI:
+          bits[0] = bits[1] = 16;
+          break;
+        case GL_RG32I:
+        case GL_RG32UI:
+          bits[0] = bits[1] = 32;
+          break;
+        case GL_RGB8:
+        case GL_RGB8I:
+        case GL_RGB8UI:
+          bits[0] = bits[1] = bits[2] = 8;
+          break;
+        case GL_RGB565:
+          bits[0] = 5;
+          bits[1] = 6;
+          bits[2] = 5;
+          break;
+        case GL_RGBA4:
+          bits[0] = bits[1] = bits[2] = bits[3] = 4;
+          break;
+        case GL_RGB5_A1:
+          bits[0] = bits[1] = bits[2] = 5;
+          bits[3] = 1;
+          break;
+        case GL_RGB10_A2:
+        case GL_RGB10_A2UI:
+          bits[0] = bits[1] = bits[2] = 10;
+          bits[3] = 2;
+          break;
+        case GL_RGBA8:
+        case GL_RGBA8I:
+        case GL_RGBA8UI:
+        case GL_SRGB8_ALPHA8:
+          bits[0] = bits[1] = bits[2] = bits[3] = 8;
+          break;
+        case GL_RGBA16I:
+        case GL_RGBA16UI:
+          bits[0] = bits[1] = bits[2] = bits[3] = 16;
+          break;
+        case GL_RGBA32I:
+        case GL_RGBA32UI:
+          bits[0] = bits[1] = bits[2] = bits[3] = 32;
+          break;
+        default:
+          break;
+      }
+      params[0] = bits[pname - GL_RENDERBUFFER_RED_SIZE];
       return;
+    }
     case GL_RENDERBUFFER_DEPTH_SIZE:
-      params[0] = renderbuffer->image.depth16.empty() ? 0 : 16;
+      params[0] = renderbuffer->format == GL_DEPTH_COMPONENT24 ||
+                          renderbuffer->format == GL_DEPTH24_STENCIL8
+                      ? 24
+                      : renderbuffer->format == GL_DEPTH_COMPONENT32F ||
+                                renderbuffer->format == GL_DEPTH32F_STENCIL8
+                            ? 32
+                            : renderbuffer->image.depth16.empty() ? 0 : 16;
       return;
     case GL_RENDERBUFFER_STENCIL_SIZE:
       params[0] = renderbuffer->image.stencil8.empty() ? 0 : 8;

@@ -509,19 +509,6 @@ GLboolean glIsEnabledi(GLenum target, GLuint index) {
   return glIsEnabled(target);
 }
 
-// ---- Integer vertex attributes -------------------------------------------
-
-void glGetVertexAttribIiv(GLuint index, GLenum pname, GLint* params) {
-  glGetVertexAttribiv(index, pname, params);
-}
-
-void glGetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params) {
-  GLint value = 0;
-  glGetVertexAttribiv(index, pname, &value);
-  if (params)
-    params[0] = static_cast<GLuint>(value);
-}
-
 // ---- Compute and indirect draws ------------------------------------------
 
 void glDispatchCompute(GLuint num_groups_x,

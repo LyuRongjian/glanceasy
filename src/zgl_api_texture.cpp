@@ -913,7 +913,23 @@ void glTexParameteri(GLenum target, GLenum pname, GLint param) {
 }
 
 void glTexParameterf(GLenum target, GLenum pname, GLfloat param) {
-  glTexParameteri(target, pname, static_cast<GLint>(param));
+  if (pname == GL_TEXTURE_MIN_LOD || pname == GL_TEXTURE_MAX_LOD) {
+    zgl::Context* context = zgl::ApiContext();
+    if (!context)
+      return;
+    int face = 0;
+    zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+    if (!texture)
+      return;
+    if (pname == GL_TEXTURE_MIN_LOD)
+      texture->min_lod = param;
+    else
+      texture->max_lod = param;
+    return;
+  }
+  const GLint value =
+      static_cast<GLint>(param >= 0.0f ? param + 0.5f : param - 0.5f);
+  glTexParameteri(target, pname, value);
 }
 
 void glTexParameteriv(GLenum target, GLenum pname, const GLint* params) {
@@ -925,7 +941,7 @@ void glTexParameteriv(GLenum target, GLenum pname, const GLint* params) {
 void glTexParameterfv(GLenum target, GLenum pname, const GLfloat* params) {
   if (!params)
     return;
-  glTexParameteri(target, pname, static_cast<GLint>(params[0]));
+  glTexParameterf(target, pname, params[0]);
 }
 
 void glGetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
@@ -962,7 +978,7 @@ void glGetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
       params[0] = texture->immutable ? GL_TRUE : GL_FALSE;
       return;
     case GL_TEXTURE_IMMUTABLE_LEVELS:
-      params[0] = texture->levels;
+      params[0] = texture->immutable ? texture->levels : 0;
       return;
     case GL_TEXTURE_WIDTH:
       params[0] = texture->width;
@@ -977,10 +993,14 @@ void glGetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
       params[0] = static_cast<GLint>(texture->compare_func);
       return;
     case GL_TEXTURE_MIN_LOD:
-      params[0] = static_cast<GLint>(texture->min_lod);
+      params[0] = static_cast<GLint>(texture->min_lod >= 0.0f
+                                         ? texture->min_lod + 0.5f
+                                         : texture->min_lod - 0.5f);
       return;
     case GL_TEXTURE_MAX_LOD:
-      params[0] = static_cast<GLint>(texture->max_lod);
+      params[0] = static_cast<GLint>(texture->max_lod >= 0.0f
+                                         ? texture->max_lod + 0.5f
+                                         : texture->max_lod - 0.5f);
       return;
     case GL_TEXTURE_SWIZZLE_R:
       params[0] = static_cast<GLint>(texture->swizzle_r);
@@ -1003,6 +1023,21 @@ void glGetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
 void glGetTexParameterfv(GLenum target, GLenum pname, GLfloat* params) {
   if (!params)
     return;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  int face = 0;
+  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  if (!texture)
+    return;
+  if (pname == GL_TEXTURE_MIN_LOD) {
+    params[0] = texture->min_lod;
+    return;
+  }
+  if (pname == GL_TEXTURE_MAX_LOD) {
+    params[0] = texture->max_lod;
+    return;
+  }
   GLint value = 0;
   glGetTexParameteriv(target, pname, &value);
   params[0] = static_cast<GLfloat>(value);
@@ -1515,6 +1550,12 @@ void glSamplerParameteri(GLuint sampler, GLenum pname, GLint param) {
     case GL_TEXTURE_COMPARE_FUNC:
       object->compare_func = static_cast<GLenum>(param);
       return;
+    case GL_TEXTURE_MIN_LOD:
+      object->min_lod = static_cast<GLfloat>(param);
+      return;
+    case GL_TEXTURE_MAX_LOD:
+      object->max_lod = static_cast<GLfloat>(param);
+      return;
     default:
       context->SetError(GL_INVALID_ENUM);
       return;
@@ -1764,6 +1805,16 @@ void glGetSamplerParameteriv(GLuint sampler, GLenum pname, GLint* params) {
       return;
     case GL_TEXTURE_COMPARE_FUNC:
       params[0] = static_cast<GLint>(object->compare_func);
+      return;
+    case GL_TEXTURE_MIN_LOD:
+      params[0] = static_cast<GLint>(object->min_lod >= 0.0f
+                                         ? object->min_lod + 0.5f
+                                         : object->min_lod - 0.5f);
+      return;
+    case GL_TEXTURE_MAX_LOD:
+      params[0] = static_cast<GLint>(object->max_lod >= 0.0f
+                                         ? object->max_lod + 0.5f
+                                         : object->max_lod - 0.5f);
       return;
     default:
       context->SetError(GL_INVALID_ENUM);

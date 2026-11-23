@@ -184,7 +184,7 @@ class Renderbuffer {
   int width = 0;
   int height = 0;
   int samples = 0;
-  GLenum format = GL_RGBA8;
+  GLenum format = GL_RGBA4;
   TextureImage image;
 };
 
@@ -436,6 +436,7 @@ struct State {
   GLuint textures[kMaxCombinedTextureUnits] = {};
   GLuint samplers[kMaxCombinedTextureUnits] = {};
   float current_attribute[kMaxVertexAttribs][4] = {};
+  GLint current_attribute_integer[kMaxVertexAttribs][4] = {};
   GLuint array_buffer = 0;
   GLuint element_buffer = 0;
   GLuint copy_read_buffer = 0;

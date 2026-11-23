@@ -68,6 +68,8 @@ bool ValidAttributeType(GLenum type) {
     case GL_FLOAT:
     case GL_HALF_FLOAT:
     case GL_FIXED:
+    case GL_INT_2_10_10_10_REV:
+    case GL_UNSIGNED_INT_2_10_10_10_REV:
       return true;
     default:
       return false;
@@ -106,7 +108,6 @@ void SetAttributePointer(GLuint index,
     return;
   }
   VertexAttribute& attribute = array->attributes[index];
-  attribute.enabled = true;
   attribute.size = size;
   attribute.type = type;
   attribute.normalized = normalized != GL_FALSE;
@@ -593,8 +594,51 @@ void glVertexAttrib4fv(GLuint index, const GLfloat* values) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  for (int i = 0; i < 4; ++i)
+  for (int i = 0; i < 4; ++i) {
     context->state.current_attribute[index][i] = values[i];
+    context->state.current_attribute_integer[index][i] =
+        values[i] >= 0.0f ? static_cast<GLint>(values[i] + 0.5f)
+                          : static_cast<GLint>(values[i] - 0.5f);
+  }
+}
+
+void glVertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint w) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const GLint values[4] = {x, y, z, w};
+  for (int i = 0; i < 4; ++i) {
+    context->state.current_attribute[index][i] =
+        static_cast<float>(values[i]);
+    context->state.current_attribute_integer[index][i] = values[i];
+  }
+}
+
+void glVertexAttribI4iv(GLuint index, const GLint* values) {
+  if (!values)
+    return;
+  glVertexAttribI4i(index, values[0], values[1], values[2], values[3]);
+}
+
+void glVertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z, GLuint w) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const GLuint values[4] = {x, y, z, w};
+  for (int i = 0; i < 4; ++i) {
+    context->state.current_attribute[index][i] =
+        static_cast<float>(values[i]);
+    context->state.current_attribute_integer[index][i] =
+        static_cast<GLint>(values[i]);
+  }
 }
 
 void glGetVertexAttribiv(GLuint index, GLenum pname, GLint* params) {
@@ -633,13 +677,37 @@ void glGetVertexAttribiv(GLuint index, GLenum pname, GLint* params) {
     case GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING:
       params[0] = static_cast<GLint>(attribute.buffer);
       return;
+    case GL_VERTEX_ATTRIB_ARRAY_INTEGER:
+      params[0] = attribute.integer ? GL_TRUE : GL_FALSE;
+      return;
     case GL_CURRENT_VERTEX_ATTRIB:
-      params[0] = 0;
+      for (int i = 0; i < 4; ++i)
+        params[i] = context->state.current_attribute_integer[index][i];
       return;
     default:
       context->SetError(GL_INVALID_ENUM);
       return;
   }
+}
+
+void glVertexAttribI4uiv(GLuint index, const GLuint* values) {
+  if (!values)
+    return;
+  glVertexAttribI4ui(index, values[0], values[1], values[2], values[3]);
+}
+
+void glGetVertexAttribIiv(GLuint index, GLenum pname, GLint* params) {
+  glGetVertexAttribiv(index, pname, params);
+}
+
+void glGetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params) {
+  GLint values[4] = {};
+  glGetVertexAttribiv(index, pname, values);
+  if (!params)
+    return;
+  const int count = pname == GL_CURRENT_VERTEX_ATTRIB ? 4 : 1;
+  for (int i = 0; i < count; ++i)
+    params[i] = static_cast<GLuint>(values[i]);
 }
 
 void glGetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) {

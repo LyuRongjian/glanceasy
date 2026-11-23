@@ -229,10 +229,14 @@ void glGetShaderiv(GLuint shader, GLenum pname, GLint* params) {
       params[0] = static_cast<GLint>(object->type);
       return;
     case GL_INFO_LOG_LENGTH:
-      params[0] = static_cast<GLint>(object->log.size());
+      params[0] = object->log.empty()
+                      ? 0
+                      : static_cast<GLint>(object->log.size() + 1);
       return;
     case GL_SHADER_SOURCE_LENGTH:
-      params[0] = static_cast<GLint>(object->source.size());
+      params[0] = object->source.empty()
+                      ? 0
+                      : static_cast<GLint>(object->source.size() + 1);
       return;
     case GL_DELETE_STATUS:
       params[0] = GL_FALSE;
@@ -255,7 +259,9 @@ void glGetShaderInfoLog(GLuint shader,
     return;
   zgl::SetInfoLog(&object->log, info_log, max_length);
   if (length)
-    *length = static_cast<GLsizei>(object->log.size());
+    *length = static_cast<GLsizei>(
+        std::min(static_cast<int>(object->log.size()),
+                 std::max(0, static_cast<int>(max_length) - 1)));
 }
 
 GLuint glCreateProgram(void) {
@@ -419,7 +425,9 @@ void glGetProgramiv(GLuint program, GLenum pname, GLint* params) {
       params[0] = object->linked ? GL_TRUE : GL_FALSE;
       return;
     case GL_INFO_LOG_LENGTH:
-      params[0] = static_cast<GLint>(object->log.size());
+      params[0] = object->log.empty()
+                      ? 0
+                      : static_cast<GLint>(object->log.size() + 1);
       return;
     case GL_ATTACHED_SHADERS:
       params[0] = static_cast<GLint>(object->shaders.size());
@@ -434,6 +442,26 @@ void glGetProgramiv(GLuint program, GLenum pname, GLint* params) {
                       ? static_cast<GLint>(object->program->uniforms().size())
                       : 0;
       return;
+    case GL_ACTIVE_ATTRIBUTE_MAX_LENGTH: {
+      int length = 0;
+      if (object->program) {
+        for (const auto& attribute : object->program->attributes()) {
+          length = std::max(length, static_cast<int>(attribute.name.size()) + 1);
+        }
+      }
+      params[0] = length;
+      return;
+    }
+    case GL_ACTIVE_UNIFORM_MAX_LENGTH: {
+      int length = 0;
+      if (object->program) {
+        for (const auto& uniform : object->program->uniforms()) {
+          length = std::max(length, static_cast<int>(uniform.name.size()) + 1);
+        }
+      }
+      params[0] = length;
+      return;
+    }
     case GL_ACTIVE_UNIFORM_BLOCKS:
       params[0] = 0;
       return;
@@ -473,7 +501,53 @@ void glGetProgramInfoLog(GLuint program,
   }
   zgl::SetInfoLog(&object->log, info_log, max_length);
   if (length)
-    *length = static_cast<GLsizei>(object->log.size());
+    *length = static_cast<GLsizei>(
+        std::min(static_cast<int>(object->log.size()),
+                 std::max(0, static_cast<int>(max_length) - 1)));
+}
+
+void glGetShaderSource(GLuint shader,
+                       GLsizei max_length,
+                       GLsizei* length,
+                       GLchar* source) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ShaderObject* object = zgl::LookupShader(context, shader);
+  if (!object)
+    return;
+  const int copy = std::min(static_cast<int>(object->source.size()),
+                            std::max(0, static_cast<int>(max_length) - 1));
+  if (source && max_length > 0) {
+    if (copy > 0)
+      memcpy(source, object->source.c_str(), static_cast<size_t>(copy));
+    source[copy] = '\0';
+  }
+  if (length)
+    *length = copy;
+}
+
+void glGetAttachedShaders(GLuint program,
+                          GLsizei max_count,
+                          GLsizei* count,
+                          GLuint* shaders) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const int total = static_cast<int>(object->shaders.size());
+  const int written =
+      max_count < 0 ? 0 : std::min(static_cast<int>(max_count), total);
+  if (shaders && written > 0) {
+    for (int i = 0; i < written; ++i)
+      shaders[i] = object->shaders[static_cast<size_t>(i)];
+  }
+  if (count)
+    *count = written;
 }
 
 void glUseProgram(GLuint program) {
@@ -561,12 +635,15 @@ void glGetActiveAttrib(GLuint program,
     *size = attribute.type.components();
   if (type)
     *type = zgl::GlslTypeToGlEnum(attribute.type);
+  const int copy = buffer_size > 0
+                       ? std::min(static_cast<int>(attribute.name.size()),
+                                  static_cast<int>(buffer_size) - 1)
+                       : 0;
   if (length)
-    *length = static_cast<GLsizei>(attribute.name.size());
+    *length = copy;
   if (name && buffer_size > 0) {
-    const int copy = std::min(static_cast<int>(attribute.name.size()),
-                              static_cast<int>(buffer_size) - 1);
-    memcpy(name, attribute.name.c_str(), static_cast<size_t>(copy));
+    if (copy > 0)
+      memcpy(name, attribute.name.c_str(), static_cast<size_t>(copy));
     name[copy] = '\0';
   }
 }
@@ -596,12 +673,15 @@ void glGetActiveUniform(GLuint program,
     *size = 1;
   if (type)
     *type = zgl::GlslTypeToGlEnum(uniform.type);
+  const int copy = buffer_size > 0
+                       ? std::min(static_cast<int>(uniform.name.size()),
+                                  static_cast<int>(buffer_size) - 1)
+                       : 0;
   if (length)
-    *length = static_cast<GLsizei>(uniform.name.size());
+    *length = copy;
   if (name && buffer_size > 0) {
-    const int copy = std::min(static_cast<int>(uniform.name.size()),
-                              static_cast<int>(buffer_size) - 1);
-    memcpy(name, uniform.name.c_str(), static_cast<size_t>(copy));
+    if (copy > 0)
+      memcpy(name, uniform.name.c_str(), static_cast<size_t>(copy));
     name[copy] = '\0';
   }
 }
@@ -992,8 +1072,11 @@ void glGetUniformiv(GLuint program, GLint location, GLint* params) {
   const zgl::glsl::Value* value = object->program->uniform_value(location);
   if (!value)
     return;
-  for (int i = 0; i < value->type.components(); ++i)
-    params[i] = static_cast<GLint>(value->Data()[i]);
+  for (int i = 0; i < value->type.components(); ++i) {
+    params[i] = value->type.base() == zgl::glsl::BaseType::kBool
+                    ? (value->Data()[i] != 0.0f ? 1 : 0)
+                    : static_cast<GLint>(value->Data()[i]);
+  }
 }
 
 void glGetUniformuiv(GLuint program, GLint location, GLuint* params) {

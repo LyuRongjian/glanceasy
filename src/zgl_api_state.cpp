@@ -300,6 +300,7 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       return true;
     }
     case GL_PROGRAM_BINARY_FORMATS:
+    case GL_NUM_PROGRAM_BINARY_FORMATS:
       *first = 0;
       return true;
     case GL_DEPTH_FUNC:
@@ -1154,7 +1155,8 @@ static bool ValidBlendFactor(GLenum factor) {
 
 static bool ValidBlendEquation(GLenum equation) {
   return equation == GL_FUNC_ADD || equation == GL_FUNC_SUBTRACT ||
-         equation == GL_FUNC_REVERSE_SUBTRACT;
+         equation == GL_FUNC_REVERSE_SUBTRACT || equation == GL_MIN ||
+         equation == GL_MAX;
 }
 
 void glBlendFuncSeparate(GLenum source_rgb,

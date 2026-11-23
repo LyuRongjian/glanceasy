@@ -299,8 +299,10 @@ Context::Context(int width, int height) {
   surface.AllocateStencil(width, height);
   state.viewport = Rect{0, 0, width, height};
   state.scissor = Rect{0, 0, width, height};
-  for (int i = 0; i < kMaxVertexAttribs; ++i)
+  for (int i = 0; i < kMaxVertexAttribs; ++i) {
     state.current_attribute[i][3] = 1.0f;
+    state.current_attribute_integer[i][3] = 1;
+  }
   diagnostics = "ZCat-GLES 0.1.0 RGBA8/16-bit depth/8-bit stencil";
   ++g_live_contexts;
 }
