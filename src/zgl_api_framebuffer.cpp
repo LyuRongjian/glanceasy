@@ -563,15 +563,20 @@ bool InvalidateAccepted(Context* context,
     const GLenum attachment = attachments ? attachments[i] : GL_NONE;
     const bool depth_stencil = attachment == GL_DEPTH_ATTACHMENT ||
                                attachment == GL_STENCIL_ATTACHMENT ||
-                               attachment == GL_DEPTH_STENCIL_ATTACHMENT;
+                               attachment == GL_DEPTH_STENCIL_ATTACHMENT ||
+                               attachment == GL_DEPTH || attachment == GL_STENCIL;
     const bool colour =
-        attachment >= GL_COLOR_ATTACHMENT0 &&
-        attachment < GL_COLOR_ATTACHMENT0 + kMaxColorAttachments;
+        attachment == GL_COLOR ||
+        (attachment >= GL_COLOR_ATTACHMENT0 &&
+         attachment < GL_COLOR_ATTACHMENT0 + kMaxColorAttachments);
     if (!depth_stencil && !colour) {
       context->SetError(GL_INVALID_ENUM);
       return false;
     }
     if (!framebuffer)
+      continue;
+    if (attachment == GL_COLOR || attachment == GL_DEPTH ||
+        attachment == GL_STENCIL)
       continue;
     bool bound = false;
     if (colour) {
