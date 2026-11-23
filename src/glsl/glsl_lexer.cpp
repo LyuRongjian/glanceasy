@@ -119,6 +119,11 @@ std::string ExpandIdentifiers(const std::string& line,
     while (i < line.size() && IsIdentChar(line[i]))
       ++i;
     const std::string name = line.substr(start, i - start);
+    if (start > 0 && (std::isdigit(static_cast<unsigned char>(line[start - 1])) ||
+                      line[start - 1] == '.')) {
+      out += name;
+      continue;
+    }
     if (name == "__LINE__") {
       out += std::to_string(line_number);
       continue;
@@ -188,17 +193,365 @@ std::string ExpandIdentifiers(const std::string& line,
   return out;
 }
 
+std::string NormalizeMacroText(const std::string& text) {
+  std::string out;
+  bool pending_space = false;
+  for (char c : text) {
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+      pending_space = !out.empty();
+    } else {
+      if (pending_space)
+        out += ' ';
+      pending_space = false;
+      out += c;
+    }
+  }
+  return out;
+}
+
+bool IsPreprocessorDefined(const std::map<std::string, Macro>& macros,
+                           const std::string& name) {
+  return macros.count(name) != 0 || name == "__LINE__" || name == "__FILE__" ||
+         name == "__VERSION__" || name == "GL_ES";
+}
+
+// Replace defined(NAME) and defined NAME before macro expansion so that the
+// operand is not expanded as an ordinary identifier.
+std::string ResolveDefined(const std::string& expr,
+                           const std::map<std::string, Macro>& macros) {
+  std::string out;
+  size_t i = 0;
+  while (i < expr.size()) {
+    if (IsIdentStart(expr[i])) {
+      const size_t start = i;
+      while (i < expr.size() && IsIdentChar(expr[i]))
+        ++i;
+      const std::string name = expr.substr(start, i - start);
+      if (name != "defined") {
+        out += name;
+        continue;
+      }
+      size_t p = i;
+      while (p < expr.size() && (expr[p] == ' ' || expr[p] == '\t'))
+        ++p;
+      bool parenthesised = false;
+      if (p < expr.size() && expr[p] == '(') {
+        parenthesised = true;
+        ++p;
+        while (p < expr.size() && (expr[p] == ' ' || expr[p] == '\t'))
+          ++p;
+      }
+      const size_t name_start = p;
+      while (p < expr.size() && IsIdentChar(expr[p]))
+        ++p;
+      const std::string operand = expr.substr(name_start, p - name_start);
+      bool closed = false;
+      if (parenthesised) {
+        while (p < expr.size() && (expr[p] == ' ' || expr[p] == '\t'))
+          ++p;
+        if (p < expr.size() && expr[p] == ')') {
+          ++p;
+          closed = true;
+        }
+      }
+      if (operand.empty() || (parenthesised && !closed)) {
+        out += "__zgl_invalid_defined_operand__";
+      } else {
+        out += IsPreprocessorDefined(macros, operand) ? "1" : "0";
+      }
+      i = p;
+    } else {
+      out += expr[i++];
+    }
+  }
+  return out;
+}
+
+class ExpressionParser {
+ public:
+  explicit ExpressionParser(const std::string& text) : text_(text) {}
+
+  bool Parse(long long* value) {
+    *value = ParseConditional();
+    SkipSpace();
+    return ok_ && pos_ == text_.size();
+  }
+
+ private:
+  void SkipSpace() {
+    while (pos_ < text_.size() &&
+           (text_[pos_] == ' ' || text_[pos_] == '\t'))
+      ++pos_;
+  }
+
+  bool Match(const char* token) {
+    SkipSpace();
+    const size_t length = std::strlen(token);
+    if (text_.compare(pos_, length, token) != 0)
+      return false;
+    if (length == 1) {
+      const char next = pos_ + 1 < text_.size() ? text_[pos_ + 1] : '\0';
+      const char c = token[0];
+      if ((c == '&' && next == '&') || (c == '|' && next == '|') ||
+          (c == '<' && (next == '<' || next == '=')) ||
+          (c == '>' && (next == '>' || next == '=')) ||
+          ((c == '+' || c == '-') && next == c) ||
+          ((c == '+' || c == '-' || c == '*' || c == '/' || c == '%' ||
+            c == '!' || c == '^' || c == '=') &&
+           next == '='))
+        return false;
+    }
+    pos_ += length;
+    return true;
+  }
+
+  long long ParseConditional() {
+    long long condition = ParseLogicalOr();
+    if (Match("?")) {
+      long long true_value = ParseConditional();
+      if (!Match(":")) {
+        ok_ = false;
+        return 0;
+      }
+      long long false_value = ParseConditional();
+      return condition ? true_value : false_value;
+    }
+    return condition;
+  }
+
+  long long ParseLogicalOr() {
+    long long value = ParseLogicalAnd();
+    while (true) {
+      if (!Match("||"))
+        return value;
+      const bool lhs_true = value != 0;
+      const bool saved_ok = ok_;
+      const long long rhs = ParseLogicalAnd();
+      if (lhs_true)
+        ok_ = saved_ok;
+      value = (lhs_true || rhs != 0) ? 1 : 0;
+    }
+  }
+
+  long long ParseLogicalAnd() {
+    long long value = ParseBitOr();
+    while (true) {
+      if (!Match("&&"))
+        return value;
+      const bool lhs_false = value == 0;
+      const bool saved_ok = ok_;
+      const long long rhs = ParseBitOr();
+      if (lhs_false)
+        ok_ = saved_ok;
+      value = (!lhs_false && rhs != 0) ? 1 : 0;
+    }
+  }
+
+  long long ParseBitOr() {
+    long long value = ParseBitXor();
+    while (true) {
+      if (!Match("|"))
+        return value;
+      value |= ParseBitXor();
+    }
+  }
+
+  long long ParseBitXor() {
+    long long value = ParseBitAnd();
+    while (true) {
+      if (!Match("^"))
+        return value;
+      value ^= ParseBitAnd();
+    }
+  }
+
+  long long ParseBitAnd() {
+    long long value = ParseEquality();
+    while (true) {
+      if (!Match("&"))
+        return value;
+      value &= ParseEquality();
+    }
+  }
+
+  long long ParseEquality() {
+    long long value = ParseRelational();
+    while (true) {
+      if (Match("==")) {
+        value = value == ParseRelational();
+      } else if (Match("!=")) {
+        value = value != ParseRelational();
+      } else {
+        return value;
+      }
+    }
+  }
+
+  long long ParseRelational() {
+    long long value = ParseShift();
+    while (true) {
+      if (Match("<=")) {
+        value = value <= ParseShift();
+      } else if (Match(">=")) {
+        value = value >= ParseShift();
+      } else if (Match("<")) {
+        value = value < ParseShift();
+      } else if (Match(">")) {
+        value = value > ParseShift();
+      } else {
+        return value;
+      }
+    }
+  }
+
+  long long ParseShift() {
+    long long value = ParseAdditive();
+    while (true) {
+      if (Match("<<")) {
+        value = value << ParseAdditive();
+      } else if (Match(">>")) {
+        value = value >> ParseAdditive();
+      } else {
+        return value;
+      }
+    }
+  }
+
+  long long ParseAdditive() {
+    long long value = ParseMultiplicative();
+    while (true) {
+      if (Match("+")) {
+        value += ParseMultiplicative();
+      } else if (Match("-")) {
+        value -= ParseMultiplicative();
+      } else {
+        return value;
+      }
+    }
+  }
+
+  long long ParseMultiplicative() {
+    long long value = ParseUnary();
+    while (true) {
+      if (Match("*")) {
+        value *= ParseUnary();
+      } else if (Match("/")) {
+        const long long rhs = ParseUnary();
+        if (rhs == 0) {
+          ok_ = false;
+          return 0;
+        }
+        value /= rhs;
+      } else if (Match("%")) {
+        const long long rhs = ParseUnary();
+        if (rhs == 0) {
+          ok_ = false;
+          return 0;
+        }
+        value %= rhs;
+      } else {
+        return value;
+      }
+    }
+  }
+
+  long long ParseUnary() {
+    if (Match("+"))
+      return ParseUnary();
+    if (Match("-"))
+      return -ParseUnary();
+    if (Match("!"))
+      return ParseUnary() == 0;
+    if (Match("~"))
+      return ~ParseUnary();
+    return ParsePrimary();
+  }
+
+  long long ParsePrimary() {
+    SkipSpace();
+    if (pos_ >= text_.size()) {
+      ok_ = false;
+      return 0;
+    }
+    if (text_[pos_] == '(') {
+      ++pos_;
+      const long long value = ParseConditional();
+      if (!Match(")")) {
+        ok_ = false;
+        return 0;
+      }
+      return value;
+    }
+    if (IsIdentStart(text_[pos_])) {
+      const size_t start = pos_;
+      while (pos_ < text_.size() && IsIdentChar(text_[pos_]))
+        ++pos_;
+      // Undefined identifiers are an error in GLSL ES preprocessor
+      // expressions.
+      (void)start;
+      ok_ = false;
+      return 0;
+    }
+    if (std::isdigit(static_cast<unsigned char>(text_[pos_]))) {
+      const size_t start = pos_;
+      if (text_.compare(pos_, 2, "0x") == 0 ||
+          text_.compare(pos_, 2, "0X") == 0) {
+        pos_ += 2;
+        while (pos_ < text_.size() &&
+               std::isxdigit(static_cast<unsigned char>(text_[pos_])))
+          ++pos_;
+      } else {
+        while (pos_ < text_.size() &&
+               std::isdigit(static_cast<unsigned char>(text_[pos_])))
+          ++pos_;
+      }
+      const std::string number = text_.substr(start, pos_ - start);
+      char* end = nullptr;
+      const long long value = std::strtoll(number.c_str(), &end, 0);
+      if (end == number.c_str()) {
+        ok_ = false;
+        return 0;
+      }
+      // Skip an integer suffix such as u, U, l or L.
+      while (pos_ < text_.size() &&
+             (text_[pos_] == 'u' || text_[pos_] == 'U' || text_[pos_] == 'l' ||
+              text_[pos_] == 'L'))
+        ++pos_;
+      return value;
+    }
+    ok_ = false;
+    return 0;
+  }
+
+  const std::string& text_;
+  size_t pos_ = 0;
+  bool ok_ = true;
+};
+
+bool EvaluateExpression(const std::string& expression,
+                        const std::map<std::string, Macro>& macros,
+                        long long* value) {
+  const std::string resolved = ExpandIdentifiers(
+      ResolveDefined(expression, macros), macros, 0, 1, 0);
+  ExpressionParser parser(resolved);
+  return parser.Parse(value);
+}
+
 std::string Preprocess(const std::string& source) {
   std::map<std::string, Macro> macros;
   struct Conditional {
     bool parent_active = true;
     bool active = true;
     bool taken = false;
+    bool seen_else = false;
   };
   std::vector<Conditional> conditionals;
   std::string out;
   int logical_line = 1;
   int logical_file = 0;
+  bool version_seen = false;
+  bool code_seen = false;
+  bool saw_statement = false;
   size_t pos = 0;
   while (pos <= source.size()) {
     const size_t end = source.find('\n', pos);
@@ -221,7 +574,65 @@ std::string Preprocess(const std::string& source) {
       while (arg < line.size() && (line[arg] == ' ' || line[arg] == '\t'))
         ++arg;
       if (directive == "version") {
+        if (saw_statement || Trim(line.substr(arg)) != "300 es") {
+          out += "__zgl_invalid_version_directive__\n";
+        } else {
+          version_seen = true;
+          out += line;
+        }
+      } else if (directive == "extension") {
+        const std::string argument = Trim(line.substr(arg));
+        bool valid = !code_seen;
+        size_t q = 0;
+        while (q < argument.size() &&
+               (std::isalnum(static_cast<unsigned char>(argument[q])) ||
+                argument[q] == '_'))
+          ++q;
+        const std::string name = argument.substr(0, q);
+        if (name.empty() || !IsIdentStart(name[0]))
+          valid = false;
+        while (q < argument.size() &&
+               (argument[q] == ' ' || argument[q] == '\t'))
+          ++q;
+        if (q >= argument.size() || argument[q] != ':') {
+          valid = false;
+        } else {
+          ++q;
+          while (q < argument.size() &&
+                 (argument[q] == ' ' || argument[q] == '\t'))
+            ++q;
+          size_t behavior_end = q;
+          while (behavior_end < argument.size() &&
+                 (std::isalnum(static_cast<unsigned char>(argument[behavior_end])) ||
+                  argument[behavior_end] == '_'))
+            ++behavior_end;
+          const std::string behavior = argument.substr(q, behavior_end - q);
+          if (behavior != "require" && behavior != "enable" &&
+              behavior != "warn" && behavior != "disable")
+            valid = false;
+          if (name == "all" && (behavior == "require" || behavior == "enable"))
+            valid = false;
+          q = behavior_end;
+          while (q < argument.size() &&
+                 (argument[q] == ' ' || argument[q] == '\t'))
+            ++q;
+          if (q != argument.size())
+            valid = false;
+        }
+        if (argument.find("/*") != std::string::npos &&
+            argument.find("*/") == std::string::npos)
+          valid = false;
+        if (!valid)
+          out += "__zgl_invalid_extension_directive__\n";
+        else
+          out += line;
+        saw_statement = true;
+      } else if (directive == "error") {
+        out += "__zgl_error_directive__\n";
+        saw_statement = true;
+      } else if (directive == "pragma") {
         out += line;
+        saw_statement = true;
       } else if (directive == "line") {
         std::string argument =
             ExpandIdentifiers(line.substr(arg), macros, 0, logical_line,
@@ -270,65 +681,134 @@ std::string Preprocess(const std::string& source) {
                 line[n] == '_'))
           ++n;
         const std::string name = line.substr(arg, n - arg);
+        bool valid = !name.empty() && IsIdentStart(name[0]) &&
+                     name.compare(0, 3, "GL_") != 0;
         Macro macro;
-        if (!name.empty()) {
-          if (n < line.size() && line[n] == '(') {
-            const size_t close = line.find(')', n + 1);
-            if (close != std::string::npos) {
-              macro.function_like = true;
-              std::string params = line.substr(n + 1, close - n - 1);
-              for (const std::string& value : SplitArguments(params)) {
-                if (!value.empty())
-                  macro.params.push_back(value);
-              }
-              macro.body = Trim(line.substr(close + 1));
-            }
+        if (valid && n < line.size() && line[n] == '(') {
+          const size_t close = line.find(')', n + 1);
+          if (close == std::string::npos) {
+            valid = false;
           } else {
-            macro.body = Trim(line.substr(n));
+            macro.function_like = true;
+            std::string params = line.substr(n + 1, close - n - 1);
+            for (const std::string& value : SplitArguments(params)) {
+              if (value.empty() || !IsIdentStart(value[0])) {
+                valid = false;
+                break;
+              }
+              for (char c : value) {
+                if (!IsIdentChar(c))
+                  valid = false;
+              }
+              for (const std::string& existing : macro.params) {
+                if (existing == value)
+                  valid = false;
+              }
+              macro.params.push_back(value);
+            }
+            macro.body = NormalizeMacroText(Trim(line.substr(close + 1)));
           }
-          macros[name] = macro;
+        } else if (valid) {
+          macro.body = NormalizeMacroText(Trim(line.substr(n)));
         }
+        if (valid) {
+          const auto existing = macros.find(name);
+          if (existing != macros.end() &&
+              (existing->second.function_like != macro.function_like ||
+               existing->second.params != macro.params ||
+               existing->second.body != macro.body)) {
+            out += "__zgl_invalid_macro_redefinition__\n";
+          } else {
+            macros[name] = macro;
+          }
+        } else {
+          out += "__zgl_invalid_define_directive__\n";
+        }
+        saw_statement = true;
       } else if (directive == "undef" && active) {
-        size_t n = arg;
-        while (n < line.size() &&
-               (std::isalnum(static_cast<unsigned char>(line[n])) ||
-                line[n] == '_'))
-          ++n;
-        macros.erase(line.substr(arg, n - arg));
+        const std::string argument = Trim(line.substr(arg));
+        bool valid = !argument.empty() && IsIdentStart(argument[0]);
+        for (char c : argument)
+          if (!IsIdentChar(c))
+            valid = false;
+        if (argument == "__LINE__" || argument == "__FILE__" ||
+            argument == "__VERSION__" || argument == "GL_ES" ||
+            argument.compare(0, 3, "GL_") == 0)
+          valid = false;
+        if (valid)
+          macros.erase(argument);
+        else
+          out += "__zgl_invalid_undef_directive__\n";
+        saw_statement = true;
       } else if (directive == "ifdef" || directive == "ifndef") {
         Conditional c;
         c.parent_active = active;
-        size_t n = arg;
-        while (n < line.size() &&
-               (std::isalnum(static_cast<unsigned char>(line[n])) ||
-                line[n] == '_'))
-          ++n;
-        const bool defined = macros.count(line.substr(arg, n - arg)) != 0;
+        const std::string argument = Trim(line.substr(arg));
+        bool valid = !argument.empty() && IsIdentStart(argument[0]);
+        for (char ch : argument)
+          if (!IsIdentChar(ch))
+            valid = false;
+        if (!valid)
+          out += "__zgl_invalid_conditional__\n";
+        const bool defined = macros.count(argument) != 0;
         c.active = active && (directive == "ifdef" ? defined : !defined);
         c.taken = c.active;
         conditionals.push_back(c);
+        saw_statement = true;
       } else if (directive == "if") {
         Conditional c;
         c.parent_active = active;
-        std::string expr = Trim(line.substr(arg));
-        c.active = active && expr == "1";
+        long long value = 0;
+        if (!EvaluateExpression(line.substr(arg), macros, &value))
+          out += "__zgl_invalid_conditional__\n";
+        c.active = active && value != 0;
         c.taken = c.active;
         conditionals.push_back(c);
       } else if (directive == "else") {
         if (!conditionals.empty()) {
           Conditional& c = conditionals.back();
+          if (c.seen_else || !Trim(line.substr(arg)).empty())
+            out += "__zgl_invalid_conditional__\n";
+          c.seen_else = true;
           c.active = c.parent_active && !c.taken;
           c.taken = c.taken || c.active;
+        } else {
+          out += "__zgl_invalid_conditional__\n";
         }
       } else if (directive == "endif") {
-        if (!conditionals.empty())
+        if (conditionals.empty() || !Trim(line.substr(arg)).empty()) {
+          out += "__zgl_invalid_conditional__\n";
+        } else {
           conditionals.pop_back();
+        }
       } else if (directive == "elif") {
-        if (!conditionals.empty())
-          conditionals.back().active = false;
+        if (conditionals.empty()) {
+          out += "__zgl_invalid_conditional__\n";
+        } else {
+          Conditional& c = conditionals.back();
+          long long value = 0;
+          if (!EvaluateExpression(line.substr(arg), macros, &value))
+            out += "__zgl_invalid_conditional__\n";
+          if (c.seen_else)
+            out += "__zgl_invalid_conditional__\n";
+          c.active = c.parent_active && !c.taken && value != 0;
+          c.taken = c.taken || c.active;
+        }
+      }
+      if (directive != "version" && directive != "line" &&
+          directive != "define" && directive != "undef" &&
+          directive != "ifdef" && directive != "ifndef" &&
+          directive != "if" && directive != "else" && directive != "endif" &&
+          directive != "elif" && directive != "extension" &&
+          directive != "error" && directive != "pragma" && !directive.empty()) {
+        out += "__zgl_unknown_directive__\n";
       }
       out += '\n';
     } else if (active) {
+      if (line.find_first_not_of(" \t") != std::string::npos) {
+        code_seen = true;
+        saw_statement = true;
+      }
       out += ExpandIdentifiers(line, macros, 0, logical_line, logical_file);
       out += '\n';
     } else {
@@ -339,6 +819,8 @@ std::string Preprocess(const std::string& source) {
       break;
     pos = end + 1;
   }
+  if (!conditionals.empty())
+    out += "__zgl_unterminated_conditional__\n";
   return out;
 }
 
