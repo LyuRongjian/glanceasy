@@ -11,6 +11,7 @@
 
 #include "GLES3/gl32.h"
 #include "src/zgl_api_common.h"
+#include "src/zgl_simd.h"
 
 namespace zgl {
 namespace {
@@ -654,6 +655,11 @@ void glClear(GLbitfield mask) {
                                       zgl::FloatToUnorm8(state.clear_color[1]),
                                       zgl::FloatToUnorm8(state.clear_color[2]),
                                       zgl::FloatToUnorm8(state.clear_color[3])};
+    const bool writes_all_channels =
+        state.color_mask[0] && state.color_mask[1] && state.color_mask[2] &&
+        state.color_mask[3];
+    const uint32_t packed =
+        zgl::PackRgba(color.r, color.g, color.b, color.a);
     for (int buffer_index = 0; buffer_index < target.draw_buffer_count;
          ++buffer_index) {
       const GLenum buffer = target.draw_buffers[buffer_index];
@@ -664,6 +670,15 @@ void glClear(GLbitfield mask) {
           target.colors[buffer - GL_COLOR_ATTACHMENT0];
       if (!color_buffer)
         continue;
+      if (writes_all_channels) {
+        for (int y = area.y; y < area.bottom(); ++y) {
+          uint8_t* row =
+              color_buffer + static_cast<size_t>(y) * target.width * 4;
+          zgl::simd::FillRgba(
+              row + static_cast<size_t>(area.x) * 4, area.width, packed);
+        }
+        continue;
+      }
       for (int y = area.y; y < area.bottom(); ++y) {
         uint8_t* row =
             color_buffer + static_cast<size_t>(y) * target.width * 4;
@@ -687,8 +702,7 @@ void glClear(GLbitfield mask) {
         zgl::Clamp01(state.clear_depth) * 65535.0f + 0.5f);
     for (int y = area.y; y < area.bottom(); ++y) {
       uint16_t* row = target.depth + static_cast<size_t>(y) * target.width;
-      for (int x = area.x; x < area.right(); ++x)
-        row[x] = depth;
+      zgl::simd::FillU16(row + area.x, area.width, depth);
     }
   }
   if ((mask & GL_STENCIL_BUFFER_BIT) && target.stencil) {
@@ -696,6 +710,10 @@ void glClear(GLbitfield mask) {
     const uint8_t write_mask = static_cast<uint8_t>(state.stencil.write_mask);
     for (int y = area.y; y < area.bottom(); ++y) {
       uint8_t* row = target.stencil + static_cast<size_t>(y) * target.width;
+      if (write_mask == 0xFF) {
+        zgl::simd::FillU8(row + area.x, area.width, value);
+        continue;
+      }
       for (int x = area.x; x < area.right(); ++x) {
         row[x] =
             static_cast<uint8_t>((value & write_mask) | (row[x] & ~write_mask));

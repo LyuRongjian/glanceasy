@@ -28,7 +28,7 @@ ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、�
 与 SLJIT 后端的输出相对宿主机构建均在 1 个 8 位 LSB 以内，这正是该套件提供的
 回归保障。
 
-这十五个用例构成完整的可视化集合，每个用例一张截图。API 层测试共 161 个，
+这十五个用例构成完整的可视化集合，每个用例一张截图。API 层测试共 163 个，
 其中不少只验证状态迁移、非法枚举和错误路径，根本不会触碰帧缓冲，因此这些
 用例只用代码断言，不做截图。
 
@@ -67,6 +67,7 @@ cmake --build build --target zgl_visual_tests
 | GLES 3.0 API | 核心子集：VAO、instancing、primitive restart、query、fence、sampler object、blit、invalidate。仍缺 MSAA、UBO、transform feedback 与压缩/浮点纹理格式 |
 | GLSL | 支持 ES 1.00 / 3.00 的解释执行与 SLJIT 分层编译；不支持的构造按 stage 回退，见 [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
 | 着色器数学 | 超越函数使用 minimax 近似；ARMv7 上 `sin` / `cos` 每次并行计算四个 lane（NEON）。整数、深度、模板与混合路径保持精确 |
+| 固定功能 SIMD | `dot` / `normalize`、颜色/深度/模板的 clear 填充、同尺寸 blit 的行拷贝在 ARMv7 上走四 lane NEON；部分颜色掩码仍走标量路径 |
 | 多重渲染目标 | 最多四个颜色输出，可用 `layout(location = N)`、`gl_FragData[0..3]` 或顺序 `out` 变量；`glDrawBuffers` 决定每个输出写到哪个附件 |
 | Transform feedback、compute、SSBO、image load/store | 纯桩；会影响输出的调用返回 `GL_INVALID_OPERATION` |
 | 细分 / 几何着色器 | 不属于 GLES；入口为桩 |
@@ -160,7 +161,7 @@ tools/coverage.sh build-cov
 ```
 
 脚本会配置 gcov 构建、运行测试，并把逐文件行覆盖率写入
-`build-cov/coverage/summary.txt`。当前共 161 个 API 测试、0 个失败断言；
+`build-cov/coverage/summary.txt`。当前共 163 个 API 测试、0 个失败断言；
 `tools/coverage.sh` 会给出宿主机构建的行覆盖率。未覆盖部分主要是防御性错误
 分支、不支持的格式拒绝路径以及 GPU 专用桩，均如实列在覆盖率汇总中。
 
@@ -174,6 +175,8 @@ gcov 数字，覆盖率只统计通过 API 测试执行到的库代码。
 include/GLES2, GLES3, KHR     Khronos 原始头文件
 include/zgl/zgl.h              软件渲染器的公共 C API
 src/                           上下文、光栅化、纹理管线、绘制管线
+src/zgl_fastmath.*             标量着色器数学近似
+src/zgl_simd.*                 四 lane 点积/缩放与批量填充
 src/glsl/                      GLSL 子集的词法、语法与解释执行
 src/zgl_api_*.cpp              GLES 入口实现
 examples/                      独立渲染示例

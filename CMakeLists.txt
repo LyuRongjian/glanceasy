@@ -38,6 +38,7 @@ set(ZGL_SOURCES
     src/zgl_texture.cpp
     src/zgl_draw.cpp
     src/zgl_fastmath.cpp
+    src/zgl_simd.cpp
     src/zgl_api_common.cpp
     src/zgl_api_state.cpp
     src/zgl_api_buffer.cpp
@@ -104,7 +105,8 @@ if(ZGL_BUILD_TESTS)
       tests/test_draw_api.cpp
       tests/test_framebuffer2.cpp
       tests/test_jit.cpp
-      tests/test_fastmath.cpp)
+      tests/test_fastmath.cpp
+      tests/test_simd.cpp)
   target_link_libraries(zgl_unittests PRIVATE zcat_gles)
   target_include_directories(zgl_unittests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   if(ZGL_ENABLE_JIT)

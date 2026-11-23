@@ -10,6 +10,7 @@
 
 #include "GLES3/gl32.h"
 #include "src/zgl_api_common.h"
+#include "src/zgl_simd.h"
 
 namespace zgl {
 namespace {
@@ -211,10 +212,8 @@ void ClearColourBuffer(Context* context, GLint drawbuffer, uint32_t packed) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  for (size_t index = 0;
-       index < static_cast<size_t>(target.width) * target.height; ++index) {
-    memcpy(color + index * 4, &packed, sizeof(packed));
-  }
+  simd::FillRgba(color, static_cast<size_t>(target.width) * target.height,
+                 packed);
 }
 
 // Validates the attachment list passed to glInvalidate* and reports whether
@@ -858,47 +857,82 @@ void glBlitFramebuffer(GLint src_x0,
     const int dst_height = dst_y1 - dst_y0;
     const int src_width = src_x1 - src_x0;
     const int src_height = src_y1 - src_y0;
-    if (dst_width != 0 && dst_height != 0 && src_width != 0 &&
-        src_height != 0) {
-      for (int row = 0; row < dst_height; ++row) {
-        for (int column = 0; column < dst_width; ++column) {
-          const int destination_x = dst_x0 + column;
+    if (dst_width > 0 && dst_height > 0 && src_width > 0 &&
+        src_height > 0) {
+      const bool writes_all_channels =
+          context->state.color_mask[0] && context->state.color_mask[1] &&
+          context->state.color_mask[2] && context->state.color_mask[3];
+      const bool copy_rows =
+          writes_all_channels && src_width == dst_width &&
+          src_height == dst_height && src_x0 >= 0 &&
+          src_x0 + dst_width <= source.width && dst_x0 >= 0 &&
+          dst_x0 + dst_width <= destination.width && src_y0 >= 0 &&
+          src_y1 <= source.height && dst_y0 >= 0 &&
+          dst_y1 <= destination.height;
+      if (copy_rows) {
+        const size_t row_bytes = static_cast<size_t>(dst_width) * 4;
+        for (int row = 0; row < dst_height; ++row) {
+          const int source_y = src_y1 - 1 - row;
           const int destination_y = dst_y0 + row;
           const int gl_y = destination.height - 1 - destination_y;
-          if (destination_x < 0 || destination_x >= destination.width ||
-              gl_y < 0 || gl_y >= destination.height) {
-            continue;
-          }
-          const int source_offset_x = src_x0 + (column * src_width) / dst_width;
-          const int source_offset_y =
-              src_y1 - 1 - (row * src_height) / dst_height;
-          if (source_offset_x < 0 || source_offset_x >= source.width ||
-              source_offset_y < 0 || source_offset_y >= source.height) {
-            continue;
-          }
           const size_t source_index =
-              static_cast<size_t>(source.height - 1 - source_offset_y) *
-                  source.width +
-              static_cast<size_t>(source_offset_x);
+              (static_cast<size_t>(source.height - 1 - source_y) *
+                   source.width +
+               static_cast<size_t>(src_x0)) *
+              4;
           const size_t destination_index =
-              static_cast<size_t>(gl_y) * destination.width +
-              static_cast<size_t>(destination_x);
-          uint32_t value;
-          memcpy(&value, source.color + source_index * 4, sizeof(value));
-          uint32_t existing;
-          memcpy(&existing, destination.color + destination_index * 4,
-                 sizeof(existing));
-          const zgl::Rgba previous = zgl::UnpackRgba(existing);
-          const zgl::Rgba incoming = zgl::UnpackRgba(value);
-          uint8_t merged[4];
-          merged[0] = context->state.color_mask[0] ? incoming.r : previous.r;
-          merged[1] = context->state.color_mask[1] ? incoming.g : previous.g;
-          merged[2] = context->state.color_mask[2] ? incoming.b : previous.b;
-          merged[3] = context->state.color_mask[3] ? incoming.a : previous.a;
-          const uint32_t packed =
-              zgl::PackRgba(merged[0], merged[1], merged[2], merged[3]);
-          memcpy(destination.color + destination_index * 4, &packed,
-                 sizeof(packed));
+              (static_cast<size_t>(gl_y) * destination.width +
+               static_cast<size_t>(dst_x0)) *
+              4;
+          memcpy(destination.color + destination_index,
+                 source.color + source_index, row_bytes);
+        }
+      } else {
+        for (int row = 0; row < dst_height; ++row) {
+          for (int column = 0; column < dst_width; ++column) {
+            const int destination_x = dst_x0 + column;
+            const int destination_y = dst_y0 + row;
+            const int gl_y = destination.height - 1 - destination_y;
+            if (destination_x < 0 || destination_x >= destination.width ||
+                gl_y < 0 || gl_y >= destination.height) {
+              continue;
+            }
+            const int source_offset_x =
+                src_x0 + (column * src_width) / dst_width;
+            const int source_offset_y =
+                src_y1 - 1 - (row * src_height) / dst_height;
+            if (source_offset_x < 0 || source_offset_x >= source.width ||
+                source_offset_y < 0 || source_offset_y >= source.height) {
+              continue;
+            }
+            const size_t source_index =
+                static_cast<size_t>(source.height - 1 - source_offset_y) *
+                    source.width +
+                static_cast<size_t>(source_offset_x);
+            const size_t destination_index =
+                static_cast<size_t>(gl_y) * destination.width +
+                static_cast<size_t>(destination_x);
+            uint32_t value;
+            memcpy(&value, source.color + source_index * 4, sizeof(value));
+            uint32_t existing;
+            memcpy(&existing, destination.color + destination_index * 4,
+                   sizeof(existing));
+            const zgl::Rgba previous = zgl::UnpackRgba(existing);
+            const zgl::Rgba incoming = zgl::UnpackRgba(value);
+            uint8_t merged[4];
+            merged[0] =
+                context->state.color_mask[0] ? incoming.r : previous.r;
+            merged[1] =
+                context->state.color_mask[1] ? incoming.g : previous.g;
+            merged[2] =
+                context->state.color_mask[2] ? incoming.b : previous.b;
+            merged[3] =
+                context->state.color_mask[3] ? incoming.a : previous.a;
+            const uint32_t packed =
+                zgl::PackRgba(merged[0], merged[1], merged[2], merged[3]);
+            memcpy(destination.color + destination_index * 4, &packed,
+                   sizeof(packed));
+          }
         }
       }
     }

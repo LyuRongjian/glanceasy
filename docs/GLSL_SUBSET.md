@@ -62,7 +62,9 @@ Common: `abs`, `sign`, `floor`, `ceil`, `fract`, `mod`, `min`, `max`, `clamp`,
 `mix`, `step`, `smoothstep`.
 
 Geometric: `length`, `distance`, `dot`, `cross`, `normalize`, `faceforward`,
-`reflect`, `refract`.
+`reflect`, `refract`. Dot products and the scale used by `normalize` run four
+components at a time on ARMv7; scalar tails cover vec2/vec3 and matrix
+remainders.
 
 Matrix: `matrixCompMult`, `transpose`, `determinant`, `inverse`.
 

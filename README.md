@@ -35,7 +35,7 @@ the host build within one 8-bit LSB, which is the regression guarantee the
 suite provides.
 
 These fifteen cases are the complete visual set, one screenshot per case. The
-API-level suite has 161 cases; many of them exercise state transitions, invalid
+API-level suite has 163 cases; many of them exercise state transitions, invalid
 enums and error paths that never touch a framebuffer, so those are asserted in
 code instead of captured as images.
 
@@ -74,6 +74,7 @@ The second argument is the output directory; one PPM per case is written there.
 | GLES 3.0 API | Core subset: VAOs, instancing, primitive restart, queries, fences, sampler objects, blit, invalidate. Still missing: MSAA, UBOs, transform feedback and compressed/float texture formats |
 | GLSL | Interpreter and SLJIT tier for ES 1.00 / 3.00 shaders; unsupported constructs fall back per stage, see [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
 | Shader math | Transcendental built-ins use minimax approximations; `sin` / `cos` evaluate four lanes at a time with NEON on ARMv7. Integer, depth, stencil and blend paths stay exact |
+| Fixed-function SIMD | `dot` / `normalize`, colour/depth/stencil clear fills and same-size blit row copies use four-lane NEON on ARMv7; partial masks keep the scalar path |
 | Multiple render targets | Up to four colour outputs through `layout(location = N)`, `gl_FragData[0..3]` or sequential `out` variables; `glDrawBuffers` selects the attachment for each output |
 | Transform feedback, compute, SSBO, image load/store | Accepted stubs; report `GL_INVALID_OPERATION` where output would change |
 | Tessellation / geometry shaders | Not part of GLES; entry points are stubs |
@@ -172,7 +173,7 @@ tools/coverage.sh build-cov
 ```
 
 The script configures a gcov build, runs the tests, and prints per-file line
-coverage into `build-cov/coverage/summary.txt`. The current tree executes 161
+coverage into `build-cov/coverage/summary.txt`. The current tree executes 163
 API tests with zero failed checks; `tools/coverage.sh` reports line coverage for
 the host build. The uncovered remainder is dominated by defensive error
 branches, unsupported-format rejection paths and the GPU-only stubs, which are
@@ -189,6 +190,8 @@ gcov figures, which measure the library through the API tests only.
 include/GLES2, GLES3, KHR     Khronos headers (unmodified)
 include/zgl/zgl.h              Public C API of the software renderer
 src/                           Context, rasteriser, texture pipeline, draw pipeline
+src/zgl_fastmath.*             Scalar shader math approximations
+src/zgl_simd.*                 Four-lane dot/scale and bulk fill helpers
 src/glsl/                      Lexer, parser and interpreter for the GLSL subset
 src/zgl_api_*.cpp              GLES entry points
 examples/                      Standalone rendering demo

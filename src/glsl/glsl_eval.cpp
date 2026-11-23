@@ -20,6 +20,7 @@
 #include "src/glsl/glsl_jit.h"
 #include "src/glsl/glsl_program.h"
 #include "src/zgl_fastmath.h"
+#include "src/zgl_simd.h"
 
 namespace zgl {
 namespace glsl {
@@ -100,11 +101,14 @@ Value MapTriples(const Value& a,
 }
 
 float DotProduct(const Value& a, const Value& b) {
-  float sum = 0.0f;
   const int count = std::max(a.type.components(), b.type.components());
-  for (int i = 0; i < count; ++i)
-    sum += ComponentAt(a, i) * ComponentAt(b, i);
-  return sum;
+  if (a.type.is_scalar() || b.type.is_scalar()) {
+    float sum = 0.0f;
+    for (int i = 0; i < count; ++i)
+      sum += ComponentAt(a, i) * ComponentAt(b, i);
+    return sum;
+  }
+  return simd::Dot(a.data, b.data, count);
 }
 
 float LengthOf(const Value& v) {
@@ -1251,8 +1255,7 @@ Value Evaluator::EvaluateBuiltinMath(const BuiltinFunc function,
       if (squared > 0.0f &&
           squared < std::numeric_limits<float>::max()) {
         const float inverse = fastmath::InverseSqrt(squared);
-        for (int i = 0; i < type.components(); ++i)
-          out.data[i] = a.data[i] * inverse;
+        simd::Scale(a.data, inverse, out.data, type.components());
         return out;
       }
       const float length = fastmath::Sqrt(squared);
