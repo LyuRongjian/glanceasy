@@ -19,17 +19,18 @@ namespace {
 bool IsTopLeftEdge(const RasterVertex& a, const RasterVertex& b) {
   const float dy = b.y - a.y;
   const float dx = b.x - a.x;
-  if (dy > 0.0f)
+  if (dy < 0.0f)
     return true;
-  return dy == 0.0f && dx < 0.0f;
+  return dy == 0.0f && dx > 0.0f;
 }
 
 bool IncludesWeight(float weight, bool top_left) {
   // Rasterize edge pixels with a small tolerance.  Exact floating-point
   // equality on a shared triangle edge otherwise drops corner pixels.
   const float kEdgeEpsilon = 1e-4f;
-  return weight > kEdgeEpsilon ||
-         (weight >= -kEdgeEpsilon && top_left);
+  if (weight > -kEdgeEpsilon && weight < kEdgeEpsilon)
+    weight = 0.0f;
+  return weight > 0.0f || (weight == 0.0f && top_left);
 }
 
 }  // namespace

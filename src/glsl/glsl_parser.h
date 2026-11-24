@@ -45,6 +45,7 @@ class Parser {
 
   // Token helpers.
   void Advance();
+  const Token& Peek();
   bool CheckPunct(const char* text) const;
   bool CheckIdent(const char* text) const;
   bool AcceptPunct(const char* text);
@@ -115,6 +116,8 @@ class Parser {
   Stage stage_;
   Lexer lexer_;
   Token current_;
+  Token lookahead_;
+  bool has_lookahead_ = false;
   std::unique_ptr<ShaderAst> ast_;
   std::string error_;
 

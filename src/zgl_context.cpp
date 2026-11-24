@@ -25,10 +25,14 @@ int g_live_contexts = 0;
 
 GLenum AttachmentFormat(const Context& context,
                         const FramebufferAttachment& attachment) {
+  if (attachment.retained_texture)
+    return attachment.retained_texture->internal_format;
   if (attachment.texture) {
     const Texture* texture = context.textures.Get(attachment.texture);
     return texture ? texture->internal_format : 0;
   }
+  if (attachment.retained_renderbuffer)
+    return attachment.retained_renderbuffer->format;
   if (attachment.renderbuffer) {
     const Renderbuffer* renderbuffer =
         context.renderbuffers.Get(attachment.renderbuffer);
@@ -223,6 +227,13 @@ int CubeFaceIndex(GLenum face) {
 
 const TextureImage* AttachmentImage(const Context& context,
                                     const FramebufferAttachment& attachment) {
+  if (attachment.retained_texture) {
+    const Texture* texture = attachment.retained_texture.get();
+    const int face = texture->target == GL_TEXTURE_CUBE_MAP
+                         ? CubeFaceIndex(attachment.cube_face)
+                         : 0;
+    return texture->image(attachment.level, face);
+  }
   if (attachment.texture) {
     const Texture* texture = context.textures.Get(attachment.texture);
     if (!texture)
@@ -232,6 +243,8 @@ const TextureImage* AttachmentImage(const Context& context,
                          : 0;
     return texture->image(attachment.level, face);
   }
+  if (attachment.retained_renderbuffer)
+    return &attachment.retained_renderbuffer->image;
   if (attachment.renderbuffer) {
     const Renderbuffer* renderbuffer =
         context.renderbuffers.Get(attachment.renderbuffer);

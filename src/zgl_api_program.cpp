@@ -225,7 +225,7 @@ GLboolean glIsShader(GLuint shader) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || shader == 0)
     return GL_FALSE;
-  return context->shaders.Get(shader) ? GL_TRUE : GL_FALSE;
+  return context->FindShader(shader) ? GL_TRUE : GL_FALSE;
 }
 
 void glShaderSource(GLuint shader,
@@ -344,7 +344,12 @@ GLboolean glIsProgram(GLuint program) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || program == 0)
     return GL_FALSE;
-  return context->programs.Get(program) ? GL_TRUE : GL_FALSE;
+  const zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object)
+    return GL_FALSE;
+  return !object->delete_status || context->state.program == program
+             ? GL_TRUE
+             : GL_FALSE;
 }
 
 void glAttachShader(GLuint program, GLuint shader) {

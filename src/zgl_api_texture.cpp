@@ -574,6 +574,137 @@ void SetTextureParameter(Texture* texture, GLenum pname, GLint value) {
   }
 }
 
+
+int TypeBytes(GLenum type) {
+  switch (type) {
+    case GL_UNSIGNED_BYTE:
+    case GL_BYTE:
+      return 1;
+    case GL_UNSIGNED_SHORT:
+    case GL_SHORT:
+    case GL_HALF_FLOAT:
+      return 2;
+    case GL_UNSIGNED_INT:
+    case GL_INT:
+    case GL_FLOAT:
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+size_t UnpackPixelBytes(GLenum format, GLenum type) {
+  switch (type) {
+    case GL_UNSIGNED_SHORT_5_6_5:
+    case GL_UNSIGNED_SHORT_4_4_4_4:
+    case GL_UNSIGNED_SHORT_5_5_5_1:
+      return 2;
+    case GL_UNSIGNED_INT_2_10_10_10_REV:
+    case GL_UNSIGNED_INT_10F_11F_11F_REV:
+    case GL_UNSIGNED_INT_5_9_9_9_REV:
+      return 4;
+    default:
+      break;
+  }
+  int components = 0;
+  switch (format) {
+    case GL_RED:
+    case GL_RED_INTEGER:
+    case GL_ALPHA:
+    case GL_LUMINANCE:
+      components = 1;
+      break;
+    case GL_RG:
+    case GL_RG_INTEGER:
+    case GL_LUMINANCE_ALPHA:
+      components = 2;
+      break;
+    case GL_RGB:
+    case GL_RGB_INTEGER:
+      components = 3;
+      break;
+    case GL_RGBA:
+    case GL_RGBA_INTEGER:
+      components = 4;
+      break;
+    default:
+      return 0;
+  }
+  return static_cast<size_t>(components * TypeBytes(type));
+}
+
+size_t UnpackImageStride(const PixelStoreState& store,
+                         int width,
+                         int height,
+                         GLenum format,
+                         GLenum type) {
+  const int row_pixels =
+      store.unpack_row_length > 0 ? store.unpack_row_length : width;
+  size_t row_bytes = static_cast<size_t>(row_pixels) *
+                     UnpackPixelBytes(format, type);
+  const size_t alignment = static_cast<size_t>(store.unpack_alignment);
+  if (alignment > 1)
+    row_bytes = (row_bytes + alignment - 1) / alignment * alignment;
+  const int rows = store.unpack_image_height > 0 ? store.unpack_image_height
+                                                 : height;
+  return row_bytes * static_cast<size_t>(rows);
+}
+
+bool ResolveUnpackPixels(Context* context,
+                         const void* pixels,
+                         int width,
+                         int height,
+                         int depth,
+                         GLenum format,
+                         GLenum type,
+                         const void** resolved) {
+  *resolved = pixels;
+  if (!context->state.pixel_unpack_buffer)
+    return true;
+  Buffer* buffer = context->buffers.Get(context->state.pixel_unpack_buffer);
+  if (!buffer || buffer->mapped) {
+    context->SetError(GL_INVALID_OPERATION);
+    return false;
+  }
+  const size_t offset = reinterpret_cast<uintptr_t>(pixels);
+  const int element_bytes = TypeBytes(type);
+  const int alignment = element_bytes == 2 || UnpackPixelBytes(format, type) == 2
+                            ? 2
+                            : (element_bytes == 4 ||
+                               UnpackPixelBytes(format, type) == 4 ? 4 : 1);
+  if ((offset % static_cast<size_t>(alignment)) != 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return false;
+  }
+  const size_t bytes = UnpackPixelBytes(format, type);
+  if (bytes == 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return false;
+  }
+  const PixelStoreState& store = context->state.pixel_store;
+  const int row_pixels =
+      store.unpack_row_length > 0 ? store.unpack_row_length : width;
+  size_t row_bytes = static_cast<size_t>(row_pixels) * bytes;
+  const size_t row_alignment = static_cast<size_t>(store.unpack_alignment);
+  if (row_alignment > 1)
+    row_bytes = (row_bytes + row_alignment - 1) / row_alignment * row_alignment;
+  const int image_rows =
+      store.unpack_image_height > 0 ? store.unpack_image_height : height;
+  size_t required = row_bytes * static_cast<size_t>(image_rows) *
+                        static_cast<size_t>(depth > 0 ? depth : 1);
+  required += static_cast<size_t>(store.unpack_skip_rows) * row_bytes;
+  required += static_cast<size_t>(store.unpack_skip_pixels) * bytes;
+  required += static_cast<size_t>(store.unpack_skip_images) *
+               row_bytes * static_cast<size_t>(image_rows);
+  if (offset > buffer->data.size() ||
+      required > buffer->data.size() - offset) {
+    context->SetError(GL_INVALID_OPERATION);
+    return false;
+  }
+  *resolved = buffer->data.data() + offset;
+  return true;
+}
+
 void SetTextureImage(GLenum target,
                      GLint level,
                      GLint internal_format,
@@ -624,6 +755,10 @@ void SetTextureImage(GLenum target,
        type == GL_UNSIGNED_INT_10F_11F_11F_REV ||
        type == GL_UNSIGNED_INT_5_9_9_9_REV)) {
     context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (!ResolveUnpackPixels(context, pixels, width, height, depth, format,
+                           type, &pixels)) {
     return;
   }
   if (level == 0) {
@@ -723,9 +858,11 @@ void SetTextureImage(GLenum target,
     const PixelStoreState& store = context->state.pixel_store;
     if (texture->target == GL_TEXTURE_3D ||
         texture->target == GL_TEXTURE_2D_ARRAY) {
+      const size_t stride = UnpackImageStride(store, width, height, format,
+                                              type);
       for (int z = 0; z < depth; ++z) {
         const uint8_t* slice = static_cast<const uint8_t*>(pixels) +
-                               static_cast<size_t>(z) * width * height * 4;
+                               static_cast<size_t>(z) * stride;
         UploadSlice(image, 0, 0, z, width, height, format, type,
                     store.unpack_row_length, 0, 0, slice);
       }
@@ -813,7 +950,7 @@ void SetTextureStorage(GLenum target,
   Texture* texture = BindTargetTexture(context, target, &face);
   if (!texture)
     return;
-  if (levels < 1 || width < 1 || height < 1) {
+  if (levels < 1 || width < 1 || height < 1 || depth < 1) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -825,7 +962,7 @@ void SetTextureStorage(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  const int extent = std::max(width, height);
+  const int extent = std::max(std::max(width, height), depth);
   if (levels > MipLevelCount(extent, extent)) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -843,7 +980,10 @@ void SetTextureStorage(GLenum target,
       TextureImage* image = texture->mutable_image(level, face_index);
       image->width = level_width;
       image->height = level_height;
-      image->depth = texture->target == GL_TEXTURE_3D ? depth : 1;
+      image->depth = texture->target == GL_TEXTURE_3D ||
+                             texture->target == GL_TEXTURE_2D_ARRAY
+                         ? depth
+                         : 1;
       const size_t texels =
           static_cast<size_t>(level_width) * level_height * image->depth;
       if (internal_format == GL_DEPTH_COMPONENT16 ||
@@ -922,7 +1062,7 @@ extern "C" {
 
 void glGenTextures(GLsizei n, GLuint* textures) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !textures)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
@@ -938,39 +1078,50 @@ void glGenTextures(GLsizei n, GLuint* textures) {
 
 void glDeleteTextures(GLsizei n, const GLuint* textures) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !textures)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!textures)
+    return;
+  zgl::Framebuffer* bound_framebuffer =
+      context->framebuffers.Get(context->state.framebuffer);
   for (GLsizei i = 0; i < n; ++i) {
     const GLuint name = textures[i];
-    context->textures.Delete(name);
-    zgl::Framebuffer* framebuffer =
-        context->framebuffers.Get(context->state.framebuffer);
-    if (framebuffer) {
+    zgl::Texture* texture = context->textures.Get(name);
+    if (!texture || name == 0)
+      continue;
+    if (bound_framebuffer) {
       for (int j = 0; j < zgl::kMaxColorAttachments; ++j) {
-        if (framebuffer->colors[j].texture == name)
-          framebuffer->colors[j] = zgl::FramebufferAttachment();
+        if (bound_framebuffer->colors[j].texture == name)
+          bound_framebuffer->colors[j] = zgl::FramebufferAttachment();
       }
-      if (framebuffer->depth.texture == name)
-        framebuffer->depth = zgl::FramebufferAttachment();
-      if (framebuffer->stencil.texture == name)
-        framebuffer->stencil = zgl::FramebufferAttachment();
+      if (bound_framebuffer->depth.texture == name)
+        bound_framebuffer->depth = zgl::FramebufferAttachment();
+      if (bound_framebuffer->stencil.texture == name)
+        bound_framebuffer->stencil = zgl::FramebufferAttachment();
     }
-    for (int unit = 0; unit < zgl::kMaxCombinedTextureUnits; ++unit) {
-      if (context->state.textures[unit] == textures[i])
-        context->state.textures[unit] = 0;
-      if (context->state.textures_2d[unit] == textures[i])
-        context->state.textures_2d[unit] = 0;
-      if (context->state.textures_3d[unit] == textures[i])
-        context->state.textures_3d[unit] = 0;
-      if (context->state.textures_cube[unit] == textures[i])
-        context->state.textures_cube[unit] = 0;
-      if (context->state.textures_2d_array[unit] == textures[i])
-        context->state.textures_2d_array[unit] = 0;
-    }
+    std::shared_ptr<const zgl::Texture> retained =
+        std::make_shared<const zgl::Texture>(*texture);
+    context->framebuffers.ForEach([&](zgl::Framebuffer& framebuffer) {
+      if (&framebuffer == bound_framebuffer)
+        return;
+      for (int j = 0; j < zgl::kMaxColorAttachments; ++j) {
+        zgl::FramebufferAttachment& attachment = framebuffer.colors[j];
+        if (attachment.texture == name) {
+          attachment.retained_texture = retained;
+        }
+      }
+      if (framebuffer.depth.texture == name) {
+        framebuffer.depth.retained_texture = retained;
+      }
+      if (framebuffer.stencil.texture == name) {
+        framebuffer.stencil.retained_texture = retained;
+      }
+    });
+    texture->delete_status = true;
   }
 }
 
@@ -978,7 +1129,8 @@ GLboolean glIsTexture(GLuint texture) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || texture == 0)
     return GL_FALSE;
-  return context->textures.Get(texture) ? GL_TRUE : GL_FALSE;
+  const zgl::Texture* object = context->textures.Get(texture);
+  return object && !object->delete_status ? GL_TRUE : GL_FALSE;
 }
 
 void glActiveTexture(GLenum texture) {
@@ -1022,7 +1174,13 @@ void glBindTexture(GLenum target, GLuint texture) {
     context->state.textures[unit] = 0;
     return;
   }
-  zgl::Texture* object = context->textures.GetOrCreate(texture);
+  zgl::Texture* object = context->textures.Get(texture);
+  if (object && object->delete_status) {
+    context->textures.Delete(texture);
+    object = context->textures.GetOrCreate(texture);
+  } else if (!object) {
+    object = context->textures.GetOrCreate(texture);
+  }
   if (!object) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -1209,6 +1367,12 @@ void glTexImage3D(GLenum target,
       context->SetError(GL_INVALID_ENUM);
     return;
   }
+  if (depth < 1) {
+    zgl::Context* context = zgl::ApiContext();
+    if (context)
+      context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   zgl::SetTextureImage(target, level, internal_format, width, height, depth,
                        border, format, type, pixels);
 }
@@ -1243,12 +1407,16 @@ void glTexSubImage2D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!pixels)
-    return;
   if (!zgl::ValidFormatType(format, type)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  if (!zgl::ResolveUnpackPixels(context, pixels, width, height, 1, format, type,
+                               &pixels)) {
+    return;
+  }
+  if (!pixels)
+    return;
   const zgl::PixelStoreState& store = context->state.pixel_store;
   if (!image->float_rgba.empty()) {
     zgl::UploadFloatSlice(image, xoffset, yoffset, 0, width, height, format,
@@ -1299,20 +1467,26 @@ void glTexSubImage3D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!pixels)
-    return;
   if (!zgl::ValidFormatType(format, type)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  if (!zgl::ResolveUnpackPixels(context, pixels, width, height, depth, format,
+                                type, &pixels)) {
+    return;
+  }
+  if (!pixels)
+    return;
   const zgl::PixelStoreState& store = context->state.pixel_store;
+  const size_t stride =
+      zgl::UnpackImageStride(store, width, height, format, type);
   for (int z = 0; z < depth; ++z) {
     zgl::TextureImage slice;
     if (!zgl::UploadTextureImage(
             &slice, width, height, format, type, store.unpack_row_length,
             store.unpack_skip_rows, store.unpack_skip_pixels,
             static_cast<const uint8_t*>(pixels) +
-                static_cast<size_t>(z) * width * height * 4)) {
+                static_cast<size_t>(z) * stride)) {
       continue;
     }
     for (int y = 0; y < height; ++y) {
@@ -1395,7 +1569,6 @@ void glCompressedTexImage2D(GLenum target,
     return;
   }
   if (!data || width == 0 || height == 0) {
-    context->SetError(GL_INVALID_VALUE);
     return;
   }
   const int extent = texture->target == GL_TEXTURE_3D
@@ -1409,6 +1582,10 @@ void glCompressedTexImage2D(GLenum target,
                        zgl::CompressedBlockBytes(internal_format);
   if (image_size < expected) {
     context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!zgl::ResolveUnpackPixels(context, data, width, height, 1, internal_format,
+                               GL_UNSIGNED_BYTE, &data)) {
     return;
   }
   if (level == 0) {
@@ -1465,6 +1642,10 @@ void glCompressedTexSubImage2D(GLenum target,
   if (!data || width == 0 || height == 0) {
     return;
   }
+  if (!zgl::ResolveUnpackPixels(context, data, width, height, 1, format,
+                               GL_UNSIGNED_BYTE, &data)) {
+    return;
+  }
   zgl::TextureImage decoded;
   if (!zgl::DecodeCompressedImage(format, width, height, image_size, data,
                                   &decoded)) {
@@ -1504,8 +1685,12 @@ void glCopyTexImage2D(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
   zgl::RenderTarget source = context->GetReadTarget();
+  if (!source.valid()) {
+    context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
+    return;
+  }
+  std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
   const uint32_t transparent = zgl::PackRgba(0, 0, 0, 0);
   for (int row = 0; row < height; ++row) {
     const int source_y = y + row;
@@ -1548,6 +1733,11 @@ void glCopyTexSubImage2D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  zgl::RenderTarget source = context->GetReadTarget();
+  if (!source.valid()) {
+    context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
+    return;
+  }
   zgl::TextureImage* image = texture->mutable_image(level, face);
   if (!image || xoffset + width > image->width ||
       yoffset + height > image->height) {
@@ -1569,6 +1759,16 @@ void glGenerateMipmap(GLenum target) {
   if (texture->width <= 0 || texture->height <= 0) {
     context->SetError(GL_INVALID_OPERATION);
     return;
+  }
+  if (texture->target == GL_TEXTURE_CUBE_MAP) {
+    for (int face_index = 0; face_index < texture->faces(); ++face_index) {
+      const zgl::TextureImage* image = texture->image(0, face_index);
+      if (!image || image->width <= 0 || image->height <= 0 ||
+          image->width != texture->width || image->height != texture->height) {
+        context->SetError(GL_INVALID_OPERATION);
+        return;
+      }
+    }
   }
   const int levels = zgl::MipLevelCount(texture->width, texture->height);
   if (!texture->immutable) {
@@ -1610,7 +1810,7 @@ void glBindSampler(GLuint unit, GLuint sampler) {
 
 void glGenSamplers(GLsizei n, GLuint* samplers) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !samplers)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);

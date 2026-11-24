@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -118,6 +119,7 @@ class Buffer {
   GLenum access_flags = 0;
   size_t map_offset = 0;
   size_t map_length = 0;
+  bool delete_status = false;
 };
 
 struct VertexAttribute {
@@ -163,6 +165,7 @@ struct TextureImage {
 class Texture {
  public:
   bool generated_only = false;
+  bool delete_status = false;
   // Zero until the texture is first bound: a name may be bound to any target
   // only while its target is still unspecified.
   GLenum target = 0;
@@ -206,6 +209,7 @@ class Texture {
 class Renderbuffer {
  public:
   bool generated_only = false;
+  bool delete_status = false;
   int width = 0;
   int height = 0;
   int samples = 0;
@@ -219,8 +223,16 @@ struct FramebufferAttachment {
   GLint layer = 0;
   GLenum cube_face = 0;
   GLuint renderbuffer = 0;
+  // When the named object is deleted, a framebuffer that was not current at
+  // deletion time keeps using the old storage.  These snapshots give the
+  // attachment an identity separate from the (reusable) object name.
+  std::shared_ptr<const Texture> retained_texture;
+  std::shared_ptr<const Renderbuffer> retained_renderbuffer;
 
-  bool bound() const { return texture != 0 || renderbuffer != 0; }
+  bool bound() const {
+    return texture != 0 || renderbuffer != 0 || retained_texture ||
+           retained_renderbuffer;
+  }
 };
 
 class Framebuffer {
@@ -305,7 +317,10 @@ class ObjectTable {
   }
 
   T* Get(GLuint name) {
-    return name < objects_.size() ? objects_[name].get() : nullptr;
+    if (name < objects_.size())
+      return objects_[name].get();
+    auto it = sparse_.find(name);
+    return it == sparse_.end() ? nullptr : it->second.get();
   }
 
   // Binding a name that was never generated creates the object, as required
@@ -313,6 +328,15 @@ class ObjectTable {
   T* GetOrCreate(GLuint name) {
     if (name == 0)
       return nullptr;
+    // Bind* calls may legally create objects with arbitrary, very large
+    // names.  Keeping those out of the dense name-indexed vector avoids
+    // allocating gigabytes for a single random identifier.
+    if (name >= kDenseNameLimit) {
+      auto& object = sparse_[name];
+      if (!object)
+        object.reset(new T());
+      return object.get();
+    }
     if (name >= objects_.size())
       objects_.resize(static_cast<size_t>(name) + 1);
     if (!objects_[name]) {
@@ -333,9 +357,20 @@ class ObjectTable {
       if (object)
         function(*object);
     }
+    for (auto& entry : sparse_) {
+      if (entry.second)
+        function(*entry.second);
+    }
   }
 
   bool Delete(GLuint name) {
+    if (name >= kDenseNameLimit) {
+      auto it = sparse_.find(name);
+      if (it == sparse_.end() || !it->second)
+        return false;
+      sparse_.erase(it);
+      return true;
+    }
     if (name == 0 || name >= objects_.size() || !objects_[name])
       return false;
     objects_[name].reset();
@@ -347,6 +382,14 @@ class ObjectTable {
   // shaders that stay alive because a program still references their AST;
   // the caller must eventually call Reclaim() with the same name.
   std::unique_ptr<T> Release(GLuint name) {
+    if (name >= kDenseNameLimit) {
+      auto it = sparse_.find(name);
+      if (it == sparse_.end())
+        return nullptr;
+      std::unique_ptr<T> object = std::move(it->second);
+      sparse_.erase(it);
+      return object;
+    }
     if (name == 0 || name >= objects_.size() || !objects_[name])
       return nullptr;
     return std::move(objects_[name]);
@@ -360,13 +403,16 @@ class ObjectTable {
   void Clear() {
     objects_.clear();
     objects_.emplace_back(nullptr);
+    sparse_.clear();
     free_.clear();
   }
 
   int size() const { return static_cast<int>(objects_.size()) - 1; }
 
  private:
+  static constexpr GLuint kDenseNameLimit = 65536;
   std::vector<std::unique_ptr<T>> objects_;
+  std::map<GLuint, std::unique_ptr<T>> sparse_;
   std::vector<GLuint> free_;
 };
 
@@ -395,6 +441,8 @@ struct BlendState {
 struct StencilFace {
   GLenum func = GL_ALWAYS;
   int reference = 0;
+  GLuint compare_mask = 0xFFu;
+  GLuint write_mask = 0xFFu;
   GLenum op_fail = GL_KEEP;
   GLenum op_depth_fail = GL_KEEP;
   GLenum op_pass = GL_KEEP;

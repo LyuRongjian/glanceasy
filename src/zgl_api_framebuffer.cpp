@@ -130,12 +130,16 @@ bool IsColorRenderableFormat(GLenum format, bool is_texture) {
 
 const TextureImage* AttachmentImageOf(Context* context,
                                       const FramebufferAttachment& attachment) {
+  if (attachment.retained_texture)
+    return attachment.retained_texture->image(attachment.level, 0);
   if (attachment.texture) {
     const Texture* texture = context->textures.Get(attachment.texture);
     if (!texture)
       return nullptr;
     return texture->image(attachment.level, 0);
   }
+  if (attachment.retained_renderbuffer)
+    return &attachment.retained_renderbuffer->image;
   if (attachment.renderbuffer) {
     const Renderbuffer* renderbuffer =
         context->renderbuffers.Get(attachment.renderbuffer);
@@ -197,7 +201,8 @@ GLenum CheckCompleteness(Context* context, const Framebuffer& framebuffer) {
     return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
 
   for (int i = 0; i < kMaxColorAttachments; ++i) {
-    if (!framebuffer.colors[i].bound() || !framebuffer.colors[i].texture)
+    if (!framebuffer.colors[i].bound() || !framebuffer.colors[i].texture ||
+        framebuffer.colors[i].retained_texture)
       continue;
     const Texture* texture = context->textures.Get(framebuffer.colors[i].texture);
     if (!texture)
@@ -681,15 +686,13 @@ void glFramebufferTexture2D(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  slot->retained_texture.reset();
   if (texture == 0) {
-    slot->texture = 0;
-    slot->level = 0;
-    slot->layer = 0;
-    slot->cube_face = 0;
+    *slot = zgl::FramebufferAttachment();
     return;
   }
   zgl::Texture* object = context->textures.Get(texture);
-  if (!object) {
+  if (!object || object->delete_status) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -820,14 +823,19 @@ void glFramebufferRenderbuffer(GLenum target,
   }
   if (renderbuffer != 0) {
     const zgl::Renderbuffer* object = context->renderbuffers.Get(renderbuffer);
-    if (!object || object->generated_only) {
+    if (!object || object->delete_status || object->generated_only) {
       context->SetError(GL_INVALID_OPERATION);
       return;
     }
   }
-  slot->renderbuffer = renderbuffer;
-  slot->texture = 0;
-  slot->level = 0;
+  slot->retained_renderbuffer.reset();
+  if (renderbuffer == 0) {
+    *slot = zgl::FramebufferAttachment();
+  } else {
+    slot->renderbuffer = renderbuffer;
+    slot->texture = 0;
+    slot->level = 0;
+  }
   if (attachment == GL_DEPTH_STENCIL_ATTACHMENT)
     framebuffer->stencil = *slot;
 }
@@ -1290,21 +1298,39 @@ void glDeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
   }
   for (GLsizei i = 0; i < n; ++i) {
     const GLuint name = renderbuffers[i];
-    context->renderbuffers.Delete(name);
+    if (name == 0)
+      continue;
+    if (zgl::Renderbuffer* object = context->renderbuffers.Get(name))
+      object->delete_status = true;
     if (context->state.renderbuffer == name)
       context->state.renderbuffer = 0;
-    zgl::Framebuffer* framebuffer =
+    zgl::Framebuffer* bound =
         zgl::CurrentFramebuffer(context, GL_FRAMEBUFFER);
-    if (framebuffer) {
-      for (int i = 0; i < zgl::kMaxColorAttachments; ++i) {
-        if (framebuffer->colors[i].renderbuffer == name)
-          framebuffer->colors[i] = zgl::FramebufferAttachment();
+    zgl::Renderbuffer* deleted = context->renderbuffers.Get(name);
+    context->framebuffers.ForEach([&](zgl::Framebuffer& framebuffer) {
+      for (int j = 0; j < zgl::kMaxColorAttachments; ++j) {
+        zgl::FramebufferAttachment& slot = framebuffer.colors[j];
+        if (slot.renderbuffer != name)
+          continue;
+        if (&framebuffer == bound) {
+          slot = zgl::FramebufferAttachment();
+        } else if (deleted && !slot.retained_renderbuffer) {
+          slot.retained_renderbuffer =
+              std::make_shared<const zgl::Renderbuffer>(*deleted);
+        }
       }
-      if (framebuffer->depth.renderbuffer == name)
-        framebuffer->depth = zgl::FramebufferAttachment();
-      if (framebuffer->stencil.renderbuffer == name)
-        framebuffer->stencil = zgl::FramebufferAttachment();
-    }
+      for (zgl::FramebufferAttachment* slot : {&framebuffer.depth,
+                                                &framebuffer.stencil}) {
+        if (slot->renderbuffer != name)
+          continue;
+        if (&framebuffer == bound) {
+          *slot = zgl::FramebufferAttachment();
+        } else if (deleted && !slot->retained_renderbuffer) {
+          slot->retained_renderbuffer =
+              std::make_shared<const zgl::Renderbuffer>(*deleted);
+        }
+      }
+    });
   }
 }
 
@@ -1312,7 +1338,8 @@ GLboolean glIsRenderbuffer(GLuint renderbuffer) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || renderbuffer == 0)
     return GL_FALSE;
-  return context->renderbuffers.Get(renderbuffer) ? GL_TRUE : GL_FALSE;
+  const zgl::Renderbuffer* object = context->renderbuffers.Get(renderbuffer);
+  return object && !object->delete_status ? GL_TRUE : GL_FALSE;
 }
 
 void glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
@@ -1326,6 +1353,21 @@ void glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
   if (renderbuffer != 0) {
     zgl::Renderbuffer* object =
         context->renderbuffers.GetOrCreate(renderbuffer);
+    if (object && object->delete_status) {
+      zgl::Framebuffer* framebuffer =
+          context->framebuffers.Get(context->state.framebuffer);
+      if (framebuffer) {
+        for (int i = 0; i < zgl::kMaxColorAttachments; ++i) {
+          if (framebuffer->colors[i].renderbuffer == renderbuffer)
+            framebuffer->colors[i] = zgl::FramebufferAttachment();
+        }
+        if (framebuffer->depth.renderbuffer == renderbuffer)
+          framebuffer->depth = zgl::FramebufferAttachment();
+        if (framebuffer->stencil.renderbuffer == renderbuffer)
+          framebuffer->stencil = zgl::FramebufferAttachment();
+      }
+      *object = zgl::Renderbuffer();
+    }
     if (object)
       object->generated_only = false;
   }
@@ -1764,6 +1806,8 @@ void glBlitFramebuffer(GLint src_x0,
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
+  const bool scissor_test = context->state.scissor_test;
+  const zgl::Rect& scissor = context->state.scissor;
   const bool mirror_src_x = src_x1 < src_x0;
   const bool mirror_src_y = src_y1 < src_y0;
   const bool mirror_dst_x = dst_x1 < dst_x0;
@@ -1796,6 +1840,8 @@ void glBlitFramebuffer(GLint src_x0,
             const int gl_y = destination.height - 1 - destination_y;
             if (destination_x < 0 || destination_x >= destination.width ||
                 gl_y < 0 || gl_y >= destination.height)
+              continue;
+            if (scissor_test && !scissor.Contains(destination_x, destination_y))
               continue;
             int source_column =
                 ((column * 2 + 1) * src_width) / (dst_width * 2);
@@ -1849,7 +1895,7 @@ void glBlitFramebuffer(GLint src_x0,
           context->state.color_mask[0] && context->state.color_mask[1] &&
           context->state.color_mask[2] && context->state.color_mask[3];
       const bool copy_rows =
-          writes_all_channels && !mirror_src_x && !mirror_src_y &&
+          writes_all_channels && !scissor_test && !mirror_src_x && !mirror_src_y &&
           !mirror_dst_x && !mirror_dst_y && source.read_channels == 4 &&
           destination.color_channels[0] == 4 &&
           source.read_format != GL_SRGB8_ALPHA8 &&
@@ -1896,6 +1942,8 @@ void glBlitFramebuffer(GLint src_x0,
                 gl_y < 0 || gl_y >= destination.height) {
               continue;
             }
+            if (scissor_test && !scissor.Contains(destination_x, destination_y))
+              continue;
             int source_column =
                 ((column * 2 + 1) * src_width) / (dst_width * 2);
             int source_row =
@@ -2040,6 +2088,8 @@ void glBlitFramebuffer(GLint src_x0,
         if (x < 0 || x >= destination.width || gl_y < 0 ||
             gl_y >= destination.height)
           continue;
+        if (scissor_test && !scissor.Contains(x, y))
+          continue;
         GLint source_column =
             ((column * 2 + 1) * (src_x1 - src_x0)) /
             ((dst_x1 - dst_x0) * 2);
@@ -2074,6 +2124,8 @@ void glBlitFramebuffer(GLint src_x0,
         const GLint gl_y = destination.height - 1 - y;
         if (x < 0 || x >= destination.width || gl_y < 0 ||
             gl_y >= destination.height)
+          continue;
+        if (scissor_test && !scissor.Contains(x, y))
           continue;
         GLint source_column =
             ((column * 2 + 1) * (src_x1 - src_x0)) /
@@ -2128,13 +2180,31 @@ void glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint* value) {
     if (target.valid() && target.stencil) {
       const size_t texels = static_cast<size_t>(target.width) * target.height;
       const int planes = target.multisampled() ? target.samples : 1;
-      for (int sample = 0; sample < planes; ++sample)
-        std::fill(target.stencil + static_cast<size_t>(sample) * texels,
-                  target.stencil + static_cast<size_t>(sample + 1) * texels,
-                  static_cast<uint8_t>(value[0]));
-      if (target.multisampled() && target.resolved_stencil)
-        std::fill(target.resolved_stencil, target.resolved_stencil + texels,
-                  static_cast<uint8_t>(value[0]));
+      zgl::Rect area{0, 0, target.width, target.height};
+      if (context->state.scissor_test) {
+        const zgl::Rect scissor{context->state.scissor.x,
+                                target.height - context->state.scissor.bottom(),
+                                context->state.scissor.width,
+                                context->state.scissor.height};
+        area = area.Intersect(scissor);
+      }
+      if (!area.IsEmpty()) {
+        for (int sample = 0; sample < planes; ++sample) {
+          uint8_t* plane = target.stencil + static_cast<size_t>(sample) * texels;
+          for (int y = area.y; y < area.bottom(); ++y)
+            std::fill(plane + static_cast<size_t>(y) * target.width + area.x,
+                      plane + static_cast<size_t>(y) * target.width + area.right(),
+                      static_cast<uint8_t>(value[0]));
+        }
+        if (target.multisampled() && target.resolved_stencil) {
+          for (int y = area.y; y < area.bottom(); ++y)
+            std::fill(target.resolved_stencil +
+                          static_cast<size_t>(y) * target.width + area.x,
+                      target.resolved_stencil +
+                          static_cast<size_t>(y) * target.width + area.right(),
+                      static_cast<uint8_t>(value[0]));
+        }
+      }
     }
     return;
   }
@@ -2181,13 +2251,31 @@ void glClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat* value) {
           static_cast<uint16_t>(zgl::Clamp01(value[0]) * 65535.0f + 0.5f);
       const size_t texels = static_cast<size_t>(target.width) * target.height;
       const int planes = target.multisampled() ? target.samples : 1;
-      for (int sample = 0; sample < planes; ++sample)
-        std::fill(target.depth + static_cast<size_t>(sample) * texels,
-                  target.depth + static_cast<size_t>(sample + 1) * texels,
-                  depth);
-      if (target.multisampled() && target.resolved_depth)
-        std::fill(target.resolved_depth, target.resolved_depth + texels,
-                  depth);
+      zgl::Rect area{0, 0, target.width, target.height};
+      if (context->state.scissor_test) {
+        const zgl::Rect scissor{context->state.scissor.x,
+                                target.height - context->state.scissor.bottom(),
+                                context->state.scissor.width,
+                                context->state.scissor.height};
+        area = area.Intersect(scissor);
+      }
+      if (!area.IsEmpty()) {
+        for (int sample = 0; sample < planes; ++sample) {
+          uint16_t* plane = target.depth + static_cast<size_t>(sample) * texels;
+          for (int y = area.y; y < area.bottom(); ++y)
+            std::fill(plane + static_cast<size_t>(y) * target.width + area.x,
+                      plane + static_cast<size_t>(y) * target.width + area.right(),
+                      depth);
+        }
+        if (target.multisampled() && target.resolved_depth) {
+          for (int y = area.y; y < area.bottom(); ++y)
+            std::fill(target.resolved_depth +
+                          static_cast<size_t>(y) * target.width + area.x,
+                      target.resolved_depth +
+                          static_cast<size_t>(y) * target.width + area.right(),
+                      depth);
+        }
+      }
     }
     return;
   }
@@ -2213,25 +2301,51 @@ void glClearBufferfi(GLenum buffer,
   }
   const size_t texels = static_cast<size_t>(target.width) * target.height;
   const int planes = target.multisampled() ? target.samples : 1;
+  zgl::Rect area{0, 0, target.width, target.height};
+  if (context->state.scissor_test) {
+    const zgl::Rect scissor{context->state.scissor.x,
+                            target.height - context->state.scissor.bottom(),
+                            context->state.scissor.width,
+                            context->state.scissor.height};
+    area = area.Intersect(scissor);
+  }
+  if (area.IsEmpty())
+    return;
   if (target.depth) {
     const uint16_t clear_depth =
         static_cast<uint16_t>(zgl::Clamp01(depth) * 65535.0f + 0.5f);
-    for (int sample = 0; sample < planes; ++sample)
-      std::fill(target.depth + static_cast<size_t>(sample) * texels,
-                target.depth + static_cast<size_t>(sample + 1) * texels,
-                clear_depth);
-    if (target.multisampled() && target.resolved_depth)
-      std::fill(target.resolved_depth, target.resolved_depth + texels,
-                clear_depth);
+    for (int sample = 0; sample < planes; ++sample) {
+      uint16_t* plane = target.depth + static_cast<size_t>(sample) * texels;
+      for (int y = area.y; y < area.bottom(); ++y)
+        std::fill(plane + static_cast<size_t>(y) * target.width + area.x,
+                  plane + static_cast<size_t>(y) * target.width + area.right(),
+                  clear_depth);
+    }
+    if (target.multisampled() && target.resolved_depth) {
+      for (int y = area.y; y < area.bottom(); ++y)
+        std::fill(target.resolved_depth +
+                      static_cast<size_t>(y) * target.width + area.x,
+                  target.resolved_depth +
+                      static_cast<size_t>(y) * target.width + area.right(),
+                  clear_depth);
+    }
   }
   if (target.stencil) {
-    for (int sample = 0; sample < planes; ++sample)
-      std::fill(target.stencil + static_cast<size_t>(sample) * texels,
-                target.stencil + static_cast<size_t>(sample + 1) * texels,
-                static_cast<uint8_t>(stencil));
-    if (target.multisampled() && target.resolved_stencil)
-      std::fill(target.resolved_stencil, target.resolved_stencil + texels,
-                static_cast<uint8_t>(stencil));
+    for (int sample = 0; sample < planes; ++sample) {
+      uint8_t* plane = target.stencil + static_cast<size_t>(sample) * texels;
+      for (int y = area.y; y < area.bottom(); ++y)
+        std::fill(plane + static_cast<size_t>(y) * target.width + area.x,
+                  plane + static_cast<size_t>(y) * target.width + area.right(),
+                  static_cast<uint8_t>(stencil));
+    }
+    if (target.multisampled() && target.resolved_stencil) {
+      for (int y = area.y; y < area.bottom(); ++y)
+        std::fill(target.resolved_stencil +
+                      static_cast<size_t>(y) * target.width + area.x,
+                  target.resolved_stencil +
+                      static_cast<size_t>(y) * target.width + area.right(),
+                  static_cast<uint8_t>(stencil));
+    }
   }
 }
 

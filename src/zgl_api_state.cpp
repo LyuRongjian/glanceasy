@@ -1073,6 +1073,8 @@ void glStencilMask(GLuint mask) {
     return;
   context->state.stencil.write_mask = static_cast<int>(mask);
   context->state.stencil_write_mask = mask;
+  context->state.stencil.front.write_mask = mask;
+  context->state.stencil.back.write_mask = mask;
 }
 
 void glStencilMaskSeparate(GLenum face, GLuint mask) {
@@ -1082,7 +1084,17 @@ void glStencilMaskSeparate(GLenum face, GLuint mask) {
       context->SetError(GL_INVALID_ENUM);
     return;
   }
-  glStencilMask(mask);
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (face == GL_FRONT || face == GL_FRONT_AND_BACK)
+    context->state.stencil.front.write_mask = mask;
+  if (face == GL_BACK || face == GL_FRONT_AND_BACK)
+    context->state.stencil.back.write_mask = mask;
+  if (face == GL_FRONT_AND_BACK) {
+    context->state.stencil.write_mask = static_cast<int>(mask);
+    context->state.stencil_write_mask = mask;
+  }
 }
 
 static void SetStencilFunc(zgl::StencilFace* face,
@@ -1090,8 +1102,10 @@ static void SetStencilFunc(zgl::StencilFace* face,
                            GLint reference,
                            GLuint mask) {
   face->func = func;
-  face->reference = reference;
-  (void)mask;
+  // The reference is clamped to the range representable by the stencil
+  // buffer; it is not reduced modulo the number of bits.
+  face->reference = reference < 0 ? 0 : (reference > 255 ? 255 : reference);
+  face->compare_mask = mask;
 }
 
 void glStencilFunc(GLenum func, GLint reference, GLuint mask) {
@@ -1119,8 +1133,10 @@ void glStencilFuncSeparate(GLenum face,
       context->SetError(GL_INVALID_ENUM);
       return;
   }
-  context->state.stencil.mask = static_cast<int>(mask);
-  context->state.stencil_mask = mask;
+  if (face == GL_FRONT_AND_BACK) {
+    context->state.stencil.mask = static_cast<int>(mask);
+    context->state.stencil_mask = mask;
+  }
   if (face == GL_FRONT || face == GL_FRONT_AND_BACK)
     SetStencilFunc(&context->state.stencil.front, func, reference, mask);
   if (face == GL_BACK || face == GL_FRONT_AND_BACK)

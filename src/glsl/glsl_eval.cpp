@@ -1596,6 +1596,7 @@ void Program::RunVertex(const VertexInput& input,
     *out_point_size = 1.0f;
   if (!linked_ || !vertex_)
     return;
+  vertex_globals_ = vertex_global_initials_;
   if (varying_floats_ > 0 && out_varyings)
     memset(out_varyings, 0, sizeof(float) * varying_floats_);
 
@@ -1658,6 +1659,32 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
   output->discarded = false;
   if (!linked_ || !fragment_)
     return false;
+  fragment_globals_ = fragment_global_initials_;
+
+  // Output arrays share one global slot.  A built-in declaration for that
+  // slot may have reset it to vec4 during linking, so restore the aggregate
+  // storage before the shader writes its elements.
+  std::vector<int> output_elements(fragment_globals_.size(), 1);
+  for (const FragmentOutputInfo& output : fragment_outputs_) {
+    if (output.slot >= 0 &&
+        output.slot < static_cast<int>(output_elements.size()) &&
+        output.element + 1 > output_elements[output.slot]) {
+      output_elements[output.slot] = output.element + 1;
+    }
+  }
+  for (const FragmentOutputInfo& output : fragment_outputs_) {
+    if (output.slot < 0 ||
+        output.slot >= static_cast<int>(fragment_globals_.size()))
+      continue;
+    const int count = output_elements[output.slot];
+    if (count > 1 &&
+        fragment_globals_[output.slot].type.kind() !=
+            zgl::glsl::TypeKind::kArray) {
+      Type element(output.base, output.components, 1);
+      fragment_globals_[output.slot].ResetType(
+          Type::Array(element, count));
+    }
+  }
 
   Evaluator evaluator(*fragment_, &fragment_globals_, this);
   evaluator.set_uniforms(input.uniforms, fragment_uniform_map_.data());

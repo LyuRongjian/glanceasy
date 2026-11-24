@@ -493,7 +493,10 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
                           int location,
                           const float color[4],
                           glsl::BaseType base);
-  void ApplyStencilOp(GLenum op, size_t pixel, uint8_t reference);
+  void ApplyStencilOp(GLenum op,
+                      size_t pixel,
+                      uint8_t reference,
+                      uint8_t write_mask);
 
   Context* context_;
   Rasterizer rasterizer_;
@@ -962,8 +965,11 @@ void Pipeline::WriteTransformFeedback(const float* varyings) {
     size_t end = buffer->data.size();
     if (binding.size > 0)
       end = std::min(end, binding.offset + binding.size);
-    if (start <= end && bytes <= end - start)
+    if (varyings && output.offset >= 0 &&
+        output.offset + output.components <= varying_floats_ && bytes > 0 &&
+        start <= end && bytes <= end - start && !buffer->data.empty()) {
       memcpy(buffer->data.data() + start, varyings + output.offset, bytes);
+    }
   }
 
   if (separate) {
@@ -1261,12 +1267,14 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
   }
 }
 
-void Pipeline::ApplyStencilOp(GLenum op, size_t pixel, uint8_t reference) {
-  const StencilState& stencil = state().stencil;
+void Pipeline::ApplyStencilOp(GLenum op,
+                              size_t pixel,
+                              uint8_t reference,
+                              uint8_t write_mask) {
   const uint8_t current = target_.stencil[pixel];
   const uint8_t updated = StencilOp(op, current, reference);
   target_.stencil[pixel] = static_cast<uint8_t>(
-      (updated & stencil.write_mask) | (current & ~stencil.write_mask));
+      (updated & write_mask) | (current & ~write_mask));
 }
 
 void Pipeline::Shade(const Fragment& fragment) {
@@ -1292,14 +1300,16 @@ void Pipeline::Shade(const Fragment& fragment) {
 
   const StencilFace* face =
       current_front_ ? &state.stencil.front : &state.stencil.back;
-  const uint8_t reference = static_cast<uint8_t>(face->reference) &
-                            static_cast<uint8_t>(state.stencil.mask);
+  const uint8_t reference = static_cast<uint8_t>(face->reference);
+  const uint8_t compare_reference =
+      reference & static_cast<uint8_t>(face->compare_mask);
   bool has_stencil = target_.stencil != nullptr;
   if (state.stencil.test && has_stencil) {
     const uint8_t stored =
-        static_cast<uint8_t>(target_.stencil[pixel] & state.stencil.mask);
-    if (!StencilTestPasses(face->func, reference, stored)) {
-      ApplyStencilOp(face->op_fail, pixel, reference);
+        static_cast<uint8_t>(target_.stencil[pixel] &
+                             face->compare_mask);
+    if (!StencilTestPasses(face->func, compare_reference, stored)) {
+      ApplyStencilOp(face->op_fail, pixel, reference, static_cast<uint8_t>(face->write_mask));
       return;
     }
   }
@@ -1311,7 +1321,7 @@ void Pipeline::Shade(const Fragment& fragment) {
     const float incoming = Unorm16ToFloat(ToDepth16(interpolated_depth));
     if (!DepthTestPasses(state.depth.func, incoming, stored)) {
       if (state.stencil.test && has_stencil)
-        ApplyStencilOp(face->op_depth_fail, pixel, reference);
+        ApplyStencilOp(face->op_depth_fail, pixel, reference, static_cast<uint8_t>(face->write_mask));
       return;
     }
   }
@@ -1345,13 +1355,13 @@ void Pipeline::Shade(const Fragment& fragment) {
                          Unorm16ToFloat(ToDepth16(depth)),
                          Unorm16ToFloat(target_.depth[pixel]))) {
       if (state.stencil.test && has_stencil)
-        ApplyStencilOp(face->op_depth_fail, pixel, reference);
+        ApplyStencilOp(face->op_depth_fail, pixel, reference, static_cast<uint8_t>(face->write_mask));
       return;
     }
   }
 
   if (state.stencil.test && has_stencil)
-    ApplyStencilOp(face->op_pass, pixel, reference);
+    ApplyStencilOp(face->op_pass, pixel, reference, static_cast<uint8_t>(face->write_mask));
 
   if (state.depth.test && has_depth && state.depth.mask)
     target_.depth[pixel] = ToDepth16(depth);
@@ -1426,10 +1436,16 @@ void Pipeline::StoreFragmentColor(size_t pixel,
     const bool unsigned_output =
         target_.color_is_unsigned[attachment] || base == glsl::BaseType::kUInt;
     for (int i = 0; i < 4; ++i) {
-      if (unsigned_output)
-        values[i] = static_cast<uint32_t>(color[i]);
-      else
-        values[i] = static_cast<uint32_t>(static_cast<int32_t>(color[i]));
+      if (unsigned_output) {
+        values[i] = static_cast<uint32_t>(
+            std::clamp(color[i], 0.0f, 4294967295.0f));
+      } else if (color[i] >= 2147483520.0f) {
+        values[i] = 0x7fffffffU;
+      } else {
+        const float clamped =
+            std::clamp(color[i], -2147483648.0f, 2147483520.0f);
+        values[i] = static_cast<uint32_t>(static_cast<int64_t>(clamped));
+      }
     }
     uint32_t* const integer_destination =
         target_.integer_colors[attachment];

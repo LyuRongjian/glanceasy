@@ -90,9 +90,10 @@ bool Program::Link(
       const Variable& attribute = vertex->attributes[i];
       int location = attribute.explicit_location ? attribute.index : -1;
       if (location < 0) {
-        for (const auto& binding : bindings) {
-          if (binding.first == attribute.name) {
-            location = binding.second;
+        // The most recent glBindAttribLocation() call wins.
+        for (auto it = bindings.rbegin(); it != bindings.rend(); ++it) {
+          if (it->first == attribute.name) {
+            location = it->second;
             break;
           }
         }
@@ -422,6 +423,27 @@ bool Program::Link(
     }
   }
 
+  // Fragment output arrays use one builtin slot for all elements.  Restore
+  // the aggregate type so element writes and reads address the full array.
+  std::vector<int> output_elements(fragment_globals_.size(), 1);
+  for (const FragmentOut& output : fragment->outputs) {
+    if (output.slot >= 0 &&
+        output.slot < static_cast<int>(output_elements.size()) &&
+        output.element + 1 > output_elements[output.slot]) {
+      output_elements[output.slot] = output.element + 1;
+    }
+  }
+  for (const FragmentOut& output : fragment->outputs) {
+    if (output.slot < 0 ||
+        output.slot >= static_cast<int>(fragment_globals_.size()))
+      continue;
+    const int count = output_elements[output.slot];
+    if (count > 1) {
+      Type element(output.base, output.components, 1);
+      fragment_globals_[output.slot].ResetType(Type::Array(element, count));
+    }
+  }
+
   std::string init_error;
   if (!EvaluateGlobalInitializers(vertex, &vertex_globals_, nullptr, nullptr,
                                   &init_error) ||
@@ -429,6 +451,9 @@ bool Program::Link(
                                   nullptr, &init_error)) {
     return fail("global initialiser failed: " + init_error);
   }
+
+  vertex_global_initials_ = vertex_globals_;
+  fragment_global_initials_ = fragment_globals_;
 
   uses_frag_depth_ = fragment->uses_frag_depth;
   uses_discard_ = fragment->uses_discard;
@@ -439,7 +464,17 @@ bool Program::Link(
   // The JIT is an optimisation, not part of link validation.  A construct the
   // native backend cannot lower only means that stage keeps the evaluator.
   vertex_jit_ = ShaderJit::Compile(*vertex, nullptr);
-  fragment_jit_ = ShaderJit::Compile(*fragment, nullptr);
+  // The scalar JIT does not address fragment output array elements; use the
+  // interpreter for shaders that declare them.
+  bool has_output_array = false;
+  for (const FragmentOut& output : fragment->outputs) {
+    if (output.element > 0) {
+      has_output_array = true;
+      break;
+    }
+  }
+  if (!has_output_array)
+    fragment_jit_ = ShaderJit::Compile(*fragment, nullptr);
 #endif
 
   if (log)

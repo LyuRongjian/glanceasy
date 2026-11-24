@@ -232,6 +232,11 @@ class Program {
   // Per-stage global variables, including built-ins.
   std::vector<Value> vertex_globals_;
   std::vector<Value> fragment_globals_;
+  // Values produced by the link-time global initialisers.  Every shader
+  // invocation starts from this snapshot: mutable globals are per-invocation
+  // state, not state shared by all vertices or fragments.
+  std::vector<Value> vertex_global_initials_;
+  std::vector<Value> fragment_global_initials_;
 
   bool uses_frag_depth_ = false;
   bool uses_discard_ = false;

@@ -312,7 +312,20 @@ Parser::Parser(Stage stage, const std::string& source)
 Parser::~Parser() = default;
 
 void Parser::Advance() {
-  current_ = lexer_.Next();
+  if (has_lookahead_) {
+    current_ = lookahead_;
+    has_lookahead_ = false;
+  } else {
+    current_ = lexer_.Next();
+  }
+}
+
+const Token& Parser::Peek() {
+  if (!has_lookahead_) {
+    lookahead_ = lexer_.Next();
+    has_lookahead_ = true;
+  }
+  return lookahead_;
 }
 
 bool Parser::CheckPunct(const char* text) const {
@@ -479,8 +492,6 @@ bool Parser::AddGlobalVariable(const std::string& name,
   }
   if (type.is_void())
     return FailAt(line, "variable '" + name + "' cannot have type void");
-  if (initializer && !qualifiers.is_const)
-    return FailAt(line, "global initialisers require 'const'");
 
   Variable variable;
   variable.name = name;
@@ -525,16 +536,19 @@ bool Parser::AddGlobalVariable(const std::string& name,
   }
 
   if (stage_ == Stage::kFragment && qualifiers.is_out) {
-    const bool valid_output =
-        type.columns() == 1 && type.rows() == 4 &&
-        (type.base() == BaseType::kFloat || type.base() == BaseType::kInt ||
-         type.base() == BaseType::kUInt);
-    if (!valid_output)
-      return FailAt(line, "fragment output '" + name +
-                             "' must be a vec4, ivec4 or uvec4");
     const bool is_array = type.is_array();
     const int array_length = is_array ? type.array_size() : 1;
     const Type element_type = is_array ? type.array_element() : type;
+    const bool valid_output =
+        element_type.columns() == 1 && element_type.rows() >= 1 &&
+        element_type.rows() <= 4 &&
+        (element_type.base() == BaseType::kFloat ||
+         element_type.base() == BaseType::kInt ||
+         element_type.base() == BaseType::kUInt);
+    if (!valid_output)
+      return FailAt(line, "fragment output '" + name +
+                             "' must be a scalar or vector of floats, ints or "
+                             "uints");
     int location = qualifiers.location;
     if (location < 0) {
       for (int candidate = 0;
@@ -575,6 +589,12 @@ bool Parser::AddGlobalVariable(const std::string& name,
       ast_->outputs.push_back(output);
     }
     global_names_.push_back({name, slot});
+    Variable output_global;
+    output_global.name = name;
+    output_global.type = type;
+    output_global.storage = Storage::kGlobal;
+    output_global.index = slot;
+    ast_->globals.push_back(output_global);
     ast_->uses_frag_color = true;
     return true;
   }
@@ -1055,8 +1075,12 @@ bool Parser::IsDeclarationStart() const {
   if (current_.kind != Token::Kind::kIdentifier)
     return false;
   const std::string& text = current_.text;
-  return IsKnownTypeName(text) || IsQualifierKeyword(text) || text == "struct" ||
-         text == "precision";
+  const bool keyword = IsKnownTypeName(text) || IsQualifierKeyword(text) ||
+                       text == "struct" || text == "precision";
+  // A type name followed by '(' is a constructor call used as an expression
+  // statement, not a declaration.
+  return keyword && const_cast<Parser*>(this)->Peek().kind ==
+                       Token::Kind::kIdentifier;
 }
 
 StmtPtr Parser::ParseBlock() {
@@ -1722,9 +1746,17 @@ ExprPtr Parser::ParseVariable(const std::string& name, int line) {
     expr->storage = Storage::kGlobal;
     expr->index = index;
     for (const Variable& global : ast_->globals) {
-      if (global.index == index) {
+      if (global.index == index && global.name == name) {
         expr->type = global.type;
         break;
+      }
+    }
+    if (expr->type.is_void()) {
+      for (const Variable& global : ast_->globals) {
+        if (global.index == index) {
+          expr->type = global.type;
+          break;
+        }
       }
     }
     return expr;

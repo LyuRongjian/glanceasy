@@ -153,7 +153,12 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
   }
   for (GLsizei i = 0; i < n; ++i) {
     const GLuint name = buffers[i];
-    context->buffers.Delete(name);
+    if (name == 0)
+      continue;
+    // A deleted buffer stays alive while a vertex array or transform feedback
+    // object still references it.  Its data remains readable by draws.
+    if (zgl::Buffer* object = context->buffers.Get(name))
+      object->delete_status = true;
     if (context->state.array_buffer == name)
       context->state.array_buffer = 0;
     if (context->state.element_buffer == name) {
@@ -176,17 +181,6 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
       if (context->state.uniform_buffers[i].buffer == name)
         context->state.uniform_buffers[i] = zgl::IndexedBufferBinding();
     }
-    auto clear_feedback = [name](zgl::TransformFeedback* feedback) {
-      if (!feedback)
-        return;
-      for (int i = 0; i < zgl::kMaxTransformFeedbackBuffers; ++i) {
-        if (feedback->buffers[i].buffer == name)
-          feedback->buffers[i] = zgl::IndexedBufferBinding();
-      }
-    };
-    // Only the current transform feedback object is unbound.  Bindings in
-    // other transform feedback objects remain stale until they are rebound.
-    clear_feedback(zgl::CurrentTransformFeedback(context));
   }
 }
 
@@ -194,7 +188,8 @@ GLboolean glIsBuffer(GLuint buffer) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || buffer == 0)
     return GL_FALSE;
-  return context->buffers.Get(buffer) ? GL_TRUE : GL_FALSE;
+  const zgl::Buffer* object = context->buffers.Get(buffer);
+  return object && !object->delete_status ? GL_TRUE : GL_FALSE;
 }
 
 void glBindBuffer(GLenum target, GLuint buffer) {
@@ -205,10 +200,8 @@ void glBindBuffer(GLenum target, GLuint buffer) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (buffer != 0 && !context->buffers.Get(buffer)) {
-    context->SetError(GL_INVALID_OPERATION);
+  if (buffer != 0 && !context->buffers.GetOrCreate(buffer))
     return;
-  }
   if (target == GL_ARRAY_BUFFER) {
     context->state.array_buffer = buffer;
   } else if (target == GL_ELEMENT_ARRAY_BUFFER) {

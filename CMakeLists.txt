@@ -44,6 +44,7 @@ set(ZGL_SOURCES
     src/zgl_api_state.cpp
     src/zgl_api_buffer.cpp
     src/zgl_api_texture.cpp
+    src/zgl_api_texture3d.cpp
     src/zgl_api_framebuffer.cpp
     src/zgl_api_program.cpp
     src/zgl_api_draw.cpp
