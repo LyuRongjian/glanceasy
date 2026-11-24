@@ -170,6 +170,9 @@ enum class BuiltinFunc {
   kDfdx,
   kDfdy,
   kFwidth,
+  kFloatBitsToUint,
+  kUIntBitsToFloat,
+  kIntBitsToFloat,
 };
 
 struct Variable {

@@ -77,8 +77,12 @@ void glCompressedTexImage3D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (width > zgl::kMaxTextureSize || height > zgl::kMaxTextureSize ||
-      depth > zgl::kMax3DTextureSize) {
+  const int max_width =
+      target == GL_TEXTURE_3D ? zgl::kMax3DTextureSize : zgl::kMaxTextureSize;
+  const int max_height = max_width;
+  const int max_depth =
+      target == GL_TEXTURE_3D ? zgl::kMax3DTextureSize : 256;
+  if (width > max_width || height > max_height || depth > max_depth) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -86,9 +90,13 @@ void glCompressedTexImage3D(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  if (level >= zgl::MipLevelCount(max_width, max_height)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   const int required =
       RequiredCompressedBytes(internal_format, width, height, depth);
-  if (image_size < required) {
+  if (image_size != required) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -135,22 +143,37 @@ void glCompressedTexSubImage3D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  const int required = RequiredCompressedBytes(format, width, height, depth);
-  if (required <= 0) {
-    context->SetError(GL_INVALID_ENUM);
-    return;
-  }
-  if (image_size < required) {
+  const int max_width =
+      target == GL_TEXTURE_3D ? zgl::kMax3DTextureSize : zgl::kMaxTextureSize;
+  if (level >= zgl::MipLevelCount(max_width, max_width)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!CheckUnpackBuffer(context, image_size))
-    return;
   zgl::Texture* texture = Bound3DTexture(context, target);
   if (!texture) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  if (format != texture->internal_format) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (xoffset % 4 != 0 || yoffset % 4 != 0 || width % 4 != 0 ||
+      height % 4 != 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const int required = RequiredCompressedBytes(format, width, height, depth);
+  if (image_size != required) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (required <= 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (!CheckUnpackBuffer(context, image_size))
+    return;
   if (level >= texture->levels) {
     context->SetError(GL_INVALID_VALUE);
     return;
@@ -158,10 +181,6 @@ void glCompressedTexSubImage3D(GLenum target,
   if (xoffset + width > texture->width || yoffset + height > texture->height ||
       zoffset + depth > texture->depth) {
     context->SetError(GL_INVALID_VALUE);
-    return;
-  }
-  if (format != texture->internal_format) {
-    context->SetError(GL_INVALID_OPERATION);
     return;
   }
 }

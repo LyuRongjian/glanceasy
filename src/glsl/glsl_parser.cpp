@@ -177,6 +177,9 @@ const BuiltinFuncEntry kBuiltinFuncs[] = {
     {"dFdx", BuiltinFunc::kDfdx},
     {"dFdy", BuiltinFunc::kDfdy},
     {"fwidth", BuiltinFunc::kFwidth},
+    {"floatBitsToUint", BuiltinFunc::kFloatBitsToUint},
+    {"uintBitsToFloat", BuiltinFunc::kUIntBitsToFloat},
+    {"intBitsToFloat", BuiltinFunc::kIntBitsToFloat},
 };
 
 int PrecedenceOfPunct(const std::string& punct) {
@@ -2030,6 +2033,11 @@ Type Parser::BuiltinResultType(BuiltinFunc function,
     case BuiltinFunc::kAny:
     case BuiltinFunc::kAll:
       return Type::Bool();
+    case BuiltinFunc::kFloatBitsToUint:
+      return Type::UVec(std::max(1, first.rows()));
+    case BuiltinFunc::kUIntBitsToFloat:
+    case BuiltinFunc::kIntBitsToFloat:
+      return Type::Vec(std::max(1, first.rows()));
     case BuiltinFunc::kTexture2D:
     case BuiltinFunc::kTexture2DProj:
     case BuiltinFunc::kTextureCube:

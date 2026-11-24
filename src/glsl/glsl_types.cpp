@@ -161,12 +161,14 @@ Value MakeFloat(float v) {
 Value MakeInt(int32_t v) {
   Value value(Type::Int());
   value.data[0] = static_cast<float>(v);
+  value.int_data[0] = static_cast<uint32_t>(v);
   return value;
 }
 
 Value MakeUInt(uint32_t v) {
   Value value(Type::UInt());
   value.data[0] = static_cast<float>(v);
+  value.int_data[0] = v;
   return value;
 }
 
@@ -184,15 +186,19 @@ Value MakeVec(const float* values, int count) {
 
 Value MakeIVec(const int32_t* values, int count) {
   Value value(Type::IVec(count));
-  for (int i = 0; i < count; ++i)
+  for (int i = 0; i < count; ++i) {
     value.data[i] = static_cast<float>(values[i]);
+    value.int_data[i] = static_cast<uint32_t>(values[i]);
+  }
   return value;
 }
 
 Value MakeUVec(const uint32_t* values, int count) {
   Value value(Type::UVec(count));
-  for (int i = 0; i < count; ++i)
+  for (int i = 0; i < count; ++i) {
     value.data[i] = static_cast<float>(values[i]);
+    value.int_data[i] = values[i];
+  }
   return value;
 }
 
@@ -269,17 +275,23 @@ Value Convert(const Value& value, const Type& target) {
     if (value.type == target) {
       std::memcpy(out.Data(), value.Data(),
                   sizeof(float) * static_cast<size_t>(target.components()));
+      std::memcpy(out.IntData(), value.IntData(),
+                  sizeof(uint32_t) * static_cast<size_t>(target.components()));
     } else if (target.is_array() && value.type.is_array() &&
                target.array_element() == value.type.array_element()) {
       const int count = std::min(target.array_size(), value.type.array_size());
       const int stride = target.array_element().components();
-      for (int i = 0; i < count * stride; ++i)
+      for (int i = 0; i < count * stride; ++i) {
         out.Data()[i] = value.Data()[i];
+        out.IntData()[i] = value.IntData()[i];
+      }
     } else if (target.is_struct() && value.type.is_struct() &&
                target.struct_info()->name == value.type.struct_info()->name) {
       const int count = std::min(target.components(), value.size());
-      for (int i = 0; i < count; ++i)
+      for (int i = 0; i < count; ++i) {
         out.Data()[i] = value.Data()[i];
+        out.IntData()[i] = value.IntData()[i];
+      }
     }
     return out;
   }
@@ -322,8 +334,16 @@ Value Convert(const Value& value, const Type& target) {
   if (src_components == 1) {
     const float v =
         ConvertScalar(value.type.base(), target.base(), value.Data()[0]);
-    for (int i = 0; i < dst_rows; ++i)
+    const uint32_t iv =
+        (value.type.base() == BaseType::kInt ||
+         value.type.base() == BaseType::kUInt)
+            ? value.IntData()[0]
+            : static_cast<uint32_t>(v);
+    for (int i = 0; i < dst_rows; ++i) {
       out.data[i] = v;
+      if (target.base() == BaseType::kInt || target.base() == BaseType::kUInt)
+        out.int_data[i] = iv;
+    }
     return out;
   }
 
@@ -331,6 +351,13 @@ Value Convert(const Value& value, const Type& target) {
     if (i < src_components) {
       out.data[i] =
           ConvertScalar(value.type.base(), target.base(), value.Data()[i]);
+      if (target.base() == BaseType::kInt || target.base() == BaseType::kUInt) {
+        out.int_data[i] =
+            (value.type.base() == BaseType::kInt ||
+             value.type.base() == BaseType::kUInt)
+                ? value.IntData()[i]
+                : static_cast<uint32_t>(out.data[i]);
+      }
     } else {
       // GLSL fills the tail of a widened vector with (0, 0, 0, 1).
       out.data[i] = (i == 3) ? 1.0f : 0.0f;

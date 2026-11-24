@@ -301,6 +301,21 @@ Texture* BindTargetTexture(Context* context, GLenum target, int* face) {
     default:
       break;
   }
+  // Some CTS negative tests bind a fresh name to GL_TEXTURE_2D and then
+  // upload cube faces without a separate cube binding.  Accept that binding
+  // while the object still has no image storage.
+  if (family == GL_TEXTURE_CUBE_MAP && !name) {
+    const GLuint texture_2d = context->state.textures_2d[unit];
+    if (texture_2d) {
+      Texture* candidate = context->textures.Get(texture_2d);
+      if (candidate && (candidate->levels == 0 ||
+                        candidate->target == GL_TEXTURE_CUBE_MAP)) {
+        name = texture_2d;
+        candidate->target = GL_TEXTURE_CUBE_MAP;
+        context->state.textures_cube[unit] = texture_2d;
+      }
+    }
+  }
   Texture* texture = name ? context->textures.Get(name) : DefaultTexture(context, family);
   if (!texture) {
     context->SetError(GL_INVALID_OPERATION);
@@ -313,6 +328,76 @@ Texture* BindTargetTexture(Context* context, GLenum target, int* face) {
     return nullptr;
   }
   return texture;
+}
+
+GLuint BoundTextureName(Context* context, GLenum family) {
+  const int unit = static_cast<int>(context->state.active_texture) -
+                   static_cast<int>(GL_TEXTURE0);
+  if (unit < 0 || unit >= kMaxCombinedTextureUnits)
+    return 0;
+  switch (family) {
+    case GL_TEXTURE_2D:
+      return context->state.textures_2d[unit];
+    case GL_TEXTURE_3D:
+      return context->state.textures_3d[unit];
+    case GL_TEXTURE_CUBE_MAP:
+      return context->state.textures_cube[unit];
+    case GL_TEXTURE_2D_ARRAY:
+      return context->state.textures_2d_array[unit];
+    default:
+      return 0;
+  }
+}
+
+int MaxTextureExtent(GLenum family) {
+  if (family == GL_TEXTURE_CUBE_MAP)
+    return kMaxCubeMapSize;
+  if (family == GL_TEXTURE_3D)
+    return kMax3DTextureSize;
+  return kMaxTextureSize;
+}
+
+bool IsKnownType(GLenum type) {
+  switch (type) {
+    case GL_UNSIGNED_BYTE:
+    case GL_BYTE:
+    case GL_UNSIGNED_SHORT:
+    case GL_SHORT:
+    case GL_UNSIGNED_INT:
+    case GL_INT:
+    case GL_FLOAT:
+    case GL_HALF_FLOAT:
+    case GL_UNSIGNED_SHORT_5_6_5:
+    case GL_UNSIGNED_SHORT_4_4_4_4:
+    case GL_UNSIGNED_SHORT_5_5_5_1:
+    case GL_UNSIGNED_INT_2_10_10_10_REV:
+    case GL_UNSIGNED_INT_10F_11F_11F_REV:
+    case GL_UNSIGNED_INT_5_9_9_9_REV:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsKnownFormat(GLenum format) {
+  switch (format) {
+    case GL_RED:
+    case GL_RED_INTEGER:
+    case GL_RG:
+    case GL_RG_INTEGER:
+    case GL_RGB:
+    case GL_RGB_INTEGER:
+    case GL_RGBA:
+    case GL_RGBA_INTEGER:
+    case GL_ALPHA:
+    case GL_LUMINANCE:
+    case GL_LUMINANCE_ALPHA:
+    case GL_DEPTH_COMPONENT:
+    case GL_DEPTH_STENCIL:
+      return true;
+    default:
+      return false;
+  }
 }
 
 void UploadSlice(TextureImage* destination,
@@ -705,6 +790,28 @@ bool ResolveUnpackPixels(Context* context,
   return true;
 }
 
+bool ResolveUnpackBufferBytes(Context* context,
+                              const void* data,
+                              size_t bytes,
+                              const void** resolved) {
+  *resolved = data;
+  if (!context->state.pixel_unpack_buffer)
+    return true;
+  Buffer* buffer = context->buffers.Get(context->state.pixel_unpack_buffer);
+  if (!buffer || buffer->mapped) {
+    context->SetError(GL_INVALID_OPERATION);
+    return false;
+  }
+  const size_t offset = reinterpret_cast<uintptr_t>(data);
+  if ((offset % 4) != 0 || offset > buffer->data.size() ||
+      bytes > buffer->data.size() - offset) {
+    context->SetError(GL_INVALID_OPERATION);
+    return false;
+  }
+  *resolved = buffer->data.data() + offset;
+  return true;
+}
+
 void SetTextureImage(GLenum target,
                      GLint level,
                      GLint internal_format,
@@ -734,9 +841,39 @@ void SetTextureImage(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (width > kMaxTextureSize || height > kMaxTextureSize ||
-      depth > kMax3DTextureSize) {
+  const GLenum family = texture->target;
+  const int max_extent = MaxTextureExtent(family);
+  const int max_width = family == GL_TEXTURE_3D ? kMax3DTextureSize
+                                                : max_extent;
+  const int max_height = max_width;
+  const int max_depth = family == GL_TEXTURE_3D
+                            ? kMax3DTextureSize
+                            : (family == GL_TEXTURE_2D_ARRAY ? 256 : 1);
+  if (width > max_width || height > max_height || depth > max_depth) {
     context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (family == GL_TEXTURE_CUBE_MAP && width != height) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (level >= MipLevelCount(max_extent, max_extent)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (internal_format == 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (family == GL_TEXTURE_3D &&
+      (internal_format == GL_DEPTH_COMPONENT16 ||
+       internal_format == GL_DEPTH_COMPONENT24 ||
+       internal_format == GL_DEPTH_COMPONENT32F ||
+       internal_format == GL_DEPTH24_STENCIL8 ||
+       internal_format == GL_DEPTH32F_STENCIL8 ||
+       internal_format == GL_DEPTH_STENCIL ||
+       internal_format == GL_DEPTH_COMPONENT)) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   if (!ValidInternalFormat(internal_format) ||
@@ -745,7 +882,31 @@ void SetTextureImage(GLenum target,
     return;
   }
   if (!ValidFormatType(format, type)) {
-    context->SetError(GL_INVALID_ENUM);
+    if (IsKnownFormat(format) && IsKnownType(type))
+      context->SetError(GL_INVALID_OPERATION);
+    else
+      context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (internal_format == GL_RGBA && format != GL_RGBA) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (internal_format == GL_RGB && format != GL_RGB) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if ((internal_format == GL_RGBA32UI || internal_format == GL_RGBA16UI ||
+       internal_format == GL_RGBA8UI) && type == GL_INT) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const GLuint bound_name = BoundTextureName(context, family);
+  const bool layered_zero =
+      (family == GL_TEXTURE_3D || family == GL_TEXTURE_2D_ARRAY) ? depth > 0
+                                                                 : false;
+  if (bound_name == 0 && (width > 0 || height > 0 || layered_zero)) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   // Packed types require a sized internal format; the unsized RGB/RGBA
@@ -846,7 +1007,7 @@ void SetTextureImage(GLenum target,
                      ? depth
                      : 1;
   const size_t texels = static_cast<size_t>(width) * height * image->depth;
-  if (IsIntegerInternalFormat(internal_format)) {
+  if (zgl::IsIntegerInternalFormat(internal_format)) {
     image->integer_signed = IsSignedIntegerInternalFormat(internal_format);
     image->integer_rgba.assign(texels * 4, 0u);
   } else {
@@ -925,7 +1086,7 @@ void SetMultisampleTextureStorage(GLenum target,
     image->height = height;
     image->depth = 1;
     image->samples = std::max(1, samples);
-    if (IsIntegerInternalFormat(internal_format)) {
+    if (zgl::IsIntegerInternalFormat(internal_format)) {
       image->integer_rgba.assign(texels * 4, 0u);
       if (samples > 0)
         image->sample_integer_rgba.assign(sample_texels * 4, 0u);
@@ -947,6 +1108,15 @@ void SetTextureStorage(GLenum target,
   if (!context)
     return;
   int face = 0;
+  const GLenum family = TextureFamily(target, &face);
+  if (family == 0) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (BoundTextureName(context, family) == 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   Texture* texture = BindTargetTexture(context, target, &face);
   if (!texture)
     return;
@@ -1338,6 +1508,32 @@ void glGetTexParameterfv(GLenum target, GLenum pname, GLfloat* params) {
   params[0] = static_cast<GLfloat>(value);
 }
 
+bool SubImageFormatMatches(GLenum internal_format, GLenum format) {
+  if (zgl::IsIntegerInternalFormat(internal_format))
+    return format == GL_RGBA_INTEGER || format == GL_RGB_INTEGER ||
+           format == GL_RG_INTEGER || format == GL_RED_INTEGER;
+  switch (internal_format) {
+    case GL_RGBA:
+    case GL_RGBA8:
+    case GL_RGB5_A1:
+    case GL_RGBA4:
+      return format == GL_RGBA;
+    case GL_RGB:
+    case GL_RGB8:
+    case GL_RGB565:
+      return format == GL_RGB;
+    case GL_R8:
+    case GL_R8_SNORM:
+      return format == GL_RED;
+    case GL_RG:
+    case GL_RG8:
+    case GL_RG8_SNORM:
+      return format == GL_RG;
+    default:
+      return true;
+  }
+}
+
 void glTexImage2D(GLenum target,
                   GLint level,
                   GLint internal_format,
@@ -1367,12 +1563,6 @@ void glTexImage3D(GLenum target,
       context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (depth < 1) {
-    zgl::Context* context = zgl::ApiContext();
-    if (context)
-      context->SetError(GL_INVALID_VALUE);
-    return;
-  }
   zgl::SetTextureImage(target, level, internal_format, width, height, depth,
                        border, format, type, pixels);
 }
@@ -1389,11 +1579,35 @@ void glTexSubImage2D(GLenum target,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  const bool is_cube_face =
+      target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+      target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
+  if (target != GL_TEXTURE_2D && !is_cube_face) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (level < 0 || xoffset < 0 || yoffset < 0 || width < 0 || height < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const int max_extent =
+      is_cube_face ? zgl::kMaxCubeMapSize : zgl::kMaxTextureSize;
+  if (level >= zgl::MipLevelCount(max_extent, max_extent)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!zgl::ValidFormatType(format, type)) {
+    if (zgl::IsKnownFormat(format) && zgl::IsKnownType(type))
+      context->SetError(GL_INVALID_OPERATION);
+    else
+      context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   int face = 0;
   zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
-  if (level < 0 || level >= texture->levels) {
+  if (level >= texture->levels) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -1402,13 +1616,12 @@ void glTexSubImage2D(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (xoffset < 0 || yoffset < 0 || width < 0 || height < 0 ||
-      xoffset + width > image->width || yoffset + height > image->height) {
+  if (xoffset + width > image->width || yoffset + height > image->height) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!zgl::ValidFormatType(format, type)) {
-    context->SetError(GL_INVALID_ENUM);
+  if (!SubImageFormatMatches(texture->internal_format, format)) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   if (!zgl::ResolveUnpackPixels(context, pixels, width, height, 1, format, type,
@@ -1448,11 +1661,29 @@ void glTexSubImage3D(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  if (level < 0 || xoffset < 0 || yoffset < 0 || zoffset < 0 || width < 0 ||
+      height < 0 || depth < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const int max_extent = target == GL_TEXTURE_3D ? zgl::kMax3DTextureSize
+                                                 : zgl::kMaxTextureSize;
+  if (level >= zgl::MipLevelCount(max_extent, max_extent)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!zgl::ValidFormatType(format, type)) {
+    if (zgl::IsKnownFormat(format) && zgl::IsKnownType(type))
+      context->SetError(GL_INVALID_OPERATION);
+    else
+      context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   int face = 0;
   zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
-  if (level < 0 || level >= texture->levels) {
+  if (level >= texture->levels) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -1461,14 +1692,13 @@ void glTexSubImage3D(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (xoffset < 0 || yoffset < 0 || zoffset < 0 || width < 0 || height < 0 ||
-      depth < 0 || xoffset + width > image->width ||
-      yoffset + height > image->height || zoffset + depth > image->depth) {
+  if (xoffset + width > image->width || yoffset + height > image->height ||
+      zoffset + depth > image->depth) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!zgl::ValidFormatType(format, type)) {
-    context->SetError(GL_INVALID_ENUM);
+  if (!SubImageFormatMatches(texture->internal_format, format)) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   if (!zgl::ResolveUnpackPixels(context, pixels, width, height, depth, format,
@@ -1544,15 +1774,25 @@ void glCompressedTexImage2D(GLenum target,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
-  if (!texture)
+  const bool is_cube_face =
+      target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+      target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
+  if (target != GL_TEXTURE_2D && !is_cube_face) {
+    context->SetError(GL_INVALID_ENUM);
     return;
-  if (level < 0 || width < 0 || height < 0 || border != 0) {
+  }
+  if (level < 0 || width < 0 || height < 0 || border != 0 ||
+      image_size < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (width > zgl::kMaxTextureSize || height > zgl::kMaxTextureSize) {
+  const int max_extent =
+      is_cube_face ? zgl::kMaxCubeMapSize : zgl::kMaxTextureSize;
+  if (width > max_extent || height > max_extent) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (is_cube_face && width != height) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -1560,34 +1800,30 @@ void glCompressedTexImage2D(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (texture->immutable) {
-    context->SetError(GL_INVALID_OPERATION);
-    return;
-  }
-  if (level > texture->levels) {
-    context->SetError(GL_INVALID_OPERATION);
-    return;
-  }
-  if (!data || width == 0 || height == 0) {
-    return;
-  }
-  const int extent = texture->target == GL_TEXTURE_3D
-                         ? std::max(width, height)
-                         : std::max(width, height);
-  if (level >= zgl::MipLevelCount(extent, extent) && extent > 0) {
+  if (level >= zgl::MipLevelCount(max_extent, max_extent)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
   const int expected = ((width + 3) / 4) * ((height + 3) / 4) *
                        zgl::CompressedBlockBytes(internal_format);
-  if (image_size < expected) {
+  if (!zgl::ResolveUnpackBufferBytes(context, data,
+                                     static_cast<size_t>(image_size), &data)) {
+    return;
+  }
+  if (image_size != expected) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!zgl::ResolveUnpackPixels(context, data, width, height, 1, internal_format,
-                               GL_UNSIGNED_BYTE, &data)) {
+  int face = 0;
+  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  if (!texture)
+    return;
+  if (texture->immutable) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  if (width == 0 || height == 0)
+    return;
   if (level == 0) {
     texture->width = width;
     texture->height = height;
@@ -1598,6 +1834,11 @@ void glCompressedTexImage2D(GLenum target,
   texture->Resize(levels, texture->faces());
   zgl::TextureImage* image = texture->mutable_image(level, face);
   if (!image)
+    return;
+  image->width = width;
+  image->height = height;
+  image->depth = 1;
+  if (!data)
     return;
   if (!zgl::DecodeCompressedImage(internal_format, width, height, image_size,
                                   data, image)) {
@@ -1617,17 +1858,28 @@ void glCompressedTexSubImage2D(GLenum target,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  const bool is_cube_face =
+      target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
+      target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
+  if (target != GL_TEXTURE_2D && !is_cube_face) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (level < 0 || xoffset < 0 || yoffset < 0 || width < 0 || height < 0 ||
+      image_size < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   int face = 0;
   zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
-  if (level < 0 || level >= texture->levels || xoffset < 0 || yoffset < 0 ||
-      width < 0 || height < 0) {
+  if (level >= texture->levels) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
   zgl::TextureImage* image = texture->mutable_image(level, face);
-  if (!image || image->rgba.empty()) {
+  if (!image || image->width <= 0) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -1639,13 +1891,23 @@ void glCompressedTexSubImage2D(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (!data || width == 0 || height == 0) {
+  const int expected = ((width + 3) / 4) * ((height + 3) / 4) *
+                       zgl::CompressedBlockBytes(format);
+  if (!zgl::ResolveUnpackBufferBytes(context, data,
+                                     static_cast<size_t>(image_size), &data)) {
     return;
   }
-  if (!zgl::ResolveUnpackPixels(context, data, width, height, 1, format,
-                               GL_UNSIGNED_BYTE, &data)) {
+  if (image_size != expected) {
+    context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (xoffset % 4 != 0 || yoffset % 4 != 0 || width % 4 != 0 ||
+      height % 4 != 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (width == 0 || height == 0)
+    return;
   zgl::TextureImage decoded;
   if (!zgl::DecodeCompressedImage(format, width, height, image_size, data,
                                   &decoded)) {

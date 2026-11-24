@@ -10,8 +10,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 #include <vector>
 
 #include "src/glsl/glsl_program.h"
@@ -198,6 +196,11 @@ float ReadNormalizedComponent(const uint8_t* data, int component, GLenum type) {
     const int raw = type == GL_SHORT ? static_cast<int16_t>(raw16)
                                      : static_cast<int>(raw16);
     return NormalizeComponent(type, raw);
+  }
+  if (type == GL_UNSIGNED_INT) {
+    uint32_t raw32;
+    memcpy(&raw32, data + component * 4, sizeof(raw32));
+    return static_cast<float>(raw32) * (1.0f / 4294967295.0f);
   }
   int32_t raw32;
   memcpy(&raw32, data + component * 4, sizeof(raw32));
@@ -472,7 +475,10 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
 
   bool Prepare();
   const State& state() const;
-  void FetchAttributes(GLuint index, int instance, float* attributes) const;
+  void FetchAttributes(GLuint index,
+                       int instance,
+                       float* attributes,
+                       uint32_t* attribute_int) const;
   TransformedVertex AcquireVertex(GLuint index, int instance);
   void CaptureVertex(GLuint index, int instance);
   void WriteTransformFeedback(const float* varyings);
@@ -492,6 +498,7 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
   void StoreFragmentColor(size_t pixel,
                           int location,
                           const float color[4],
+                          const uint32_t color_int[4],
                           glsl::BaseType base);
   void ApplyStencilOp(GLenum op,
                       size_t pixel,
@@ -822,15 +829,58 @@ bool Pipeline::Prepare() {
   return true;
 }
 
+uint32_t ReadAttributeInteger(const uint8_t* data, int component,
+                            GLenum type) {
+  switch (type) {
+    case GL_BYTE:
+      return static_cast<uint32_t>(
+          static_cast<int32_t>(static_cast<int8_t>(data[component])));
+    case GL_UNSIGNED_BYTE:
+      return data[component];
+    case GL_SHORT: {
+      int16_t value;
+      memcpy(&value, data + component * 2, sizeof(value));
+      return static_cast<uint32_t>(static_cast<int32_t>(value));
+    }
+    case GL_UNSIGNED_SHORT: {
+      uint16_t value;
+      memcpy(&value, data + component * 2, sizeof(value));
+      return value;
+    }
+    case GL_INT: {
+      int32_t value;
+      memcpy(&value, data + component * 4, sizeof(value));
+      return static_cast<uint32_t>(value);
+    }
+    case GL_UNSIGNED_INT: {
+      uint32_t value;
+      memcpy(&value, data + component * 4, sizeof(value));
+      return value;
+    }
+    case GL_FLOAT: {
+      float value;
+      memcpy(&value, data + component * 4, sizeof(value));
+      return static_cast<uint32_t>(value);
+    }
+    default:
+      return 0;
+  }
+}
+
 void Pipeline::FetchAttributes(GLuint index,
                                int instance,
-                               float* attributes) const {
+                               float* attributes,
+                               uint32_t* attribute_int) const {
   for (int i = 0; i < kMaxVertexAttribs; ++i) {
     float* destination = attributes + i * 4;
+    uint32_t* int_destination = attribute_int + i * 4;
     const VertexAttribute& attribute = vertex_array_->attributes[i];
     if (!attribute.enabled) {
-      for (int c = 0; c < 4; ++c)
+      for (int c = 0; c < 4; ++c) {
         destination[c] = context_->state.current_attribute[i][c];
+        int_destination[c] = static_cast<uint32_t>(
+            context_->state.current_attribute_integer[i][c]);
+      }
       continue;
     }
     destination[0] = 0.0f;
@@ -868,6 +918,10 @@ void Pipeline::FetchAttributes(GLuint index,
           attribute.normalized && IsIntegerType(attribute.type)
               ? ReadNormalizedComponent(base, component, attribute.type)
               : ReadAttributeComponent(base, component, attribute.type);
+      int_destination[component] =
+          attribute.normalized && IsIntegerType(attribute.type)
+              ? static_cast<uint32_t>(destination[component])
+              : ReadAttributeInteger(base, component, attribute.type);
     }
   }
 }
@@ -887,9 +941,11 @@ Pipeline::TransformedVertex Pipeline::AcquireVertex(GLuint index,
   next_cache_slot_ = (next_cache_slot_ + 1) % kVertexCacheSize;
   float* destination = cache_.data() + static_cast<size_t>(slot) * stride_;
   float attributes[kMaxVertexAttribs * 4];
-  FetchAttributes(index, instance, attributes);
+  uint32_t attribute_int[kMaxVertexAttribs * 4];
+  FetchAttributes(index, instance, attributes, attribute_int);
   glsl::VertexInput input;
   input.attributes = attributes;
+  input.attribute_int = attribute_int;
   input.vertex_id = static_cast<int>(index);
   input.instance_id = instance;
   input.uniforms = uniforms_;
@@ -913,9 +969,11 @@ Pipeline::TransformedVertex Pipeline::AcquireVertex(GLuint index,
 
 void Pipeline::CaptureVertex(GLuint index, int instance) {
   float attributes[kMaxVertexAttribs * 4];
-  FetchAttributes(index, instance, attributes);
+  uint32_t attribute_int[kMaxVertexAttribs * 4];
+  FetchAttributes(index, instance, attributes, attribute_int);
   glsl::VertexInput input;
   input.attributes = attributes;
+  input.attribute_int = attribute_int;
   input.vertex_id = static_cast<int>(index);
   input.instance_id = instance;
   input.uniforms = uniforms_;
@@ -1163,7 +1221,7 @@ void Pipeline::ProcessTriangle(const float* a, const float* b, const float* c) {
       float difference = 0.0f;
       for (int k = 0; k < stride_; ++k)
         difference = std::max(difference, std::fabs(kept[k] - candidate[k]));
-      if (difference < 1e-3f) {
+      if (difference < 1e-5f) {
         duplicate = true;
         break;
       }
@@ -1371,6 +1429,7 @@ void Pipeline::Shade(const Fragment& fragment) {
     if (!output.written[location])
       continue;
     StoreFragmentColor(pixel, location, output.color[location],
+                       output.color_int[location],
                        output.color_base[location]);
     wrote_color = true;
   }
@@ -1419,6 +1478,7 @@ void Pipeline::Resolve() {
 void Pipeline::StoreFragmentColor(size_t pixel,
                                   int location,
                                   const float color[4],
+                                  const uint32_t color_int[4],
                                   glsl::BaseType base) {
   if (location < 0 || location >= target_.draw_buffer_count)
     return;
@@ -1435,8 +1495,12 @@ void Pipeline::StoreFragmentColor(size_t pixel,
     uint32_t values[4];
     const bool unsigned_output =
         target_.color_is_unsigned[attachment] || base == glsl::BaseType::kUInt;
+    const bool exact_integer =
+        base == glsl::BaseType::kInt || base == glsl::BaseType::kUInt;
     for (int i = 0; i < 4; ++i) {
-      if (unsigned_output) {
+      if (exact_integer) {
+        values[i] = color_int[i];
+      } else if (unsigned_output) {
         values[i] = static_cast<uint32_t>(
             std::clamp(color[i], 0.0f, 4294967295.0f));
       } else if (color[i] >= 2147483520.0f) {

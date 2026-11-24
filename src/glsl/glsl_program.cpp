@@ -463,7 +463,31 @@ bool Program::Link(
 #if defined(ZGL_ENABLE_JIT)
   // The JIT is an optimisation, not part of link validation.  A construct the
   // native backend cannot lower only means that stage keeps the evaluator.
-  vertex_jit_ = ShaderJit::Compile(*vertex, nullptr);
+  bool has_integer_io = false;
+  for (const Variable& varying : vertex->varyings) {
+    if (varying.type.base() == BaseType::kInt ||
+        varying.type.base() == BaseType::kUInt) {
+      has_integer_io = true;
+      break;
+    }
+  }
+  for (const Variable& attribute : vertex->attributes) {
+    if (attribute.type.base() == BaseType::kInt ||
+        attribute.type.base() == BaseType::kUInt) {
+      has_integer_io = true;
+      break;
+    }
+  }
+  for (const FragmentOut& output : fragment->outputs) {
+    if (output.base == BaseType::kInt || output.base == BaseType::kUInt) {
+      has_integer_io = true;
+      break;
+    }
+  }
+  // Integer stage IO needs exact 32-bit payloads; the scalar JIT models
+  // varyings as floats, so leave those programs to the interpreter.
+  if (!has_integer_io)
+    vertex_jit_ = ShaderJit::Compile(*vertex, nullptr);
   // The scalar JIT does not address fragment output array elements; use the
   // interpreter for shaders that declare them.
   bool has_output_array = false;
@@ -473,7 +497,7 @@ bool Program::Link(
       break;
     }
   }
-  if (!has_output_array)
+  if (!has_output_array && !has_integer_io)
     fragment_jit_ = ShaderJit::Compile(*fragment, nullptr);
 #endif
 

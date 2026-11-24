@@ -27,6 +27,27 @@ namespace glsl {
 
 namespace {
 
+float ConvertComponent(BaseType from, BaseType to, float v) {
+  if (from == to)
+    return v;
+  switch (to) {
+    case BaseType::kFloat:
+      return from == BaseType::kBool ? (v != 0.0f ? 1.0f : 0.0f) : v;
+    case BaseType::kInt:
+      return from == BaseType::kBool
+                 ? (v != 0.0f ? 1.0f : 0.0f)
+                 : static_cast<float>(static_cast<int32_t>(v));
+    case BaseType::kUInt:
+      return from == BaseType::kBool
+                 ? (v != 0.0f ? 1.0f : 0.0f)
+                 : static_cast<float>(static_cast<uint32_t>(v));
+    case BaseType::kBool:
+      return v != 0.0f ? 1.0f : 0.0f;
+    default:
+      return v;
+  }
+}
+
 constexpr int kMaxCallDepth = 16;
 constexpr int kMaxSteps = 1 << 21;
 constexpr float kPi = 3.14159265358979323846f;
@@ -44,15 +65,19 @@ float ComponentAt(const Value& value, int index) {
 // Copies |count| components starting at |offset| into a new value of |type|.
 Value Slice(const Value& value, int offset, const Type& type, int count) {
   Value out(type);
-  for (int i = 0; i < count && i < out.size(); ++i)
+  for (int i = 0; i < count && i < out.size(); ++i) {
     out.Data()[i] = ComponentAt(value, offset + i);
+    out.IntData()[i] = value.IntData()[offset + i];
+  }
   return out;
 }
 
 // Writes the components of |value| into |out| starting at |offset|.
 void WriteSlice(Value* out, int offset, const Value& value, int count) {
-  for (int i = 0; i < count && offset + i < out->size(); ++i)
+  for (int i = 0; i < count && offset + i < out->size(); ++i) {
     out->Data()[offset + i] = ComponentAt(value, i);
+    out->IntData()[offset + i] = value.IntData()[i];
+  }
 }
 
 template <typename F>
@@ -233,8 +258,12 @@ class Evaluator {
     uniforms_ = uniforms;
     uniform_map_ = map;
   }
-  void set_attributes(const float* attributes, int vertex_id, int instance_id) {
+  void set_attributes(const float* attributes,
+                      const uint32_t* attribute_int,
+                      int vertex_id,
+                      int instance_id) {
     attributes_ = attributes;
+    attribute_int_ = attribute_int;
     vertex_id_ = vertex_id;
     instance_id_ = instance_id;
   }
@@ -322,6 +351,7 @@ class Evaluator {
   const Value* uniforms_ = nullptr;
   const int* uniform_map_ = nullptr;
   const float* attributes_ = nullptr;
+  const uint32_t* attribute_int_ = nullptr;
   int vertex_id_ = 0;
   int instance_id_ = 0;
   const float* varyings_in_ = nullptr;
@@ -615,8 +645,13 @@ Value Evaluator::ReadVariable(const Expr& expr) {
             }
           }
         } else {
-          for (int i = 0; i < std::min(4, expr.type.components()); ++i)
+          const bool integer = expr.type.base() == BaseType::kInt ||
+                               expr.type.base() == BaseType::kUInt;
+          for (int i = 0; i < std::min(4, expr.type.components()); ++i) {
             value.data[i] = attributes_[expr.index * 4 + i];
+            if (integer && attribute_int_)
+              value.int_data[i] = attribute_int_[expr.index * 4 + i];
+          }
         }
       }
       return value;
@@ -628,8 +663,14 @@ Value Evaluator::ReadVariable(const Expr& expr) {
               ? ast_.varyings[expr.index].varying_offset
               : -1;
       if (varyings_in_ && offset >= 0) {
-        for (int i = 0; i < std::min(4, expr.type.components()); ++i)
-          value.data[i] = varyings_in_[offset + i];
+        const bool integer = expr.type.base() == BaseType::kInt ||
+                             expr.type.base() == BaseType::kUInt;
+        for (int i = 0; i < std::min(4, expr.type.components()); ++i) {
+          const float raw = varyings_in_[offset + i];
+          value.data[i] = raw;
+          if (integer)
+            memcpy(&value.int_data[i], &raw, sizeof(raw));
+        }
       }
       return value;
     }
@@ -669,8 +710,16 @@ void Evaluator::WriteVariable(const Expr& expr, const Value& value) {
               ? ast_.varyings[expr.index].varying_offset
               : -1;
       if (varyings_out_ && offset >= 0) {
-        for (int i = 0; i < std::min(4, expr.type.components()); ++i)
-          varyings_out_[offset + i] = converted.data[i];
+        const bool integer = expr.type.base() == BaseType::kInt ||
+                             expr.type.base() == BaseType::kUInt;
+        for (int i = 0; i < std::min(4, expr.type.components()); ++i) {
+          if (integer) {
+            memcpy(&varyings_out_[offset + i], &converted.int_data[i],
+                   sizeof(uint32_t));
+          } else {
+            varyings_out_[offset + i] = converted.data[i];
+          }
+        }
       }
       return;
     }
@@ -710,8 +759,15 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
       if (component < kValueFloats) {
         const float source =
             value.type.is_scalar() ? value.data[0] : ComponentAt(value, i);
-        base.data[component] =
-            Convert(MakeFloat(source), base.type.Element()).data[0];
+        const Value converted =
+            Convert(MakeFloat(source), base.type.Element());
+        base.data[component] = converted.data[0];
+        if (base.type.base() == BaseType::kInt ||
+            base.type.base() == BaseType::kUInt) {
+          base.IntData()[component] = value.type.is_scalar()
+                                          ? value.IntData()[0]
+                                          : value.IntData()[i];
+        }
       }
     }
     Assign(*target.base, base);
@@ -741,6 +797,9 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
       if (index < 0 || index >= base.type.components())
         return;
       base.data[index] = ComponentAt(value, 0);
+      if (base.type.base() == BaseType::kInt ||
+          base.type.base() == BaseType::kUInt)
+        base.IntData()[index] = value.IntData()[0];
     }
     Assign(*target.base, base);
     return;
@@ -844,19 +903,35 @@ Value Evaluator::EvalConstructor(const Expr& expr) {
     return out;
   }
   float components[kValueFloats] = {0.0f};
+  uint32_t int_components[kValueFloats] = {};
   int count = 0;
+  const BaseType destination = expr.type.base();
+  const auto append = [&](const Value& value, int component) {
+    if (count >= kValueFloats)
+      return;
+    const BaseType source = value.type.base();
+    const float raw = value.Data()[component];
+    components[count] = ConvertComponent(source, destination, raw);
+    if ((destination == BaseType::kInt || destination == BaseType::kUInt) &&
+        (source == BaseType::kInt || source == BaseType::kUInt)) {
+      int_components[count] = value.IntData()[component];
+    } else if (destination == BaseType::kInt ||
+               destination == BaseType::kUInt) {
+      int_components[count] = static_cast<uint32_t>(components[count]);
+    }
+    ++count;
+  };
   for (const ExprPtr& argument : expr.args) {
     const Value value = Eval(*argument);
     if (value.type.is_matrix()) {
       const int total = value.type.components();
       for (int i = 0; i < total && count < kValueFloats; ++i)
-        components[count++] = value.data[i];
+        append(value, i);
       continue;
     }
     const int total = value.type.is_scalar() ? 1 : value.type.components();
     for (int i = 0; i < total && count < kValueFloats; ++i)
-      components[count++] =
-          value.type.is_scalar() ? value.data[0] : value.data[i];
+      append(value, value.type.is_scalar() ? 0 : i);
   }
 
   Value out(expr.type);
@@ -874,16 +949,21 @@ Value Evaluator::EvalConstructor(const Expr& expr) {
     return out;
   }
   if (count == 1 && !expr.type.is_scalar()) {
-    for (int i = 0; i < expr.type.components(); ++i)
+    for (int i = 0; i < expr.type.components(); ++i) {
       out.data[i] = components[0];
+      out.IntData()[i] = int_components[0];
+    }
     return out;
   }
   const int total = expr.type.is_scalar() ? 1 : expr.type.components();
   for (int i = 0; i < total; ++i) {
-    if (i < count)
+    if (i < count) {
       out.data[i] = components[i];
-    else
+      out.IntData()[i] = int_components[i];
+    } else {
       out.data[i] = (i == 3) ? 1.0f : 0.0f;
+      out.IntData()[i] = (i == 3) ? 1u : 0u;
+    }
   }
   return out;
 }
@@ -1568,6 +1648,31 @@ Value Evaluator::EvalBuiltin(const Expr& expr) {
         out.data[i] = static_cast<float>(size[i]);
       return out;
     }
+    case BuiltinFunc::kFloatBitsToUint:
+    case BuiltinFunc::kUIntBitsToFloat:
+    case BuiltinFunc::kIntBitsToFloat: {
+      Value out(expr.type);
+      for (int i = 0; i < expr.type.components(); ++i) {
+        const float source = ComponentAt(args[0], i);
+        uint32_t bits;
+        memcpy(&bits, &source, sizeof(bits));
+        if (expr.builtin_func == BuiltinFunc::kFloatBitsToUint) {
+          out.data[i] = static_cast<float>(bits);
+          out.IntData()[i] = bits;
+        } else {
+          const float converted = [&]() {
+            float value;
+            memcpy(&value, &bits, sizeof(value));
+            return value;
+          }();
+          out.data[i] = converted;
+          uint32_t exact = 0;
+          memcpy(&exact, &converted, sizeof(exact));
+          out.IntData()[i] = exact;
+        }
+      }
+      return out;
+    }
     case BuiltinFunc::kDfdx:
     case BuiltinFunc::kDfdy:
     case BuiltinFunc::kFwidth: {
@@ -1602,8 +1707,8 @@ void Program::RunVertex(const VertexInput& input,
 
   Evaluator evaluator(*vertex_, &vertex_globals_, this);
   evaluator.set_uniforms(input.uniforms, vertex_uniform_map_.data());
-  evaluator.set_attributes(input.attributes, input.vertex_id,
-                           input.instance_id);
+  evaluator.set_attributes(input.attributes, input.attribute_int,
+                           input.vertex_id, input.instance_id);
   evaluator.set_varyings(nullptr, out_varyings);
   evaluator.set_sampler(input.sampler);
 
@@ -1733,9 +1838,15 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
     const int components = fragment_output.components;
     const float* data =
         value.Data() + static_cast<size_t>(fragment_output.element) * components;
-    for (int i = 0; i < 4; ++i)
+    const uint32_t* int_data =
+        value.IntData() +
+        static_cast<size_t>(fragment_output.element) * components;
+    for (int i = 0; i < 4; ++i) {
       output->color[fragment_output.location][i] =
           i < components ? data[i] : (i == 3 ? 1.0f : 0.0f);
+      output->color_int[fragment_output.location][i] =
+          i < components ? int_data[i] : (i == 3 ? 1u : 0u);
+    }
     output->color_base[fragment_output.location] = fragment_output.base;
     output->written[fragment_output.location] = true;
   }

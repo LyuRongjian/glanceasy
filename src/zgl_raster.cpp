@@ -24,13 +24,31 @@ bool IsTopLeftEdge(const RasterVertex& a, const RasterVertex& b) {
   return dy == 0.0f && dx > 0.0f;
 }
 
-bool IncludesWeight(float weight, bool top_left) {
-  // Rasterize edge pixels with a small tolerance.  Exact floating-point
-  // equality on a shared triangle edge otherwise drops corner pixels.
-  const float kEdgeEpsilon = 1e-4f;
-  if (weight > -kEdgeEpsilon && weight < kEdgeEpsilon)
-    weight = 0.0f;
-  return weight > 0.0f || (weight == 0.0f && top_left);
+
+// Coverage is decided on a fixed sub-pixel grid.  Clipping two triangles that
+// share an edge produces vertex coordinates that differ by a few ulps; a pure
+// float edge test then either leaves a crack or shades the shared edge twice.
+// Snapping the edge function inputs to a deterministic grid makes both
+// triangles see exactly the same shared edge.
+constexpr int kSubpixelBits = 9;
+constexpr int64_t kSubpixelScale = int64_t(1) << kSubpixelBits;
+constexpr int64_t kSubpixelHalf = kSubpixelScale / 2;
+
+int64_t QuantizeSubpixel(float value) {
+  return static_cast<int64_t>(std::floor(value * kSubpixelScale + 0.5f));
+}
+
+int64_t EdgeFunction(int64_t ax, int64_t ay, int64_t bx, int64_t by,
+                     int64_t px, int64_t py) {
+  return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+}
+
+bool IsTopLeftEdgeInt(int64_t ax, int64_t ay, int64_t bx, int64_t by) {
+  const int64_t dy = by - ay;
+  const int64_t dx = bx - ax;
+  if (dy < 0)
+    return true;
+  return dy == 0 && dx > 0;
 }
 
 }  // namespace
@@ -79,9 +97,37 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
 
   // Edge opposite vertex i is (i+1) -> (i+2); its inclusion rule decides
   // whether a pixel exactly on that edge is covered.
-  const bool top_left0 = IsTopLeftEdge(*v1, *v2);
-  const bool top_left1 = IsTopLeftEdge(*v2, *v0);
-  const bool top_left2 = IsTopLeftEdge(*v0, *v1);
+  const int64_t qx0 = QuantizeSubpixel(v0->x);
+  const int64_t qy0 = QuantizeSubpixel(v0->y);
+  const int64_t qx1 = QuantizeSubpixel(v1->x);
+  const int64_t qy1 = QuantizeSubpixel(v1->y);
+  const int64_t qx2 = QuantizeSubpixel(v2->x);
+  const int64_t qy2 = QuantizeSubpixel(v2->y);
+  const int64_t det_int =
+      (qy1 - qy2) * (qx0 - qx2) - (qx1 - qx2) * (qy0 - qy2);
+  const bool top_left_int0 = IsTopLeftEdgeInt(qx1, qy1, qx2, qy2);
+  const bool top_left_int1 = IsTopLeftEdgeInt(qx2, qy2, qx0, qy0);
+  const bool top_left_int2 = IsTopLeftEdgeInt(qx0, qy0, qx1, qy1);
+  const auto covers = [&](int64_t px, int64_t py) {
+    if (det_int == 0)
+      return false;
+    const int64_t e0 = EdgeFunction(qx1, qy1, qx2, qy2, px, py);
+    const int64_t e1 = EdgeFunction(qx2, qy2, qx0, qy0, px, py);
+    const int64_t e2 = det_int - e0 - e1;
+    const bool positive = det_int > 0;
+    const int64_t det_magnitude = det_int < 0 ? -det_int : det_int;
+    const int64_t tolerance =
+        det_magnitude / 8 < kSubpixelScale ? det_magnitude / 8
+                                          : kSubpixelScale;
+    const auto include = [&](int64_t e, bool top_left) {
+      const int64_t oriented = positive ? e : -e;
+      return oriented > tolerance || (oriented >= -tolerance && top_left);
+    };
+    const bool result = include(e0, top_left_int0) &&
+                        include(e1, top_left_int1) &&
+                        include(e2, top_left_int2);
+    return result;
+  };
 
   const float dw0_dx = (v1->y - v2->y) * inv_det;
   const float dw1_dx = (v2->y - v0->y) * inv_det;
@@ -114,10 +160,8 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
               ((v2->y - v0->y) * (sx - v2->x) +
                (v0->x - v2->x) * (sy - v2->y)) *
               inv_det;
-          if (!IncludesWeight(s0, top_left0) || !IncludesWeight(s1, top_left1) ||
-              !IncludesWeight(1.0f - s0 - s1, top_left2)) {
+          if (!covers(QuantizeSubpixel(sx), QuantizeSubpixel(sy)))
             continue;
-          }
           Fragment fragment;
           fragment.x = x;
           fragment.y = y;
@@ -133,9 +177,7 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
           fragment.vertex[2] = i2;
           sink->Shade(fragment);
         }
-      } else if (IncludesWeight(w0, top_left0) &&
-                 IncludesWeight(w1, top_left1) &&
-                 IncludesWeight(1.0f - w0 - w1, top_left2)) {
+      } else if (covers(QuantizeSubpixel(px), QuantizeSubpixel(py))) {
         Fragment fragment;
         fragment.x = x;
         fragment.y = y;
@@ -150,6 +192,7 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
       }
       w0 += step0;
       w1 += step1;
+      px += 1.0f;
     }
   }
 }

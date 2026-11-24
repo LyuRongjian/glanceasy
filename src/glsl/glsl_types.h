@@ -169,7 +169,9 @@ struct Value {
 
   Type type;
   float data[kValueFloats] = {};
+  uint32_t int_data[kValueFloats] = {};
   std::vector<float> aggregate;
+  std::vector<uint32_t> int_aggregate;
 
   int size() const { return type.components(); }
 
@@ -177,13 +179,22 @@ struct Value {
     return aggregate.empty() ? data : aggregate.data();
   }
   float* Data() { return aggregate.empty() ? data : aggregate.data(); }
+  const uint32_t* IntData() const {
+    return int_aggregate.empty() ? int_data : int_aggregate.data();
+  }
+  uint32_t* IntData() {
+    return int_aggregate.empty() ? int_data : int_aggregate.data();
+  }
 
   void ResetType(const Type& t) {
     type = t;
-    if (t.is_aggregate())
+    if (t.is_aggregate()) {
       aggregate.assign(static_cast<size_t>(std::max(0, t.components())), 0.0f);
-    else
+      int_aggregate.assign(static_cast<size_t>(std::max(0, t.components())), 0u);
+    } else {
       aggregate.clear();
+      int_aggregate.clear();
+    }
   }
 };
 

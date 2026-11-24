@@ -95,8 +95,10 @@ class TextureSampler {
 };
 
 struct VertexInput {
-  // 4 floats per attribute slot, indexed by attribute location.
+  // 4 floats per attribute slot, indexed by attribute location.  Integer
+  // attributes also carry their exact bit patterns in |attribute_int|.
   const float* attributes = nullptr;
+  const uint32_t* attribute_int = nullptr;
   int vertex_id = 0;
   int instance_id = 0;
   const Value* uniforms = nullptr;
@@ -129,6 +131,7 @@ struct FragmentOutput {
   // Indexed by fragment output location.  |color[i]| is only meaningful when
   // |written[i]| is true; outputs the shader does not declare stay untouched.
   float color[kMaxFragmentOutputs][4] = {};
+  uint32_t color_int[kMaxFragmentOutputs][4] = {};
   BaseType color_base[kMaxFragmentOutputs] = {BaseType::kFloat, BaseType::kFloat,
                                              BaseType::kFloat,
                                              BaseType::kFloat};
