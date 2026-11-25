@@ -101,10 +101,6 @@ void DecodeEtc2Color(uint8_t* rgba, uint64_t src, bool alpha_mode) {
                                   sel_bb + sel_db >= 0 &&
                                   sel_bb + sel_db <= 31;
 
-  if (getenv("ZGL_DEBUG_ETC"))
-    fprintf(stderr, "[etcmode] diff=%d valid=%d alpha=%d br=%d bg=%d bb=%d dr=%d dg=%d db=%d\n",
-            (int)diff_opaque, (int)differential_valid, (int)alpha_mode, sel_br,
-            sel_bg, sel_bb, sel_dr, sel_dg, sel_db);
   if (!alpha_mode && !diff_opaque) {
     // Individual mode.
     const bool flip = GetBit(src, 32) != 0;
@@ -122,10 +118,6 @@ void DecodeEtc2Color(uint8_t* rgba, uint64_t src, bool alpha_mode) {
       const int subblock = ((flip ? y : x) >= 2) ? 1 : 0;
       const uint32_t index = (GetBit(src, 16 + i) << 1) | GetBit(src, i);
       const int32_t modifier = kEtc1Modifiers[table[subblock]][index];
-      if (getenv("ZGL_DEBUG_ETC") && i == 0)
-        fprintf(stderr, "[etcpix] flip=%d tbl=%u,%u base=%u,%u,%u idx=%u mod=%d\n",
-                (int)flip, table[0], table[1], base[0][0], base[0][1],
-                base[0][2], index, modifier);
       StorePixel(rgba, y * 4 + x, Clamp8(base[subblock][0] + modifier),
                  Clamp8(base[subblock][1] + modifier),
                  Clamp8(base[subblock][2] + modifier), 255);
@@ -362,16 +354,9 @@ bool DecodeEtc2Block(GLenum format, const uint8_t* block, uint8_t* rgba) {
       return true;
     case GL_COMPRESSED_RGBA8_ETC2_EAC:
     case GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC:
-      if (getenv("ZGL_DEBUG_ETC"))
-        fprintf(stderr, "[eacblock] %02x %02x %02x %02x %02x %02x %02x %02x | %02x %02x %02x %02x %02x %02x %02x %02x\n",
-                block[0],block[1],block[2],block[3],block[4],block[5],block[6],block[7],
-                block[8],block[9],block[10],block[11],block[12],block[13],block[14],block[15]);
       // RGBA8 EAC stores the alpha block first, followed by the colour block.
       DecodeEtc2Color(rgba, Get64(block + 8), false);
       DecodeEac8(rgba, Get64(block), 3);
-      if (getenv("ZGL_DEBUG_ETC"))
-        fprintf(stderr, "[etcrgba] %u %u %u %u\n", rgba[0], rgba[1], rgba[2],
-                rgba[3]);
       return true;
     case GL_COMPRESSED_R11_EAC:
     case GL_COMPRESSED_SIGNED_R11_EAC:
