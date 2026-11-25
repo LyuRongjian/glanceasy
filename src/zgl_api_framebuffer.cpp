@@ -15,6 +15,7 @@
 namespace zgl {
 namespace {
 
+
 GLenum AttachmentFormat(Context* context,
                         const FramebufferAttachment& attachment) {
   if (attachment.texture) {
@@ -274,19 +275,21 @@ GLenum CheckCompleteness(Context* context, const Framebuffer& framebuffer) {
 }
 
 size_t PixelBytes(GLenum format, GLenum type) {
-  if (type == GL_INT || type == GL_UNSIGNED_INT) {
-    switch (format) {
-      case GL_RGBA_INTEGER:
-        return 16;
-      case GL_RGB_INTEGER:
-        return 12;
-      case GL_RG_INTEGER:
-        return 8;
-      case GL_RED_INTEGER:
-        return 4;
-      default:
-        return 4;
-    }
+  const bool integer_format = format == GL_RGBA_INTEGER ||
+                              format == GL_RGB_INTEGER ||
+                              format == GL_RG_INTEGER ||
+                              format == GL_RED_INTEGER;
+  if (integer_format) {
+    const int components = format == GL_RGBA_INTEGER
+                               ? 4
+                               : format == GL_RGB_INTEGER
+                                     ? 3
+                                     : format == GL_RG_INTEGER ? 2 : 1;
+    const int component_bytes =
+        type == GL_BYTE || type == GL_UNSIGNED_BYTE
+            ? 1
+            : type == GL_SHORT || type == GL_UNSIGNED_SHORT ? 2 : 4;
+    return static_cast<size_t>(components * component_bytes);
   }
   if (type == GL_UNSIGNED_BYTE) {
     switch (format) {
@@ -389,21 +392,62 @@ void WritePixel(const uint8_t* source,
 void WriteIntegerPixel(const uint32_t* source,
                        GLenum format,
                        GLenum type,
+                       int bits,
+                       bool is_unsigned,
                        uint8_t* destination) {
   const int count = format == GL_RGBA_INTEGER
                         ? 4
                         : format == GL_RGB_INTEGER
                               ? 3
                               : format == GL_RG_INTEGER ? 2 : 1;
-  if (type == GL_INT) {
-    for (int i = 0; i < count; ++i) {
-      const int32_t value = static_cast<int32_t>(source[i]);
-      memcpy(destination + i * sizeof(int32_t), &value, sizeof(value));
-    }
-  } else {
-    for (int i = 0; i < count; ++i)
-      memcpy(destination + i * sizeof(uint32_t), &source[i],
-             sizeof(uint32_t));
+  const auto clamped = [&](int channel) -> int64_t {
+    // Narrow signed formats store a sign-extended value in the 32-bit slot.
+    // Treating that slot as unsigned would clamp negative values to the
+    // positive maximum instead of preserving their sign.
+    const int64_t raw = is_unsigned
+                            ? static_cast<int64_t>(source[channel])
+                            : static_cast<int64_t>(
+                                  static_cast<int32_t>(source[channel]));
+    if (bits >= 32)
+      return raw;
+    const int64_t minimum = is_unsigned ? 0 : -(1LL << (bits - 1));
+    const int64_t maximum =
+        is_unsigned ? (1LL << bits) - 1 : (1LL << (bits - 1)) - 1;
+    return std::min(std::max(raw, minimum), maximum);
+  };
+  switch (type) {
+    case GL_BYTE:
+      for (int i = 0; i < count; ++i)
+        destination[i] = static_cast<uint8_t>(clamped(i));
+      return;
+    case GL_UNSIGNED_BYTE:
+      for (int i = 0; i < count; ++i)
+        destination[i] = static_cast<uint8_t>(clamped(i));
+      return;
+    case GL_SHORT:
+      for (int i = 0; i < count; ++i) {
+        const int16_t value = static_cast<int16_t>(clamped(i));
+        memcpy(destination + i * sizeof(int16_t), &value, sizeof(value));
+      }
+      return;
+    case GL_UNSIGNED_SHORT:
+      for (int i = 0; i < count; ++i) {
+        const uint16_t value = static_cast<uint16_t>(clamped(i));
+        memcpy(destination + i * sizeof(uint16_t), &value, sizeof(value));
+      }
+      return;
+    case GL_INT:
+      for (int i = 0; i < count; ++i) {
+        const int32_t value = static_cast<int32_t>(clamped(i));
+        memcpy(destination + i * sizeof(int32_t), &value, sizeof(value));
+      }
+      return;
+    default:
+      for (int i = 0; i < count; ++i) {
+        const uint32_t value = static_cast<uint32_t>(clamped(i));
+        memcpy(destination + i * sizeof(uint32_t), &value, sizeof(uint32_t));
+      }
+      return;
   }
 }
 
@@ -574,6 +618,11 @@ bool InvalidateAccepted(Context* context,
         attachment == GL_COLOR ||
         (attachment >= GL_COLOR_ATTACHMENT0 &&
          attachment < GL_COLOR_ATTACHMENT0 + kMaxColorAttachments);
+    if (!depth_stencil && !colour &&
+        attachment >= GL_COLOR_ATTACHMENT0 && attachment <= 0x8CFF) {
+      context->SetError(GL_INVALID_OPERATION);
+      return false;
+    }
     if (!depth_stencil && !colour) {
       context->SetError(GL_INVALID_ENUM);
       return false;
@@ -595,24 +644,28 @@ extern "C" {
 
 void glGenFramebuffers(GLsizei n, GLuint* framebuffers) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !framebuffers)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!framebuffers)
+    return;
   for (GLsizei i = 0; i < n; ++i)
-    framebuffers[i] = context->framebuffers.Create();
+    framebuffers[i] = context->framebuffers.Generate();
 }
 
 void glDeleteFramebuffers(GLsizei n, const GLuint* framebuffers) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !framebuffers)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!framebuffers)
+    return;
   for (GLsizei i = 0; i < n; ++i) {
     context->framebuffers.Delete(framebuffers[i]);
     if (context->state.framebuffer == framebuffers[i])
@@ -630,6 +683,9 @@ GLboolean glIsFramebuffer(GLuint framebuffer) {
 }
 
 void glBindFramebuffer(GLenum target, GLuint framebuffer) {
+  if (getenv("ZGL_DEBUG_ERROR"))
+    fprintf(stderr, "[glbindfb] target=0x%x fb=%u\n",
+            static_cast<unsigned>(target), framebuffer);
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
@@ -676,7 +732,7 @@ void glFramebufferTexture2D(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (level < 0) {
+  if (level < 0 || level > 13) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -684,6 +740,11 @@ void glFramebufferTexture2D(GLenum target,
                          textarget <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z;
   if (textarget != GL_TEXTURE_2D && !cube_face) {
     context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  const int max_level = cube_face ? 11 : 13;
+  if (level > max_level) {
+    context->SetError(GL_INVALID_VALUE);
     return;
   }
   slot->retained_texture.reset();
@@ -755,7 +816,7 @@ void glFramebufferTextureLayer(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (level < 0 || layer < 0) {
+  if (level < 0 || level > 13 || layer < 0 || layer > 2047) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -773,6 +834,11 @@ void glFramebufferTextureLayer(GLenum target,
   }
   if (bound->target != GL_TEXTURE_3D && bound->target != GL_TEXTURE_2D_ARRAY) {
     context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const int max_layer = bound->target == GL_TEXTURE_3D ? 511 : 255;
+  if (layer > max_layer) {
+    context->SetError(GL_INVALID_VALUE);
     return;
   }
   // A layer outside the texture is not an attachment-time error; the
@@ -888,7 +954,6 @@ int ColorComponentBits(GLenum format, int channel) {
     case GL_RG16UI:
     case GL_RGBA16I:
     case GL_RGBA16UI:
-    case GL_RGBA16F:
       bits[0] = bits[1] = bits[2] = bits[3] = 16;
       if (format == GL_R16I || format == GL_R16UI)
         bits[1] = bits[2] = bits[3] = 0;
@@ -901,7 +966,6 @@ int ColorComponentBits(GLenum format, int channel) {
     case GL_RG32UI:
     case GL_RGBA32I:
     case GL_RGBA32UI:
-    case GL_RGBA32F:
       bits[0] = bits[1] = bits[2] = bits[3] = 32;
       if (format == GL_R32I || format == GL_R32UI)
         bits[1] = bits[2] = bits[3] = 0;
@@ -1033,46 +1097,45 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
   }
   zgl::Framebuffer* framebuffer = zgl::CurrentFramebuffer(context, target);
   if (!framebuffer) {
-    // The default framebuffer exposes GL_BACK, GL_DEPTH and GL_STENCIL as
-    // GL_FRAMEBUFFER_DEFAULT attachments with fixed RGBA8/depth16/stencil8
-    // component sizes.
-    if (attachment != GL_BACK && attachment != GL_DEPTH &&
-        attachment != GL_STENCIL && attachment != GL_DEPTH_STENCIL) {
-      context->SetError(GL_INVALID_ENUM);
+    // The default drawable exposes GL_BACK, GL_DEPTH and GL_STENCIL as
+    // GL_FRAMEBUFFER_DEFAULT attachments, but not the colour attachment
+    // points of a framebuffer object.
+    const bool color = attachment == GL_BACK;
+    const bool depth =
+        attachment == GL_DEPTH || attachment == GL_DEPTH_STENCIL;
+    const bool stencil =
+        attachment == GL_STENCIL || attachment == GL_DEPTH_STENCIL;
+    if (!color && !depth && !stencil) {
+      context->SetError(GL_INVALID_OPERATION);
       return;
     }
-    const bool is_color = attachment == GL_BACK;
-    const bool is_depth = attachment == GL_DEPTH || attachment == GL_DEPTH_STENCIL;
-    const bool is_stencil = attachment == GL_STENCIL || attachment == GL_DEPTH_STENCIL;
     switch (pname) {
       case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:
         params[0] = GL_FRAMEBUFFER_DEFAULT;
         return;
       case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME:
-        params[0] = 0;
+      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:
+      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE:
+      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER:
+        context->SetError(GL_INVALID_ENUM);
         return;
       case GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE:
       case GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE:
       case GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE:
       case GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE:
-        params[0] = is_color ? 8 : 0;
+        params[0] = color ? 8 : 0;
         return;
       case GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE:
-        params[0] = is_depth ? 16 : 0;
+        params[0] = depth ? 24 : 0;
         return;
       case GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE:
-        params[0] = is_stencil ? 8 : 0;
+        params[0] = stencil ? 8 : 0;
         return;
       case GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE:
-        params[0] = is_color ? GL_UNSIGNED_NORMALIZED : GL_UNSIGNED_INT;
+        params[0] = color ? GL_UNSIGNED_NORMALIZED : GL_UNSIGNED_INT;
         return;
       case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING:
         params[0] = GL_LINEAR;
-        return;
-      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL:
-      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE:
-      case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER:
-        params[0] = 0;
         return;
       default:
         context->SetError(GL_INVALID_ENUM);
@@ -1088,8 +1151,17 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
   } else if (attachment == GL_STENCIL_ATTACHMENT) {
     slot = &framebuffer->stencil;
   } else if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
-    slot = framebuffer->depth.bound() ? &framebuffer->depth
-                                      : &framebuffer->stencil;
+    const zgl::FramebufferAttachment& depth = framebuffer->depth;
+    const zgl::FramebufferAttachment& stencil = framebuffer->stencil;
+    if (depth.bound() && stencil.bound() &&
+        (depth.texture != stencil.texture ||
+         depth.renderbuffer != stencil.renderbuffer ||
+         depth.retained_texture != stencil.retained_texture ||
+         depth.retained_renderbuffer != stencil.retained_renderbuffer)) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    slot = depth.bound() ? &framebuffer->depth : &framebuffer->stencil;
   } else {
     context->SetError(GL_INVALID_ENUM);
     return;
@@ -1208,6 +1280,10 @@ void glDrawBuffers(GLsizei n, const GLenum* buffers) {
   }
   for (GLsizei i = 0; i < n; ++i) {
     const GLenum value = buffers[i];
+    if (value == GL_BACK) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
     if (value != GL_NONE &&
         (value < GL_COLOR_ATTACHMENT0 ||
          value >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments)) {
@@ -1250,12 +1326,22 @@ void glReadBuffer(GLenum mode) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  if (context->state.read_framebuffer != 0 && mode == GL_BACK) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   if (context->state.read_framebuffer == 0) {
     if (mode != GL_BACK && mode != GL_NONE) {
       context->SetError(GL_INVALID_OPERATION);
       return;
     }
     context->state.default_read_buffer = mode;
+    return;
+  }
+  if (mode != GL_NONE && mode != GL_BACK &&
+      mode >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments &&
+      mode <= 0x8CFF) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   if (mode != GL_NONE &&
@@ -1274,14 +1360,16 @@ void glReadBuffer(GLenum mode) {
 
 void glGenRenderbuffers(GLsizei n, GLuint* renderbuffers) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !renderbuffers)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!renderbuffers)
+    return;
   for (GLsizei i = 0; i < n; ++i) {
-    renderbuffers[i] = context->renderbuffers.Create();
+    renderbuffers[i] = context->renderbuffers.Generate();
     zgl::Renderbuffer* object = context->renderbuffers.Get(renderbuffers[i]);
     if (object)
       object->generated_only = true;
@@ -1290,12 +1378,14 @@ void glGenRenderbuffers(GLsizei n, GLuint* renderbuffers) {
 
 void glDeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !renderbuffers)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!renderbuffers)
+    return;
   for (GLsizei i = 0; i < n; ++i) {
     const GLuint name = renderbuffers[i];
     if (name == 0)
@@ -1385,7 +1475,6 @@ bool RenderbufferFormatSupported(GLenum internal_format) {
     case GL_RGB8:
     case GL_SRGB8_ALPHA8:
     case GL_R8:
-    case GL_R8_SNORM:
     case GL_R8I:
     case GL_R8UI:
     case GL_R16I:
@@ -1394,14 +1483,12 @@ bool RenderbufferFormatSupported(GLenum internal_format) {
     case GL_R32UI:
     case GL_RG:
     case GL_RG8:
-    case GL_RG8_SNORM:
     case GL_RG8I:
     case GL_RG8UI:
     case GL_RG16I:
     case GL_RG16UI:
     case GL_RG32I:
     case GL_RG32UI:
-    case GL_RGB8_SNORM:
     case GL_RGB8I:
     case GL_RGB8UI:
     case GL_RGB16I:
@@ -1410,23 +1497,12 @@ bool RenderbufferFormatSupported(GLenum internal_format) {
     case GL_RGB32UI:
     case GL_RGB10_A2:
     case GL_RGB10_A2UI:
-    case GL_RGBA8_SNORM:
     case GL_RGBA8I:
     case GL_RGBA8UI:
     case GL_RGBA16I:
     case GL_RGBA16UI:
     case GL_RGBA32I:
     case GL_RGBA32UI:
-    case GL_R11F_G11F_B10F:
-    case GL_RGB9_E5:
-    case GL_RGB16F:
-    case GL_RGB32F:
-    case GL_RGBA16F:
-    case GL_RGBA32F:
-    case GL_R16F:
-    case GL_R32F:
-    case GL_RG16F:
-    case GL_RG32F:
     case GL_DEPTH_COMPONENT16:
     case GL_DEPTH_COMPONENT24:
     case GL_DEPTH_COMPONENT32F:
@@ -1530,8 +1606,12 @@ void glRenderbufferStorageMultisample(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (samples < 0 || samples > zgl::kMaxSamples) {
+  if (samples < 0) {
     context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (samples > zgl::kMaxSamples) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   if (width < 0 || height < 0 || width > zgl::kMaxRenderbufferSize ||
@@ -1676,7 +1756,15 @@ void glReadPixels(GLint x,
                   GLenum type,
                   void* pixels) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !pixels)
+  if (getenv("ZGL_DEBUG_ERROR"))
+    fprintf(stderr,
+            "[glreadpixels-entry] pixels=%p pbo=%u fmt=0x%x type=0x%x %dx%d\n",
+            pixels, context ? context->state.pixel_pack_buffer : 0,
+            static_cast<unsigned>(format), static_cast<unsigned>(type), width,
+            height);
+  if (!context)
+    return;
+  if (!pixels && context->state.pixel_pack_buffer == 0)
     return;
   if (width < 0 || height < 0) {
     context->SetError(GL_INVALID_VALUE);
@@ -1686,7 +1774,8 @@ void glReadPixels(GLint x,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  bool supported = false;
+  bool valid_format = false;
+  bool integer_format = false;
   switch (format) {
     case GL_RGBA:
     case GL_RGB:
@@ -1695,26 +1784,97 @@ void glReadPixels(GLint x,
     case GL_ALPHA:
     case GL_LUMINANCE:
     case GL_LUMINANCE_ALPHA:
+    case GL_DEPTH_COMPONENT:
+    case GL_DEPTH_STENCIL:
+      valid_format = true;
+      break;
+    case GL_RGBA_INTEGER:
+    case GL_RGB_INTEGER:
+    case GL_RG_INTEGER:
+    case GL_RED_INTEGER:
+      valid_format = true;
+      integer_format = true;
+      break;
+    default:
+      break;
+  }
+  if (!valid_format) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  bool valid_type = false;
+  switch (type) {
+    case GL_UNSIGNED_BYTE:
+    case GL_BYTE:
+    case GL_UNSIGNED_SHORT:
+    case GL_SHORT:
+    case GL_UNSIGNED_INT:
+    case GL_INT:
+    case GL_HALF_FLOAT:
+    case GL_FLOAT:
+    case GL_UNSIGNED_SHORT_5_6_5:
+    case GL_UNSIGNED_SHORT_4_4_4_4:
+    case GL_UNSIGNED_SHORT_5_5_5_1:
+    case GL_UNSIGNED_INT_2_10_10_10_REV:
+    case GL_UNSIGNED_INT_10F_11F_11F_REV:
+    case GL_UNSIGNED_INT_5_9_9_9_REV:
+    case GL_UNSIGNED_INT_24_8:
+    case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
+      valid_type = true;
+      break;
+    default:
+      break;
+  }
+  if (!valid_type) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  bool supported = false;
+  switch (format) {
+    case GL_RGBA:
+      supported = type == GL_UNSIGNED_BYTE || type == GL_FLOAT ||
+                  type == GL_UNSIGNED_SHORT_4_4_4_4 ||
+                  type == GL_UNSIGNED_SHORT_5_5_5_1;
+      break;
+    case GL_LUMINANCE_ALPHA:
+      supported = type == GL_UNSIGNED_BYTE || type == GL_FLOAT;
+      break;
+    case GL_RGB:
+      supported = type == GL_UNSIGNED_BYTE || type == GL_FLOAT ||
+                  type == GL_UNSIGNED_SHORT_5_6_5;
+      break;
+    case GL_RG:
+    case GL_RED:
+    case GL_ALPHA:
+    case GL_LUMINANCE:
       supported = type == GL_UNSIGNED_BYTE || type == GL_FLOAT;
       break;
     case GL_RGBA_INTEGER:
     case GL_RGB_INTEGER:
     case GL_RG_INTEGER:
     case GL_RED_INTEGER:
-      supported = type == GL_INT || type == GL_UNSIGNED_INT;
+      supported = type == GL_BYTE || type == GL_UNSIGNED_BYTE ||
+                  type == GL_SHORT || type == GL_UNSIGNED_SHORT ||
+                  type == GL_INT || type == GL_UNSIGNED_INT;
       break;
     default:
-      supported = false;
       break;
   }
-  if (!supported &&
-      !(format == GL_RGBA && (type == GL_UNSIGNED_SHORT_4_4_4_4 ||
-                              type == GL_UNSIGNED_SHORT_5_5_5_1)) &&
-      !(format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5)) {
-    context->SetError(GL_INVALID_ENUM);
+  if (!supported) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   const zgl::RenderTarget target = context->GetReadTarget();
+  if (getenv("ZGL_DEBUG_ERROR")) {
+    const unsigned* words = reinterpret_cast<const unsigned*>(target.color);
+    fprintf(stderr,
+            "[glreadpixels] readfb=%u %dx%d int=%d fmt=0x%x cb=%d w0=%u w1=%u\n",
+            context->state.read_framebuffer, target.width, target.height,
+            target.read_integer ? 1 : 0,
+            static_cast<unsigned>(target.read_format),
+            target.read_color_bytes, words ? words[0] : 0,
+            words ? words[1] : 0);
+  }
   if (!target.valid()) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
@@ -1727,14 +1887,57 @@ void glReadPixels(GLint x,
   const size_t row_stride =
       ((static_cast<size_t>(row_pixels) * bytes + alignment - 1) / alignment) *
       alignment;
+  uint8_t* base = static_cast<uint8_t*>(pixels);
+  if (context->state.pixel_pack_buffer != 0) {
+    zgl::Buffer* buffer =
+        context->buffers.Get(context->state.pixel_pack_buffer);
+    if (!buffer || buffer->mapped) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    const size_t offset = reinterpret_cast<uintptr_t>(pixels);
+    const size_t required =
+        static_cast<size_t>(store.pack_skip_rows) * row_stride +
+        static_cast<size_t>(height) * row_stride +
+        static_cast<size_t>(store.pack_skip_pixels) * bytes;
+    if (offset + required > buffer->data.size()) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    base = buffer->data.data() + offset;
+  }
   uint8_t* destination =
-      static_cast<uint8_t*>(pixels) +
-      static_cast<size_t>(store.pack_skip_rows) * row_stride +
+      base + static_cast<size_t>(store.pack_skip_rows) * row_stride +
       static_cast<size_t>(store.pack_skip_pixels) * bytes;
   const bool integer_read = target.read_integer;
-  if ((format == GL_RGBA_INTEGER || format == GL_RGB_INTEGER ||
-       format == GL_RG_INTEGER || format == GL_RED_INTEGER) &&
-      !integer_read) {
+  if (integer_format != integer_read) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (target.multisampled()) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const bool float_type = type == GL_FLOAT || type == GL_HALF_FLOAT ||
+                          type == GL_UNSIGNED_INT_10F_11F_11F_REV ||
+                          type == GL_UNSIGNED_INT_5_9_9_9_REV;
+  bool float_target = false;
+  switch (target.read_format) {
+    case GL_R16F:
+    case GL_RG16F:
+    case GL_RGB16F:
+    case GL_RGBA16F:
+    case GL_R32F:
+    case GL_RG32F:
+    case GL_RGB32F:
+    case GL_RGBA32F:
+    case GL_R11F_G11F_B10F:
+      float_target = true;
+      break;
+    default:
+      break;
+  }
+  if (float_type != float_target) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -1756,8 +1959,19 @@ void glReadPixels(GLint x,
 
       uint8_t* out = row_start + static_cast<size_t>(column) * bytes;
       if (integer_read) {
-        zgl::WriteIntegerPixel(reinterpret_cast<const uint32_t*>(source),
-                              format, type, out);
+        const int source_attachment =
+            context->state.read_framebuffer &&
+                    context->framebuffers.Get(context->state.read_framebuffer)
+                ? std::max(0, static_cast<int>(
+                                      context->framebuffers
+                                          .Get(context->state.read_framebuffer)
+                                          ->read_buffer -
+                                      GL_COLOR_ATTACHMENT0))
+                : 0;
+        const uint32_t* raw_source = reinterpret_cast<const uint32_t*>(source);
+        zgl::WriteIntegerPixel(raw_source, format, type,
+                              target.color_integer_bits[source_attachment],
+                              target.color_is_unsigned[source_attachment], out);
         GLuint* components = reinterpret_cast<GLuint*>(out);
         const int output_channels = format == GL_RGBA_INTEGER   ? 4
                                     : format == GL_RGB_INTEGER  ? 3
@@ -1800,10 +2014,95 @@ void glBlitFramebuffer(GLint src_x0,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  if (mask & ~(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
+               GL_STENCIL_BUFFER_BIT)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   zgl::RenderTarget source = context->GetReadTarget();
   zgl::RenderTarget destination = context->GetDrawTarget();
   if (!source.valid() || !destination.valid()) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
+    return;
+  }
+  const zgl::Framebuffer* source_framebuffer =
+      context->framebuffers.Get(context->state.read_framebuffer);
+  const zgl::Framebuffer* destination_framebuffer =
+      context->framebuffers.Get(context->state.framebuffer);
+  const auto normalized_format = [](GLenum format) {
+    if (format == 0 || format == GL_SRGB8_ALPHA8)
+      return static_cast<GLenum>(GL_RGBA8);
+    return format;
+  };
+  GLenum source_color_format = GL_RGBA8;
+  if (source_framebuffer &&
+      source_framebuffer->read_buffer >= GL_COLOR_ATTACHMENT0 &&
+      source_framebuffer->read_buffer <
+          GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments) {
+    source_color_format = zgl::AttachmentFormat(
+        context,
+        source_framebuffer
+            ->colors[source_framebuffer->read_buffer - GL_COLOR_ATTACHMENT0]);
+  }
+  GLenum destination_color_format = GL_RGBA8;
+  if (destination_framebuffer)
+    destination_color_format =
+        zgl::AttachmentFormat(context, destination_framebuffer->colors[0]);
+  const GLenum source_depth_format =
+      source_framebuffer
+          ? zgl::AttachmentFormat(context, source_framebuffer->depth)
+          : GL_DEPTH_COMPONENT16;
+  const GLenum destination_depth_format =
+      destination_framebuffer
+          ? zgl::AttachmentFormat(context, destination_framebuffer->depth)
+          : GL_DEPTH_COMPONENT16;
+  const GLenum source_stencil_format =
+      source_framebuffer
+          ? zgl::AttachmentFormat(context, source_framebuffer->stencil)
+          : GL_STENCIL_INDEX8;
+  const GLenum destination_stencil_format =
+      destination_framebuffer
+          ? zgl::AttachmentFormat(context, destination_framebuffer->stencil)
+          : GL_STENCIL_INDEX8;
+  const bool blits_depth =
+      (mask & (GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)) != 0;
+  if (blits_depth && filter != GL_NEAREST) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (destination.multisampled()) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if ((mask & GL_COLOR_BUFFER_BIT) &&
+      source.read_integer && filter == GL_LINEAR) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if ((mask & GL_COLOR_BUFFER_BIT) &&
+      source.read_integer != destination.color_is_integer[0]) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if ((mask & GL_DEPTH_BUFFER_BIT) &&
+      source_depth_format != destination_depth_format) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if ((mask & GL_STENCIL_BUFFER_BIT) &&
+      source_stencil_format != destination_stencil_format) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (source.multisampled() &&
+      normalized_format(source_color_format) !=
+          normalized_format(destination_color_format)) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (source.multisampled() && (src_x0 != dst_x0 || src_y0 != dst_y0 ||
+                                src_x1 != dst_x1 || src_y1 != dst_y1)) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   const bool scissor_test = context->state.scissor_test;
@@ -1870,10 +2169,24 @@ void glBlitFramebuffer(GLint src_x0,
                 destination_index * 4;
             for (int channel = 0; channel < 4; ++channel) {
               int64_t value = 0;
-              if (channel < source.read_channels)
-                value = static_cast<int64_t>(incoming[channel]);
-              else if (channel == 3)
+              if (channel < source.read_channels) {
+                const uint32_t raw = incoming[channel];
+                const int source_bits =
+                    zgl::FormatIntegerBits(source.read_format, channel);
+                if (source_bits < 32) {
+                  const uint32_t mask = (1u << source_bits) - 1u;
+                  const uint32_t field = raw & mask;
+                  value = source.read_unsigned ||
+                                  (field & (1u << (source_bits - 1))) == 0
+                              ? static_cast<int64_t>(field)
+                              : static_cast<int64_t>(field) -
+                                    (1LL << source_bits);
+                } else {
+                  value = static_cast<int64_t>(raw);
+                }
+              } else if (channel == 3) {
                 value = 1;
+              }
               if (!destination.color_is_unsigned[0] && channel < 4)
                 value = static_cast<int32_t>(static_cast<uint32_t>(value));
               const int bits = zgl::FormatIntegerBits(
@@ -2155,6 +2468,8 @@ void glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint* value) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !value)
     return;
+  if (context->state.rasterizer_discard)
+    return;
   if (buffer == GL_COLOR) {
     if (zgl::DrawBufferIsInteger(context, drawbuffer)) {
       const uint32_t values[4] = {
@@ -2215,6 +2530,8 @@ void glClearBufferuiv(GLenum buffer, GLint drawbuffer, const GLuint* value) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !value)
     return;
+  if (context->state.rasterizer_discard)
+    return;
   if (buffer == GL_COLOR) {
     if (zgl::DrawBufferIsInteger(context, drawbuffer)) {
       const uint32_t values[4] = {value[0], value[1], value[2], value[3]};
@@ -2237,14 +2554,28 @@ void glClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat* value) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !value)
     return;
+  if (context->state.rasterizer_discard)
+    return;
   if (buffer == GL_COLOR) {
+    if (drawbuffer < 0 || drawbuffer >= zgl::kMaxDrawBuffers) {
+      context->SetError(GL_INVALID_VALUE);
+      return;
+    }
     const zgl::Rgba color =
         zgl::Rgba{zgl::FloatToUnorm8(value[0]), zgl::FloatToUnorm8(value[1]),
                   zgl::FloatToUnorm8(value[2]), zgl::FloatToUnorm8(value[3])};
     zgl::ClearColourBuffer(context, drawbuffer, zgl::PackRgba(color));
     return;
   }
+  if (buffer == GL_STENCIL || buffer == GL_DEPTH_STENCIL) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (buffer == GL_DEPTH) {
+    if (drawbuffer != 0) {
+      context->SetError(GL_INVALID_VALUE);
+      return;
+    }
     zgl::RenderTarget target = context->GetDrawTarget();
     if (target.valid() && target.depth) {
       const uint16_t depth =
@@ -2288,6 +2619,8 @@ void glClearBufferfi(GLenum buffer,
                      GLint stencil) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
+    return;
+  if (context->state.rasterizer_discard)
     return;
   if (buffer != GL_DEPTH_STENCIL || drawbuffer != 0) {
     context->SetError(buffer == GL_DEPTH_STENCIL ? GL_INVALID_VALUE

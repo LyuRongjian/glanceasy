@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <cstring>
 #include <utility>
 
@@ -111,6 +112,26 @@ const BuiltinVarEntry kBuiltinVars[] = {
     {"__zgl_frag_output_1", BuiltinId::kFragOutput1, Type::Vec(4), false},
     {"__zgl_frag_output_2", BuiltinId::kFragOutput2, Type::Vec(4), false},
     {"__zgl_frag_output_3", BuiltinId::kFragOutput3, Type::Vec(4), false},
+    {"gl_DepthRange", BuiltinId::kDepthRange, Type::Vec(3), true},
+};
+
+struct BuiltinConstantEntry {
+  const char* name;
+  int value;
+};
+
+const BuiltinConstantEntry kBuiltinConstants[] = {
+    {"gl_MaxVertexAttribs", 16},
+    {"gl_MaxVertexUniformVectors", 256},
+    {"gl_MaxVertexTextureImageUnits", 16},
+    {"gl_MaxCombinedTextureImageUnits", 32},
+    {"gl_MaxTextureImageUnits", 16},
+    {"gl_MaxFragmentUniformVectors", 256},
+    {"gl_MaxDrawBuffers", 4},
+    {"gl_MaxVertexOutputVectors", 64},
+    {"gl_MaxFragmentInputVectors", 64},
+    {"gl_MinProgramTexelOffset", -8},
+    {"gl_MaxProgramTexelOffset", 7},
 };
 
 struct BuiltinFuncEntry {
@@ -124,8 +145,14 @@ const BuiltinFuncEntry kBuiltinFuncs[] = {
     {"sin", BuiltinFunc::kSin},
     {"cos", BuiltinFunc::kCos},
     {"tan", BuiltinFunc::kTan},
+    {"sinh", BuiltinFunc::kSinh},
+    {"cosh", BuiltinFunc::kCosh},
+    {"tanh", BuiltinFunc::kTanh},
     {"asin", BuiltinFunc::kAsin},
     {"acos", BuiltinFunc::kAcos},
+    {"asinh", BuiltinFunc::kAsinh},
+    {"acosh", BuiltinFunc::kAcosh},
+    {"atanh", BuiltinFunc::kAtanh},
     {"atan", BuiltinFunc::kAtan},
     {"pow", BuiltinFunc::kPow},
     {"exp", BuiltinFunc::kExp},
@@ -138,7 +165,11 @@ const BuiltinFuncEntry kBuiltinFuncs[] = {
     {"sign", BuiltinFunc::kSign},
     {"floor", BuiltinFunc::kFloor},
     {"ceil", BuiltinFunc::kCeil},
+    {"trunc", BuiltinFunc::kTrunc},
+    {"round", BuiltinFunc::kRound},
+    {"roundEven", BuiltinFunc::kRoundEven},
     {"fract", BuiltinFunc::kFract},
+    {"modf", BuiltinFunc::kModf},
     {"mod", BuiltinFunc::kMod},
     {"min", BuiltinFunc::kMin},
     {"max", BuiltinFunc::kMax},
@@ -155,6 +186,7 @@ const BuiltinFuncEntry kBuiltinFuncs[] = {
     {"reflect", BuiltinFunc::kReflect},
     {"refract", BuiltinFunc::kRefract},
     {"matrixCompMult", BuiltinFunc::kMatrixCompMult},
+    {"outerProduct", BuiltinFunc::kOuterProduct},
     {"transpose", BuiltinFunc::kTranspose},
     {"determinant", BuiltinFunc::kDeterminant},
     {"inverse", BuiltinFunc::kInverse},
@@ -178,8 +210,17 @@ const BuiltinFuncEntry kBuiltinFuncs[] = {
     {"dFdy", BuiltinFunc::kDfdy},
     {"fwidth", BuiltinFunc::kFwidth},
     {"floatBitsToUint", BuiltinFunc::kFloatBitsToUint},
+    {"floatBitsToInt", BuiltinFunc::kFloatBitsToInt},
     {"uintBitsToFloat", BuiltinFunc::kUIntBitsToFloat},
     {"intBitsToFloat", BuiltinFunc::kIntBitsToFloat},
+    {"isinf", BuiltinFunc::kIsInf},
+    {"isnan", BuiltinFunc::kIsNan},
+    {"packUnorm2x16", BuiltinFunc::kPackUnorm2x16},
+    {"packSnorm2x16", BuiltinFunc::kPackSnorm2x16},
+    {"packHalf2x16", BuiltinFunc::kPackHalf2x16},
+    {"unpackUnorm2x16", BuiltinFunc::kUnpackUnorm2x16},
+    {"unpackSnorm2x16", BuiltinFunc::kUnpackSnorm2x16},
+    {"unpackHalf2x16", BuiltinFunc::kUnpackHalf2x16},
 };
 
 int PrecedenceOfPunct(const std::string& punct) {
@@ -307,6 +348,53 @@ bool IsSwizzleChar(char c, int* set) {
   return false;
 }
 
+// Identifiers that GLSL ES reserves for the language, and the maximum
+// identifier length guaranteed by the specification.  These may not be used
+// for user variables, functions, structures, fields or parameters.
+bool IsReservedIdentifier(const std::string& name) {
+  if (name.size() > 1024)
+    return true;
+  if (name.compare(0, 3, "gl_") == 0)
+    return true;
+  static const char* const kReserved[] = {
+      "active", "asm", "atomic_uint", "attribute", "bool", "break", "bvec2",
+      "bvec3", "bvec4", "case",
+      "cast", "centroid", "class", "coherent", "common", "const", "continue",
+      "default", "discard", "do", "double", "dvec2", "dvec3", "dvec4", "else",
+      "enum", "extern", "external", "false", "filter", "fixed", "flat", "float",
+      "for", "fvec2", "fvec3", "fvec4", "goto", "half", "highp", "hvec2",
+      "hvec3", "hvec4", "if", "iimage1D", "iimage1DArray", "iimage2D",
+      "iimage2DArray", "iimage3D", "iimageBuffer", "iimageCube", "image1D",
+      "image1DArray", "image2D", "image2DArray", "image3D", "imageBuffer",
+      "imageCube", "in", "inline", "inout", "input", "int", "interface",
+      "invariant", "isampler1D", "isampler1DArray", "isampler2D",
+      "isampler2DArray", "isampler2DMS", "isampler2DMSArray", "isampler2DRect",
+      "isampler3D", "isamplerBuffer", "isamplerCube", "ivec2", "ivec3",
+      "ivec4", "layout", "long", "lowp", "mat2", "mat2x2", "mat2x3", "mat2x4",
+      "mat3", "mat3x2", "mat3x3", "mat3x4", "mat4", "mat4x2", "mat4x3",
+      "mat4x4", "mediump", "namespace", "noinline", "noperspective", "out",
+      "output", "partition", "patch", "precision", "public", "readonly",
+      "resource", "restrict", "return", "sample", "sampler1D",
+      "sampler1DArray", "sampler1DArrayShadow", "sampler1DShadow", "sampler2D",
+      "sampler2DArray", "sampler2DArrayShadow", "sampler2DMS",
+      "sampler2DMSArray", "sampler2DRect", "sampler2DRectShadow",
+      "sampler2DShadow", "sampler3D", "sampler3DRect", "samplerBuffer",
+      "samplerCube", "samplerCubeShadow", "short", "sizeof", "smooth",
+      "static", "struct", "subroutine", "superp", "switch", "template", "this",
+      "true", "typedef", "uimage1D", "uimage1DArray", "uimage2D",
+      "uimage2DArray", "uimage3D", "uimageBuffer", "uimageCube", "uint",
+      "uniform", "union", "unsigned", "usampler1D", "usampler1DArray",
+      "usampler2D", "usampler2DArray", "usampler2DMS", "usampler2DMSArray",
+      "usampler2DRect", "usampler3D", "usamplerBuffer", "usamplerCube",
+      "using", "uvec2", "uvec3", "uvec4", "varying", "vec2", "vec3", "vec4",
+      "void", "volatile", "while", "writeonly"};
+  for (const char* reserved : kReserved) {
+    if (name == reserved)
+      return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 Parser::Parser(Stage stage, const std::string& source)
@@ -387,6 +475,8 @@ bool Parser::ParseQualifiers(Qualifiers* qualifiers) {
       qualifiers->is_in = true;
     } else if (text == "out") {
       qualifiers->is_out = true;
+    } else if (text == "inout") {
+      qualifiers->is_inout = true;
     } else if (text == "invariant") {
       qualifiers->is_invariant = true;
     } else if (text == "flat") {
@@ -407,7 +497,8 @@ bool Parser::ParseQualifiers(Qualifiers* qualifiers) {
             return Fail("expected an integer location");
           qualifiers->location = static_cast<int>(current_.number);
           Advance();
-        } else if (CheckIdent("std140") || CheckIdent("depth_any") ||
+        } else if (CheckIdent("std140") || CheckIdent("shared") ||
+                   CheckIdent("packed") || CheckIdent("depth_any") ||
                    CheckIdent("index")) {
           if (CheckIdent("std140"))
             qualifiers->is_std140 = true;
@@ -447,25 +538,189 @@ bool Parser::IsKnownTypeName(const std::string& name) const {
   return LookupType(name, &unused);
 }
 
+bool Parser::EvalConstIntExpr(const ExprPtr& expr, int* value) {
+  if (!expr)
+    return false;
+  if (expr->kind == Expr::Kind::kLiteral &&
+      (expr->type.base() == BaseType::kInt ||
+       expr->type.base() == BaseType::kUInt)) {
+    *value = static_cast<int>(expr->integer_literal);
+    return true;
+  }
+  if (expr->kind == Expr::Kind::kVariable) {
+    for (const auto& entry : const_ints_) {
+      if (entry.first == expr->text) {
+        *value = entry.second;
+        return true;
+      }
+    }
+    return false;
+  }
+  if (expr->kind == Expr::Kind::kUnary && expr->op == Op::kNegate) {
+    int inner = 0;
+    if (!EvalConstIntExpr(expr->base, &inner))
+      return false;
+    *value = -inner;
+    return true;
+  }
+  if (expr->kind == Expr::Kind::kBinary) {
+    int left = 0;
+    int right = 0;
+    if (!EvalConstIntExpr(expr->base, &left) ||
+        !EvalConstIntExpr(expr->args[0], &right))
+      return false;
+    switch (expr->op) {
+      case Op::kAdd: *value = left + right; return true;
+      case Op::kSubtract: *value = left - right; return true;
+      case Op::kMultiply: *value = left * right; return true;
+      case Op::kDivide: if (right == 0) return false; *value = left / right; return true;
+      case Op::kModulo: if (right == 0) return false; *value = left % right; return true;
+      default: return false;
+    }
+  }
+  return false;
+}
+
+bool Parser::IsConstantExpr(const ExprPtr& expr) const {
+  if (!expr)
+    return false;
+  if (getenv("ZGL_DEBUG_CONST"))
+    fprintf(stderr, "[const] kind=%d type=%s\n", (int)expr->kind,
+            expr->type.Name().c_str());
+  switch (expr->kind) {
+    case Expr::Kind::kLiteral:
+      return true;
+    case Expr::Kind::kVariable:
+      if (getenv("ZGL_DEBUG_CONST"))
+        fprintf(stderr, "[const] var %s const=%d param=%d kind=%d\n", expr->text.c_str(),
+                (int)expr->is_const, (int)expr->is_parameter,
+                (int)expr->kind);
+      return expr->is_const && !expr->is_parameter;
+    case Expr::Kind::kUnary:
+      return expr->args.empty() ? false : IsConstantExpr(expr->args[0]);
+    case Expr::Kind::kBinary:
+    case Expr::Kind::kComma:
+      return expr->args.size() >= 2 && IsConstantExpr(expr->args[0]) &&
+             IsConstantExpr(expr->args[1]);
+    case Expr::Kind::kTernary:
+      return expr->args.size() >= 3 && IsConstantExpr(expr->args[0]) &&
+             IsConstantExpr(expr->args[1]) && IsConstantExpr(expr->args[2]);
+    case Expr::Kind::kField:
+    case Expr::Kind::kIndex:
+      return IsConstantExpr(expr->base);
+    case Expr::Kind::kCall:
+      if (getenv("ZGL_DEBUG_CONST"))
+        fprintf(stderr, "[const] call %s ctor=%d builtin=%d args=%zu\n",
+                expr->text.c_str(), (int)expr->is_constructor,
+                (int)expr->builtin_func, expr->args.size());
+      if (expr->is_constructor) {
+        for (const ExprPtr& argument : expr->args) {
+          if (!IsConstantExpr(argument))
+            return false;
+        }
+        return true;
+      }
+      if (expr->builtin_func == BuiltinFunc::kNone)
+        return false;
+      for (const ExprPtr& argument : expr->args) {
+        if (!IsConstantExpr(argument))
+          return false;
+      }
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool Parser::ParseConstAtom(int* value) {
+  if (AcceptPunct("-")) {
+    if (!ParseConstAtom(value))
+      return false;
+    *value = -*value;
+    return true;
+  }
+  if (AcceptPunct("+"))
+    return ParseConstAtom(value);
+  if (AcceptPunct("(")) {
+    if (!ParseConstantInt(value))
+      return false;
+    return ExpectPunct(")");
+  }
+  if (current_.kind == Token::Kind::kIntLiteral) {
+    *value = static_cast<int>(current_.number);
+    Advance();
+    return true;
+  }
+  if (current_.kind == Token::Kind::kIdentifier) {
+    const std::string name = current_.text;
+    Advance();
+    if (AcceptPunct(".")) {
+      if (!AcceptIdent("length") || !ExpectPunct("(") || !ExpectPunct(")"))
+        return Fail("invalid array length expression");
+      for (const auto& entry : array_sizes_) {
+        if (entry.first == name) {
+          *value = entry.second;
+          if (*value <= 0)
+            return Fail("array length is not a constant");
+          return true;
+        }
+      }
+      return Fail("unknown array '" + name + "'");
+    }
+    for (const auto& entry : const_ints_) {
+      if (entry.first == name) {
+        *value = entry.second;
+        return true;
+      }
+    }
+    return Fail("array size must be a constant integer expression");
+  }
+  return Fail("expected a constant integer expression");
+}
+
 bool Parser::ParseConstantInt(int* value) {
-  if (current_.kind != Token::Kind::kIntLiteral) {
-    Fail("expected a constant integer expression");
+  if (!ParseConstAtom(value))
     return false;
+  for (;;) {
+    Op op = Op::kNone;
+    if (AcceptPunct("+")) op = Op::kAdd;
+    else if (AcceptPunct("-")) op = Op::kSubtract;
+    else if (AcceptPunct("*")) op = Op::kMultiply;
+    else if (AcceptPunct("/")) op = Op::kDivide;
+    else if (AcceptPunct("%")) op = Op::kModulo;
+    else break;
+    int rhs = 0;
+    if (!ParseConstAtom(&rhs))
+      return false;
+    switch (op) {
+      case Op::kAdd: *value += rhs; break;
+      case Op::kSubtract: *value -= rhs; break;
+      case Op::kMultiply: *value *= rhs; break;
+      case Op::kDivide:
+        if (rhs == 0) return Fail("division by zero in array size");
+        *value /= rhs; break;
+      case Op::kModulo:
+        if (rhs == 0) return Fail("division by zero in array size");
+        *value %= rhs; break;
+      default: break;
+    }
   }
-  *value = static_cast<int>(current_.number);
-  Advance();
-  if (*value <= 0) {
-    Fail("array size must be positive");
-    return false;
-  }
+  if (*value <= 0)
+    return Fail("array size must be positive");
   return true;
 }
 
 bool Parser::ParseArraySuffix(Type* type) {
   while (AcceptPunct("[")) {
+    if (type->is_array())
+      return Fail("multidimensional arrays are not supported");
     int count = 0;
-    if (!ParseConstantInt(&count))
+    if (CheckPunct("]")) {
+      // An empty dimension is resolved from the initializer or constructor.
+      count = 0;
+    } else if (!ParseConstantInt(&count)) {
       return false;
+    }
     if (!ExpectPunct("]"))
       return false;
     *type = Type::Array(*type, count);
@@ -487,6 +742,8 @@ bool Parser::AddGlobalVariable(const std::string& name,
                                const Qualifiers& qualifiers,
                                ExprPtr initializer,
                                int line) {
+  if (IsReservedIdentifier(name))
+    return FailAt(line, "reserved identifier '" + name + "'");
   if (HasName(global_names_, name, nullptr) ||
       HasName(uniform_names_, name, nullptr) ||
       HasName(attribute_names_, name, nullptr) ||
@@ -499,6 +756,7 @@ bool Parser::AddGlobalVariable(const std::string& name,
   Variable variable;
   variable.name = name;
   variable.type = type;
+  variable.is_const = qualifiers.is_const;
 
   if (qualifiers.is_uniform) {
     if (initializer)
@@ -608,8 +866,6 @@ bool Parser::AddGlobalVariable(const std::string& name,
   if (wants_varying_out || wants_varying_in) {
     if (type.is_sampler())
       return FailAt(line, "varying '" + name + "' cannot be a sampler");
-    if (type.is_matrix())
-      return FailAt(line, "matrix varyings are not supported");
     variable.storage =
         wants_varying_out ? Storage::kVaryingOut : Storage::kVaryingIn;
     variable.flat = qualifiers.flat;
@@ -635,13 +891,14 @@ bool Parser::AddGlobalVariable(const std::string& name,
 bool Parser::AddLocalVariable(const std::string& name,
                               const Type& type,
                               ExprPtr initializer,
+                              bool is_const,
                               int line,
                               StmtPtr* statement) {
-  for (const auto& scope : scopes_) {
-    for (const auto& entry : scope) {
-      if (entry.first == name)
-        return FailAt(line, "redefinition of '" + name + "'");
-    }
+  if (IsReservedIdentifier(name))
+    return FailAt(line, "reserved identifier '" + name + "'");
+  for (const auto& entry : scopes_.back()) {
+    if (entry.first == name)
+      return FailAt(line, "redefinition of '" + name + "'");
   }
   if (type.is_void())
     return FailAt(line, "variable '" + name + "' cannot have type void");
@@ -651,11 +908,15 @@ bool Parser::AddLocalVariable(const std::string& name,
   variable.name = name;
   variable.type = type;
   variable.storage = Storage::kLocal;
+  variable.is_const = is_const;
   variable.index = slot_count_++;
   scopes_.back().push_back({name, variable.index});
   if (static_cast<int>(slot_types_.size()) <= variable.index)
     slot_types_.resize(variable.index + 1, Type::Float());
   slot_types_[variable.index] = type;
+  if (static_cast<int>(slot_is_const_.size()) <= variable.index)
+    slot_is_const_.resize(variable.index + 1, false);
+  slot_is_const_[variable.index] = is_const;
   max_slot_count_ = std::max(max_slot_count_, slot_count_);
 
   Statement::Declarator declarator;
@@ -667,11 +928,52 @@ bool Parser::AddLocalVariable(const std::string& name,
 
 bool Parser::RegisterFunction(Function&& function, bool prototype) {
   const std::string name = function.name;
+  if (IsReservedIdentifier(name))
+    return FailAt(function.line, "reserved identifier '" + name + "'");
+  for (const BuiltinFuncEntry& entry : kBuiltinFuncs) {
+    if (entry.name == name)
+      return FailAt(function.line, "cannot redefine built-in function '" +
+                                      name + "'");
+  }
   int existing = -1;
-  if (HasName(function_names_, name, &existing)) {
+  for (size_t i = 0; i < ast_->functions.size(); ++i) {
+    const Function& candidate = ast_->functions[i];
+    if (candidate.name != name ||
+        candidate.parameters.size() != function.parameters.size()) {
+      continue;
+    }
+    bool same = true;
+    for (size_t p = 0; p < function.parameters.size(); ++p) {
+      if (!(candidate.parameters[p].type == function.parameters[p].type)) {
+        same = false;
+        break;
+      }
+    }
+    if (same) {
+      existing = static_cast<int>(i);
+      break;
+    }
+  }
+  if (existing >= 0) {
     Function& previous = ast_->functions[existing];
-    if (previous.defined || !prototype)
+    if (previous.return_type != function.return_type) {
+      return FailAt(function.line, "function '" + name +
+                                      "' prototype return type mismatch");
+    }
+    for (size_t p = 0; p < function.parameters.size() &&
+                      p < previous.parameters.size(); ++p) {
+      if (previous.parameters[p].is_const != function.parameters[p].is_const ||
+          previous.parameters[p].parameter_qualifier !=
+              function.parameters[p].parameter_qualifier) {
+        return FailAt(function.line, "function '" + name +
+                                        "' prototype parameter qualifier mismatch");
+      }
+    }
+    if (prototype)
+      return true;
+    if (previous.defined)
       return FailAt(function.line, "redefinition of function '" + name + "'");
+    function.defined = true;
     ast_->functions[existing] = std::move(function);
     return true;
   }
@@ -690,8 +992,6 @@ bool Parser::ParseParameters(Function* function) {
     Qualifiers qualifiers;
     if (!ParseQualifiers(&qualifiers))
       return false;
-    if (qualifiers.is_out || qualifiers.is_inout)
-      return Fail("'out' and 'inout' parameters are not supported");
     if (qualifiers.is_uniform || qualifiers.is_attribute ||
         qualifiers.is_varying)
       return Fail("invalid parameter qualifier");
@@ -704,16 +1004,26 @@ bool Parser::ParseParameters(Function* function) {
         return true;
       return Fail("a parameter cannot have type void");
     }
-    if (current_.kind != Token::Kind::kIdentifier)
+    std::string name;
+    if (current_.kind == Token::Kind::kIdentifier) {
+      name = current_.text;
+      if (IsReservedIdentifier(name))
+        return FailAt(current_.line, "reserved identifier '" + name + "'");
+      Advance();
+      if (!ParseArraySuffix(&type))
+        return false;
+    } else if (!CheckPunct(",") && !CheckPunct(")")) {
       return Fail("expected a parameter name");
-    const std::string name = current_.text;
-    Advance();
-    if (!ParseArraySuffix(&type))
-      return false;
+    }
     Variable variable;
     variable.name = name;
     variable.type = type;
     variable.storage = Storage::kLocal;
+    variable.is_const = qualifiers.is_const;
+    variable.parameter_qualifier =
+        qualifiers.is_inout ? 2 : (qualifiers.is_out ? 1 : 0);
+    if (variable.parameter_qualifier != 0 && ast_)
+      ast_->uses_out_params = true;
     variable.index = static_cast<int>(function->parameters.size());
     function->parameters.push_back(variable);
     if (!AcceptPunct(","))
@@ -726,7 +1036,11 @@ bool Parser::ParseFunction(const std::string& name,
                            const Type& return_type,
                            const Qualifiers& qualifiers,
                            int line) {
-  (void)qualifiers;
+  if (qualifiers.is_in || qualifiers.is_out || qualifiers.is_inout ||
+      qualifiers.is_uniform || qualifiers.is_attribute ||
+      qualifiers.is_varying) {
+    return FailAt(line, "invalid qualifier on a function return type");
+  }
   if (in_function_)
     return FailAt(line, "nested functions are not supported");
   Function function;
@@ -749,15 +1063,21 @@ bool Parser::ParseFunction(const std::string& name,
     return false;
 
   in_function_ = true;
+  current_function_ = name;
+  current_return_type_ = return_type;
   slot_count_ = static_cast<int>(function.parameters.size());
+  current_parameter_count_ = slot_count_;
   max_slot_count_ = slot_count_;
   slot_types_.clear();
   slot_types_.reserve(16);
+  slot_is_const_.clear();
+  slot_is_const_.reserve(16);
   loop_depth_ = 0;
   scopes_.push_back({});
   for (const Variable& parameter : function.parameters) {
     scopes_.back().push_back({parameter.name, parameter.index});
     slot_types_.push_back(parameter.type);
+    slot_is_const_.push_back(parameter.is_const);
   }
 
   while (!CheckPunct("}")) {
@@ -776,6 +1096,9 @@ bool Parser::ParseFunction(const std::string& name,
   scopes_.pop_back();
   function.slot_count = max_slot_count_;
   in_function_ = false;
+  current_function_.clear();
+  current_return_type_ = Type::Void();
+  current_parameter_count_ = 0;
   slot_count_ = 0;
   return RegisterFunction(std::move(function), false);
 }
@@ -786,6 +1109,8 @@ bool Parser::ParseStructDefinition() {
   if (current_.kind != Token::Kind::kIdentifier)
     return Fail("expected a structure name");
   const std::string name = current_.text;
+  if (IsReservedIdentifier(name))
+    return FailAt(line, "reserved identifier '" + name + "'");
   Advance();
   for (const auto& entry : struct_types_) {
     if (entry.first == name)
@@ -803,6 +1128,10 @@ bool Parser::ParseStructDefinition() {
       FailAt(line, "unexpected end of shader inside struct '" + name + "'");
       return false;
     }
+    while (CheckIdent("lowp") || CheckIdent("mediump") ||
+           CheckIdent("highp")) {
+      Advance();
+    }
     Type member_type;
     if (!ParseTypeSpec(&member_type))
       return false;
@@ -810,26 +1139,33 @@ bool Parser::ParseStructDefinition() {
       return FailAt(line, "a structure member cannot have type void");
     if (member_type.is_sampler())
       return FailAt(line, "a structure member cannot be a sampler");
-    if (current_.kind != Token::Kind::kIdentifier)
-      return FailAt(line, "expected a structure member name");
-    const std::string member_name = current_.text;
-    Advance();
-    if (!ParseArraySuffix(&member_type))
-      return false;
-    for (const StructMember& member : info->members) {
-      if (member.name == member_name)
-        return FailAt(line, "duplicate structure member '" + member_name + "'");
+    for (;;) {
+      if (current_.kind != Token::Kind::kIdentifier)
+        return FailAt(line, "expected a structure member name");
+      const std::string member_name = current_.text;
+      if (IsReservedIdentifier(member_name))
+        return FailAt(line, "reserved identifier '" + member_name + "'");
+      Advance();
+      Type member_type_with_array = member_type;
+      if (!ParseArraySuffix(&member_type_with_array))
+        return false;
+      for (const StructMember& member : info->members) {
+        if (member.name == member_name)
+          return FailAt(line, "duplicate structure member '" + member_name + "'");
+      }
+      const int alignment = Std140Alignment(member_type_with_array);
+      byte_offset = (byte_offset + alignment - 1) / alignment * alignment;
+      StructMember member;
+      member.name = member_name;
+      member.type = member_type_with_array;
+      member.component_offset = component_offset;
+      member.byte_offset = byte_offset;
+      info->members.push_back(member);
+      component_offset += member_type_with_array.components();
+      byte_offset += Std140Size(member_type_with_array);
+      if (!AcceptPunct(","))
+        break;
     }
-    const int alignment = Std140Alignment(member_type);
-    byte_offset = (byte_offset + alignment - 1) / alignment * alignment;
-    StructMember member;
-    member.name = member_name;
-    member.type = member_type;
-    member.component_offset = component_offset;
-    member.byte_offset = byte_offset;
-    info->members.push_back(member);
-    component_offset += member_type.components();
-    byte_offset += Std140Size(member_type);
     if (!ExpectPunct(";"))
       return false;
   }
@@ -882,6 +1218,13 @@ bool Parser::ParseGlobalDeclaration() {
     Advance();
     return ExpectPunct(";");
   }
+  if (qualifiers.is_invariant &&
+      (qualifiers.is_in || qualifiers.is_attribute ||
+       qualifiers.is_uniform)) {
+    return FailAt(current_.line,
+                  "invariant is only valid on vertex outputs and fragment "
+                  "inputs");
+  }
   if (qualifiers.is_uniform && current_.kind == Token::Kind::kIdentifier &&
       !IsKnownTypeName(current_.text) && !CheckIdent("true") &&
       !CheckIdent("false")) {
@@ -894,6 +1237,8 @@ bool Parser::ParseGlobalDeclaration() {
   if (current_.kind != Token::Kind::kIdentifier)
     return Fail("expected an identifier");
   std::string name = current_.text;
+  if (name == "gl_FragDepth")
+    return Fail("gl_FragDepth cannot be redeclared");
   Advance();
   if (CheckPunct("("))
     return ParseFunction(name, type, qualifiers, line);
@@ -908,6 +1253,29 @@ bool Parser::ParseGlobalDeclaration() {
       if (!initializer)
         return false;
     }
+    if (declaration_type.is_array() && declaration_type.array_size() == 0 &&
+        initializer && initializer->type.is_array())
+      declaration_type = initializer->type;
+    if (declaration_type.is_array() && declaration_type.array_size() == 0 &&
+        !initializer)
+      return Fail("array size must be specified");
+    if (initializer && initializer->type != declaration_type)
+      return Fail("implicit conversion in variable initializer");
+    if (qualifiers.is_const) {
+      if (!initializer)
+        return Fail("const variable requires an initializer");
+      if (initializer->type != declaration_type)
+        return Fail("implicit conversion in constant initializer");
+      if (!IsConstantExpr(initializer))
+        return Fail("initializer is not a constant expression");
+    }
+    if (qualifiers.is_const && declaration_type == Type::Int() && initializer) {
+      int constant = 0;
+      if (EvalConstIntExpr(initializer, &constant))
+        const_ints_.push_back({name, constant});
+    }
+    if (declaration_type.is_array() && declaration_type.array_size() > 0)
+      array_sizes_.push_back({name, declaration_type.array_size()});
     if (!AddGlobalVariable(name, declaration_type, qualifiers,
                            std::move(initializer), line)) {
       return false;
@@ -948,7 +1316,8 @@ bool Parser::ParseUniformBlock(const Qualifiers& qualifiers, int line) {
       return false;
     if (member_qualifiers.is_uniform || member_qualifiers.is_attribute ||
         member_qualifiers.is_varying || member_qualifiers.is_in ||
-        member_qualifiers.is_out)
+        member_qualifiers.is_out || member_qualifiers.is_invariant ||
+        member_qualifiers.is_const)
       return FailAt(line, "invalid qualifier on a uniform block member");
     Type member_type;
     if (!ParseTypeSpec(&member_type))
@@ -1007,6 +1376,12 @@ bool Parser::ParseUniformBlock(const Qualifiers& qualifiers, int line) {
         return FailAt(line, "duplicate uniform block instance '" +
                                block.instance_name + "'");
     }
+    if (HasName(global_names_, block.instance_name, nullptr) ||
+        HasName(uniform_names_, block.instance_name, nullptr) ||
+        HasName(attribute_names_, block.instance_name, nullptr) ||
+        HasName(varying_names_, block.instance_name, nullptr)) {
+      return FailAt(line, "redefinition of '" + block.instance_name + "'");
+    }
     block_instances_.push_back({block.instance_name, block_index});
   } else {
     // Members of an unnamed block live in the global uniform namespace.
@@ -1030,13 +1405,21 @@ StmtPtr Parser::ParseDeclarationStatement() {
   if (!ParseQualifiers(&qualifiers))
     return nullptr;
   if (qualifiers.is_uniform || qualifiers.is_attribute ||
-      qualifiers.is_varying || qualifiers.is_in || qualifiers.is_out) {
+      qualifiers.is_varying || qualifiers.is_in || qualifiers.is_out ||
+      qualifiers.is_inout) {
     Fail("uniform/attribute/varying declarations must be global");
     return nullptr;
   }
   if (CheckIdent("struct")) {
-    Fail("local struct definitions are not supported");
-    return nullptr;
+    // GLSL ES 3.00 allows structure definitions in a local declaration.
+    // Register the type and consume the trailing semicolon; the instance
+    // declaration, if any, is parsed as the following statement.
+    StmtPtr statement(new Statement());
+    statement->kind = Statement::Kind::kBlock;
+    statement->line = current_.line;
+    if (!ParseStructDefinition())
+      return nullptr;
+    return statement;
   }
   Type type;
   if (!ParseTypeSpec(&type))
@@ -1052,6 +1435,10 @@ StmtPtr Parser::ParseDeclarationStatement() {
       return nullptr;
     }
     const std::string name = current_.text;
+    if (name == "gl_FragDepth") {
+      Fail("gl_FragDepth cannot be redeclared");
+      return nullptr;
+    }
     Advance();
     Type declaration_type = type;
     if (!ParseArraySuffix(&declaration_type))
@@ -1062,8 +1449,41 @@ StmtPtr Parser::ParseDeclarationStatement() {
       if (!initializer)
         return nullptr;
     }
-    if (!AddLocalVariable(name, declaration_type, std::move(initializer), line,
-                          &statement)) {
+    if (declaration_type.is_array() && declaration_type.array_size() == 0 &&
+        initializer && initializer->type.is_array())
+      declaration_type = initializer->type;
+    if (declaration_type.is_array() && declaration_type.array_size() == 0 &&
+        !initializer) {
+      Fail("array size must be specified");
+      return nullptr;
+    }
+    if (initializer && initializer->type != declaration_type) {
+      Fail("implicit conversion in variable initializer");
+      return nullptr;
+    }
+    if (qualifiers.is_const) {
+      if (!initializer) {
+        Fail("const variable requires an initializer");
+        return nullptr;
+      }
+      if (initializer->type != declaration_type) {
+        Fail("implicit conversion in constant initializer");
+        return nullptr;
+      }
+      if (!IsConstantExpr(initializer)) {
+        Fail("initializer is not a constant expression");
+        return nullptr;
+      }
+    }
+    if (qualifiers.is_const && declaration_type == Type::Int() && initializer) {
+      int constant = 0;
+      if (EvalConstIntExpr(initializer, &constant))
+        const_ints_.push_back({name, constant});
+    }
+    if (declaration_type.is_array() && declaration_type.array_size() > 0)
+      array_sizes_.push_back({name, declaration_type.array_size()});
+    if (!AddLocalVariable(name, declaration_type, std::move(initializer),
+                          qualifiers.is_const, line, &statement)) {
       return nullptr;
     }
     if (!AcceptPunct(","))
@@ -1080,10 +1500,12 @@ bool Parser::IsDeclarationStart() const {
   const std::string& text = current_.text;
   const bool keyword = IsKnownTypeName(text) || IsQualifierKeyword(text) ||
                        text == "struct" || text == "precision";
-  // A type name followed by '(' is a constructor call used as an expression
-  // statement, not a declaration.
-  return keyword && const_cast<Parser*>(this)->Peek().kind ==
-                       Token::Kind::kIdentifier;
+  // A declaration starts with a type name followed by an identifier, or by
+  // an array suffix (`float[4] x`).  A type name followed by '(' is a
+  // constructor call used as an expression statement, not a declaration.
+  const Token& next = const_cast<Parser*>(this)->Peek();
+  return keyword && (next.kind == Token::Kind::kIdentifier ||
+                     next.IsPunct("["));
 }
 
 StmtPtr Parser::ParseBlock() {
@@ -1114,9 +1536,13 @@ StmtPtr Parser::ParseIf() {
   Advance();  // if
   if (!ExpectPunct("("))
     return nullptr;
-  ExprPtr condition = ParseExpression(false);
+  ExprPtr condition = ParseExpression(true);
   if (!condition || !ExpectPunct(")"))
     return nullptr;
+  if (condition->type.base() != BaseType::kBool) {
+    Fail("if condition must have type bool");
+    return nullptr;
+  }
   StmtPtr condition_statement(new Statement());
   condition_statement->kind = Statement::Kind::kExpression;
   condition_statement->line = statement->line;
@@ -1140,6 +1566,7 @@ StmtPtr Parser::ParseFor() {
   Advance();  // for
   if (!ExpectPunct("("))
     return nullptr;
+  scopes_.emplace_back();
 
   if (CheckPunct(";")) {
     Advance();
@@ -1160,9 +1587,13 @@ StmtPtr Parser::ParseFor() {
   }
 
   if (!CheckPunct(";")) {
-    ExprPtr condition = ParseExpression(false);
+    ExprPtr condition = ParseExpression(true);
     if (!condition)
       return nullptr;
+    if (condition->type.base() != BaseType::kBool) {
+      Fail("for condition must have type bool");
+      return nullptr;
+    }
     StmtPtr condition_statement(new Statement());
     condition_statement->kind = Statement::Kind::kExpression;
     condition_statement->line = statement->line;
@@ -1188,6 +1619,7 @@ StmtPtr Parser::ParseFor() {
   ++loop_depth_;
   statement->then_branch = ParseStatement();
   --loop_depth_;
+  scopes_.pop_back();
   if (!statement->then_branch)
     return nullptr;
   return statement;
@@ -1200,9 +1632,13 @@ StmtPtr Parser::ParseWhile() {
   Advance();  // while
   if (!ExpectPunct("("))
     return nullptr;
-  ExprPtr condition = ParseExpression(false);
+  ExprPtr condition = ParseExpression(true);
   if (!condition || !ExpectPunct(")"))
     return nullptr;
+  if (condition->type.base() != BaseType::kBool) {
+    Fail("while condition must have type bool");
+    return nullptr;
+  }
   StmtPtr condition_statement(new Statement());
   condition_statement->kind = Statement::Kind::kExpression;
   condition_statement->line = statement->line;
@@ -1232,9 +1668,13 @@ StmtPtr Parser::ParseDoWhile() {
   }
   if (!ExpectPunct("("))
     return nullptr;
-  ExprPtr condition = ParseExpression(false);
+  ExprPtr condition = ParseExpression(true);
   if (!condition || !ExpectPunct(")"))
     return nullptr;
+  if (condition->type.base() != BaseType::kBool) {
+    Fail("do-while condition must have type bool");
+    return nullptr;
+  }
   StmtPtr condition_statement(new Statement());
   condition_statement->kind = Statement::Kind::kExpression;
   condition_statement->line = statement->line;
@@ -1245,15 +1685,106 @@ StmtPtr Parser::ParseDoWhile() {
   return statement;
 }
 
+StmtPtr Parser::ParseSwitch() {
+  StmtPtr statement(new Statement());
+  statement->kind = Statement::Kind::kSwitch;
+  statement->line = current_.line;
+  Advance();  // switch
+  if (!ExpectPunct("("))
+    return nullptr;
+  ExprPtr selector = ParseExpression(true);
+  if (!selector || !ExpectPunct(")"))
+    return nullptr;
+  if (selector->type.base() != BaseType::kInt &&
+      selector->type.base() != BaseType::kUInt) {
+    Fail("switch selector must have type int or uint");
+    return nullptr;
+  }
+  if (!ExpectPunct("{"))
+    return nullptr;
+  scopes_.emplace_back();
+  ++switch_depth_;
+  if (ast_)
+    ast_->uses_switch = true;
+
+  Statement::SwitchCase* current_case = nullptr;
+  while (!CheckPunct("}")) {
+    if (current_.kind == Token::Kind::kEnd) {
+      Fail("unexpected end of shader inside switch");
+      return nullptr;
+    }
+    if (CheckIdent("case")) {
+      const int line = current_.line;
+      Advance();
+      ExprPtr label = ParseExpression(false);
+      if (!label || !ExpectPunct(":"))
+        return nullptr;
+      int new_value = 0;
+      if (!EvalConstIntExpr(label, &new_value)) {
+        FailAt(line, "case label must be an integral constant expression");
+        return nullptr;
+      }
+      for (const Statement::SwitchCase& existing : statement->cases) {
+        int existing_value = 0;
+        if (existing.label &&
+            EvalConstIntExpr(existing.label, &existing_value) &&
+            existing_value == new_value) {
+          FailAt(line, "duplicate case label");
+          return nullptr;
+        }
+      }
+      statement->cases.push_back(Statement::SwitchCase{std::move(label), {}});
+      current_case = &statement->cases.back();
+      continue;
+    }
+    if (CheckIdent("default")) {
+      const int line = current_.line;
+      Advance();
+      if (!ExpectPunct(":"))
+        return nullptr;
+      for (const Statement::SwitchCase& existing : statement->cases) {
+        if (!existing.label) {
+          FailAt(line, "duplicate default label");
+          return nullptr;
+        }
+      }
+      statement->cases.push_back(Statement::SwitchCase{nullptr, {}});
+      current_case = &statement->cases.back();
+      continue;
+    }
+    if (!current_case) {
+      Fail("statement outside a case label");
+      return nullptr;
+    }
+    StmtPtr child = ParseStatement();
+    if (!child)
+      return nullptr;
+    current_case->statements.push_back(std::move(child));
+  }
+  Advance();  // '}'
+  scopes_.pop_back();
+  --switch_depth_;
+  statement->expression = std::move(selector);
+  return statement;
+}
+
 StmtPtr Parser::ParseReturn() {
   StmtPtr statement(new Statement());
   statement->kind = Statement::Kind::kReturn;
   statement->line = current_.line;
   Advance();  // return
-  if (!CheckPunct(";")) {
+  const bool returns_value = !CheckPunct(";");
+  if (returns_value) {
+    if (current_return_type_.is_void()) {
+      Fail("a void function cannot return a value");
+      return nullptr;
+    }
     statement->expression = ParseExpression(true);
     if (!statement->expression)
       return nullptr;
+  } else if (!current_return_type_.is_void()) {
+    Fail("a non-void function must return a value");
+    return nullptr;
   }
   if (!ExpectPunct(";"))
     return nullptr;
@@ -1290,6 +1821,8 @@ StmtPtr Parser::ParseStatement() {
     return ParseBlock();
   if (CheckIdent("if"))
     return ParseIf();
+  if (CheckIdent("switch"))
+    return ParseSwitch();
   if (CheckIdent("for"))
     return ParseFor();
   if (CheckIdent("while"))
@@ -1299,7 +1832,7 @@ StmtPtr Parser::ParseStatement() {
   if (CheckIdent("return"))
     return ParseReturn();
   if (CheckIdent("break")) {
-    if (loop_depth_ == 0) {
+    if (loop_depth_ == 0 && switch_depth_ == 0) {
       Fail("'break' outside a loop");
       return nullptr;
     }
@@ -1329,10 +1862,6 @@ StmtPtr Parser::ParseStatement() {
     empty->kind = Statement::Kind::kBlock;
     empty->line = current_.line;
     return empty;
-  }
-  if (CheckIdent("struct")) {
-    Fail("struct is not supported");
-    return nullptr;
   }
   if (IsDeclarationStart())
     return ParseDeclarationStatement();
@@ -1368,6 +1897,10 @@ ExprPtr Parser::ParseAssignment() {
           left->kind != Expr::Kind::kField &&
           left->kind != Expr::Kind::kIndex) {
         Fail("left side of an assignment is not assignable");
+        return nullptr;
+      }
+      if (left->is_const) {
+        Fail("cannot assign to a const variable");
         return nullptr;
       }
       if (left->kind == Expr::Kind::kVariable &&
@@ -1501,6 +2034,7 @@ ExprPtr Parser::ParsePostfix() {
         indexed->type = base.Element();
       else
         indexed->type = Type::Float();
+      indexed->is_const = expression->is_const;
       indexed->base = std::move(expression);
       indexed->args.push_back(std::move(index));
       expression = std::move(indexed);
@@ -1522,6 +2056,8 @@ ExprPtr Parser::ParsePostfix() {
         ExprPtr length = MakeExpr(Expr::Kind::kLiteral, line);
         length->type = Type::Int();
         length->literal = static_cast<float>(expression->type.array_size());
+        length->integer_literal = static_cast<uint64_t>(
+            expression->type.array_size());
         expression = std::move(length);
         continue;
       }
@@ -1568,6 +2104,20 @@ ExprPtr Parser::ParsePostfix() {
         member->text = field;
         member->type = found->type;
         member->field_offset = found->component_offset;
+        member->is_const = expression->is_const;
+        member->base = std::move(expression);
+        expression = std::move(member);
+        continue;
+      }
+      if (expression->builtin == BuiltinId::kDepthRange) {
+        ExprPtr member = MakeExpr(Expr::Kind::kField, line);
+        member->text = field == "near" ? "x" : field == "far" ? "y"
+                       : field == "diff" ? "z" : "";
+        if (member->text.empty()) {
+          Fail("unknown gl_DepthRange member '" + field + "'");
+          return nullptr;
+        }
+        member->type = Type::Float();
         member->base = std::move(expression);
         expression = std::move(member);
         continue;
@@ -1644,6 +2194,37 @@ ExprPtr Parser::ParseConstructor(const Type& type, int line) {
     FailAt(line, "a constructor requires an argument");
     return nullptr;
   }
+  if (call->type.is_vector()) {
+    const bool scalar_splat =
+        call->args.size() == 1 && call->args[0]->type.is_scalar();
+    const bool truncating_vector =
+        call->args.size() == 1 && call->args[0]->type.is_vector() &&
+        call->args[0]->type.base() == call->type.base() &&
+        call->args[0]->type.components() >= call->type.components();
+    const bool truncating_matrix =
+        call->args.size() == 1 && call->args[0]->type.is_matrix() &&
+        call->args[0]->type.base() == call->type.base() &&
+        call->args[0]->type.components() >= call->type.components();
+    if (!scalar_splat && !truncating_vector && !truncating_matrix) {
+      int components = 0;
+      for (const ExprPtr& argument : call->args)
+        components += argument->type.is_scalar() ? 1
+                                                 : argument->type.components();
+      if (components != call->type.components()) {
+        FailAt(line, "constructor component count mismatch");
+        return nullptr;
+      }
+    }
+  }
+  if (call->type.is_array() && call->type.array_size() == 0) {
+    if (call->args.size() != 1 &&
+        call->args[0]->type != call->type.array_element()) {
+      FailAt(line, "array constructor element type mismatch");
+      return nullptr;
+    }
+    call->type = Type::Array(call->type.array_element(),
+                             static_cast<int>(call->args.size()));
+  }
   return call;
 }
 
@@ -1683,16 +2264,8 @@ ExprPtr Parser::ParseCall(const std::string& name, int line) {
     return call;
   }
 
-  int function_index = -1;
-  if (!HasName(function_names_, name, &function_index)) {
-    FailAt(line, "unknown function '" + name + "'");
-    return nullptr;
-  }
-  const Function& callee = ast_->functions[function_index];
   ExprPtr call = MakeExpr(Expr::Kind::kCall, line);
-  call->function_index = function_index;
   call->text = name;
-  call->type = callee.return_type;
   if (!ExpectPunct("("))
     return nullptr;
   if (!CheckPunct(")")) {
@@ -1707,11 +2280,48 @@ ExprPtr Parser::ParseCall(const std::string& name, int line) {
   }
   if (!ExpectPunct(")"))
     return nullptr;
-  if (call->args.size() != callee.parameters.size()) {
-    FailAt(line, "function '" + name + "' expects " +
-                     std::to_string(callee.parameters.size()) + " argument(s)");
+
+  int function_index = -1;
+  for (size_t i = 0; i < ast_->functions.size(); ++i) {
+    const Function& candidate = ast_->functions[i];
+    if (candidate.name != name ||
+        candidate.parameters.size() != call->args.size()) {
+      continue;
+    }
+    bool matches = true;
+    for (size_t p = 0; p < call->args.size(); ++p) {
+      if (!(candidate.parameters[p].type == call->args[p]->type)) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      function_index = static_cast<int>(i);
+      break;
+    }
+  }
+  if (function_index < 0) {
+    FailAt(line, "no matching overload for '" + name + "'");
     return nullptr;
   }
+  const Function& callee = ast_->functions[function_index];
+  for (size_t i = 0; i < call->args.size(); ++i) {
+    const Expr& argument = *call->args[i];
+    if (callee.parameters[i].parameter_qualifier != 0 &&
+        argument.storage == Storage::kUniform) {
+      FailAt(line, "out and inout arguments must be l-values");
+      return nullptr;
+    }
+    if (callee.parameters[i].parameter_qualifier != 0 &&
+        argument.is_const) {
+      FailAt(line, "out and inout arguments cannot be const");
+      return nullptr;
+    }
+  }
+  call->function_index = function_index;
+  call->type = callee.return_type;
+  if (!current_function_.empty())
+    calls_.push_back({current_function_, callee.name});
   return call;
 }
 
@@ -1722,8 +2332,15 @@ ExprPtr Parser::ParseVariable(const std::string& name, int line) {
       if (entry.first != name)
         continue;
       ExprPtr expr = MakeExpr(Expr::Kind::kVariable, line);
+      expr->text = entry.first;
       expr->storage = Storage::kLocal;
       expr->index = entry.second;
+      expr->is_const = entry.second >= 0 &&
+                               entry.second < static_cast<int>(slot_is_const_.size())
+                           ? slot_is_const_[entry.second]
+                           : false;
+      expr->is_parameter = entry.second >= 0 &&
+                           entry.second < current_parameter_count_;
       expr->type = entry.second < static_cast<int>(slot_types_.size())
                        ? slot_types_[entry.second]
                        : Type::Float();
@@ -1746,11 +2363,14 @@ ExprPtr Parser::ParseVariable(const std::string& name, int line) {
   }
   if (HasName(global_names_, name, &index)) {
     ExprPtr expr = MakeExpr(Expr::Kind::kVariable, line);
+    expr->text = name;
     expr->storage = Storage::kGlobal;
     expr->index = index;
+    expr->is_const = false;
     for (const Variable& global : ast_->globals) {
-      if (global.index == index && global.name == name) {
+      if (global.name == name) {
         expr->type = global.type;
+        expr->is_const = global.is_const;
         break;
       }
     }
@@ -1791,6 +2411,28 @@ ExprPtr Parser::ParseVariable(const std::string& name, int line) {
     expr->type = ast_->varyings[index].type;
     return expr;
   }
+  if (name == "gl_DepthRange") {
+    ExprPtr expr = MakeExpr(Expr::Kind::kVariable, line);
+    expr->storage = Storage::kGlobal;
+    expr->builtin = BuiltinId::kDepthRange;
+    expr->index = EnsureBuiltin(BuiltinId::kDepthRange);
+    expr->type = Type::Vec(3);
+    if (getenv("ZGL_DEBUG_DR"))
+      fprintf(stderr, "[dr] parse depth range slot=%d\n", expr->index);
+    if (ast_)
+      ast_->uses_depth_range = true;
+    return expr;
+  }
+  for (const BuiltinConstantEntry& constant : kBuiltinConstants) {
+    if (name != constant.name)
+      continue;
+    ExprPtr literal = MakeExpr(Expr::Kind::kLiteral, line);
+    literal->type = Type::Int();
+    literal->literal = static_cast<float>(constant.value);
+    literal->integer_literal =
+        static_cast<uint64_t>(static_cast<uint32_t>(constant.value));
+    return literal;
+  }
   for (const BuiltinVarEntry& builtin : kBuiltinVars) {
     if (name != builtin.name)
       continue;
@@ -1817,6 +2459,7 @@ ExprPtr Parser::ParsePrimary() {
       current_.kind == Token::Kind::kIntLiteral) {
     ExprPtr literal = MakeExpr(Expr::Kind::kLiteral, line);
     literal->literal = static_cast<float>(current_.number);
+    literal->integer_literal = static_cast<uint64_t>(current_.number);
     if (current_.kind == Token::Kind::kFloatLiteral) {
       literal->type = Type::Float();
     } else {
@@ -1826,7 +2469,7 @@ ExprPtr Parser::ParsePrimary() {
     return literal;
   }
   if (AcceptPunct("(")) {
-    ExprPtr expression = ParseExpression(false);
+    ExprPtr expression = ParseExpression(true);
     if (!expression || !ExpectPunct(")"))
       return nullptr;
     return expression;
@@ -1906,6 +2549,9 @@ int Parser::EnsureBuiltin(BuiltinId id) {
   for (const BuiltinVarEntry& entry : kBuiltinVars) {
     if (entry.id != id)
       continue;
+    if (id == BuiltinId::kDepthRange && getenv("ZGL_DEBUG_DR"))
+      fprintf(stderr, "[dr] ensure idx=%d size=%d entry=%s\n", id_index,
+              (int)ast_->builtin_slots.size(), entry.name);
     Variable variable;
     variable.name = entry.name;
     variable.type = entry.type;
@@ -1979,7 +2625,7 @@ Type Parser::BinaryResultType(Op op, const Type& left, const Type& right) {
     }
     case Op::kMultiply: {
       if (left.is_matrix() && right.is_matrix())
-        return Type::Mat(left.columns(), right.rows());
+        return Type::Mat(right.columns(), left.rows());
       if (left.is_matrix())
         return Type::Vec(left.rows());
       if (right.is_matrix())
@@ -2022,6 +2668,12 @@ Type Parser::BuiltinResultType(BuiltinFunc function,
     case BuiltinFunc::kInverse:
     case BuiltinFunc::kMatrixCompMult:
       return first;
+    case BuiltinFunc::kOuterProduct:
+      if (args.size() != 2) {
+        FailAt(line, "outerProduct() expects two vector arguments");
+        return Type::Float();
+      }
+      return Type::Mat(args[1]->type.rows(), args[0]->type.rows());
     case BuiltinFunc::kLessThan:
     case BuiltinFunc::kLessThanEqual:
     case BuiltinFunc::kGreaterThan:
@@ -2035,6 +2687,19 @@ Type Parser::BuiltinResultType(BuiltinFunc function,
       return Type::Bool();
     case BuiltinFunc::kFloatBitsToUint:
       return Type::UVec(std::max(1, first.rows()));
+    case BuiltinFunc::kFloatBitsToInt:
+      return Type::IVec(std::max(1, first.rows()));
+    case BuiltinFunc::kIsInf:
+    case BuiltinFunc::kIsNan:
+      return Type::BVec(std::max(1, first.rows()));
+    case BuiltinFunc::kPackUnorm2x16:
+    case BuiltinFunc::kPackSnorm2x16:
+    case BuiltinFunc::kPackHalf2x16:
+      return Type::UInt();
+    case BuiltinFunc::kUnpackUnorm2x16:
+    case BuiltinFunc::kUnpackSnorm2x16:
+    case BuiltinFunc::kUnpackHalf2x16:
+      return Type::Vec(2);
     case BuiltinFunc::kUIntBitsToFloat:
     case BuiltinFunc::kIntBitsToFloat:
       return Type::Vec(std::max(1, first.rows()));
@@ -2125,6 +2790,29 @@ std::unique_ptr<ShaderAst> Parser::Parse() {
       FailAt(function.line,
              "function '" + function.name + "' is declared but never defined");
       return nullptr;
+    }
+  }
+  {
+    std::map<std::string, std::vector<std::string>> graph;
+    for (const auto& call : calls_)
+      graph[call.first].push_back(call.second);
+    std::map<std::string, int> state;
+    const auto visit = [&](const auto& self, const std::string& name) -> bool {
+      state[name] = 1;
+      for (const std::string& next : graph[name]) {
+        if (state[next] == 1)
+          return false;
+        if (state[next] == 0 && !self(self, next))
+          return false;
+      }
+      state[name] = 2;
+      return true;
+    };
+    for (const Function& function : ast_->functions) {
+      if (state[function.name] == 0 && !visit(visit, function.name)) {
+        FailAt(function.line, "recursive function call is not allowed");
+        return nullptr;
+      }
     }
   }
   return std::move(ast_);

@@ -50,24 +50,28 @@ extern "C" {
 
 void glGenTransformFeedbacks(GLsizei n, GLuint* ids) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !ids)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!ids)
+    return;
   for (GLsizei i = 0; i < n; ++i)
-    ids[i] = context->transform_feedbacks.Create();
+    ids[i] = context->transform_feedbacks.Generate();
 }
 
 void glDeleteTransformFeedbacks(GLsizei n, const GLuint* ids) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !ids)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!ids)
+    return;
   for (GLsizei i = 0; i < n; ++i) {
     if (ids[i] == 0)
       continue;
@@ -98,7 +102,7 @@ void glBindTransformFeedback(GLenum target, GLuint id) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (id != 0 && !context->transform_feedbacks.Get(id)) {
+  if (id != 0 && !context->transform_feedbacks.GetOrCreateReserved(id)) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -157,8 +161,10 @@ void glEndTransformFeedback(void) {
   if (!context)
     return;
   zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
-  if (!current || !current->active)
+  if (!current || !current->active) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
+  }
   for (int name = 1; name <= context->queries.size(); ++name) {
     const zgl::Query* query =
         context->queries.Get(static_cast<GLuint>(name));
@@ -245,7 +251,12 @@ void glGetTransformFeedbackVarying(GLuint program,
   if (!context)
     return;
   zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program || !object->linked) {
+  if (!object) {
+    context->SetError(context->FindShader(program) ? GL_INVALID_OPERATION
+                                                   : GL_INVALID_VALUE);
+    return;
+  }
+  if (!object->program || !object->linked) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -331,7 +342,7 @@ void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
   }
   zgl::IndexedBufferBinding binding;
   if (buffer != 0) {
-    zgl::Buffer* object = context->buffers.Get(buffer);
+    zgl::Buffer* object = context->buffers.GetOrCreate(buffer);
     if (!object) {
       context->SetError(GL_INVALID_OPERATION);
       return;
@@ -396,6 +407,10 @@ void glBindBufferRange(GLenum target,
     const size_t begin = static_cast<size_t>(offset);
     const size_t length = static_cast<size_t>(size);
     if (length == 0 || begin + length > object->data.size()) {
+      context->SetError(GL_INVALID_VALUE);
+      return;
+    }
+    if (!transform_feedback && (begin % 4) != 0) {
       context->SetError(GL_INVALID_VALUE);
       return;
     }
@@ -704,6 +719,10 @@ void glProgramParameteri(GLuint program, GLenum pname, GLint value) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  if (value != 0 && value != 1) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   object->program_binary_retrievable_hint = value != 0;
 }
 
@@ -867,11 +886,69 @@ void glGetInternalformativ(GLenum target,
                            GLenum pname,
                            GLsizei buffer_size,
                            GLint* params) {
-  (void)target;
-  (void)internal_format;
-  (void)pname;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (buffer_size < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (target != GL_RENDERBUFFER) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (pname != GL_SAMPLES && pname != GL_NUM_SAMPLE_COUNTS) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  switch (internal_format) {
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGB565:
+    case GL_RGBA8:
+    case GL_RGB8:
+    case GL_R8:
+    case GL_RG8:
+    case GL_RGB10_A2:
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGB10_A2UI:
+    case GL_DEPTH_COMPONENT16:
+    case GL_DEPTH_COMPONENT24:
+    case GL_DEPTH_COMPONENT32F:
+    case GL_STENCIL_INDEX8:
+    case GL_DEPTH24_STENCIL8:
+    case GL_DEPTH32F_STENCIL8:
+      break;
+    default:
+      context->SetError(GL_INVALID_ENUM);
+      return;
+  }
   if (params && buffer_size > 0)
-    params[0] = 0;
+    params[0] = pname == GL_SAMPLES ? 4 : 1;
 }
 
 // ---- Debug output --------------------------------------------------------

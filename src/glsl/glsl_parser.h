@@ -62,6 +62,9 @@ class Parser {
   bool LookupType(const std::string& name, Type* type) const;
   bool IsKnownTypeName(const std::string& name) const;
   bool ParseConstantInt(int* value);
+  bool ParseConstAtom(int* value);
+  bool EvalConstIntExpr(const ExprPtr& expr, int* value);
+  bool IsConstantExpr(const ExprPtr& expr) const;
   bool ParseGlobalDeclaration();
   bool ParseUniformBlock(const Qualifiers& qualifiers, int line);
   bool ParseFunction(const std::string& name,
@@ -78,6 +81,7 @@ class Parser {
   bool AddLocalVariable(const std::string& name,
                         const Type& type,
                         ExprPtr initializer,
+                        bool is_const,
                         int line,
                         StmtPtr* statement);
   bool RegisterFunction(Function&& function, bool prototype);
@@ -87,6 +91,7 @@ class Parser {
   StmtPtr ParseBlock();
   StmtPtr ParseIf();
   StmtPtr ParseFor();
+  StmtPtr ParseSwitch();
   StmtPtr ParseWhile();
   StmtPtr ParseDoWhile();
   StmtPtr ParseReturn();
@@ -127,7 +132,12 @@ class Parser {
   int slot_count_ = 0;
   int max_slot_count_ = 0;
   int loop_depth_ = 0;
+  int switch_depth_ = 0;
   bool in_function_ = false;
+  std::string current_function_;
+  Type current_return_type_;
+  std::vector<std::pair<std::string, std::string>> calls_;
+  int current_parameter_count_ = 0;
 
   // Name maps for the translation unit.
   std::vector<std::pair<std::string, int>> global_names_;
@@ -138,6 +148,9 @@ class Parser {
   std::vector<std::pair<std::string, int>> block_instances_;
   std::vector<std::string> block_names_;
   std::vector<std::pair<std::string, Type>> struct_types_;
+  std::vector<std::pair<std::string, int>> const_ints_;
+  std::vector<std::pair<std::string, int>> array_sizes_;
+  std::vector<bool> slot_is_const_;
   int next_attribute_location_ = 0;
 };
 

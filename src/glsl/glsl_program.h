@@ -91,6 +91,24 @@ class TextureSampler {
                              float layer,
                              float lod_bias,
                              float out[4]) = 0;
+  virtual void Sample2DShadow(int unit,
+                              float u,
+                              float v,
+                              float ref,
+                              float lod_bias,
+                              float out[4]) = 0;
+  virtual void Sample2DArrayShadow(int unit,
+                                   float u,
+                                   float v,
+                                   float layer,
+                                   float ref,
+                                   float lod_bias,
+                                   float out[4]) = 0;
+  virtual void SampleCubeShadow(int unit,
+                                const float direction[3],
+                                float ref,
+                                float lod_bias,
+                                float out[4]) = 0;
   virtual void Size(int unit, int out[3]) = 0;
 };
 
@@ -101,6 +119,7 @@ struct VertexInput {
   const uint32_t* attribute_int = nullptr;
   int vertex_id = 0;
   int instance_id = 0;
+  float depth_range[3] = {0.0f, 1.0f, 1.0f};
   const Value* uniforms = nullptr;
   const int* uniform_map = nullptr;  // Stage uniform index -> program index.
   TextureSampler* sampler = nullptr;
@@ -108,7 +127,10 @@ struct VertexInput {
 
 struct FragmentInput {
   const float* varyings = nullptr;  // Interpolated fragment-stage varyings.
+  const float* varyings_dx = nullptr;  // d(varying)/dx in framebuffer pixels.
+  const float* varyings_dy = nullptr;  // d(varying)/dy in framebuffer pixels.
   float frag_coord[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  float depth_range[3] = {0.0f, 1.0f, 1.0f};
   bool front_facing = true;
   float point_coord[2] = {0.0f, 0.0f};
   int sample_id = 0;

@@ -80,6 +80,25 @@ void WriteSlice(Value* out, int offset, const Value& value, int count) {
   }
 }
 
+bool HasSideEffects(const Expr& expr) {
+  if (expr.kind == Expr::Kind::kAssign)
+    return true;
+  if (expr.kind == Expr::Kind::kUnary &&
+      (expr.op == Op::kPreIncrement || expr.op == Op::kPreDecrement ||
+       expr.op == Op::kPostIncrement || expr.op == Op::kPostDecrement))
+    return true;
+  if (expr.kind == Expr::Kind::kCall && !expr.is_constructor &&
+      expr.builtin_func == BuiltinFunc::kNone)
+    return true;
+  if (expr.base && HasSideEffects(*expr.base))
+    return true;
+  for (const ExprPtr& arg : expr.args) {
+    if (arg && HasSideEffects(*arg))
+      return true;
+  }
+  return false;
+}
+
 template <typename F>
 Value MapScalars(const Value& a, const Type& type, F fn) {
   Value out(type);
@@ -171,33 +190,35 @@ Value RowMajorToMat(const float* in, int rows, int columns) {
   return out;
 }
 
+float Det3(float a00, float a01, float a02, float a10, float a11,
+           float a12, float a20, float a21, float a22) {
+  return a00 * (a11 * a22 - a12 * a21) +
+         a01 * (a12 * a20 - a10 * a22) +
+         a02 * (a10 * a21 - a11 * a20);
+}
+
 float Determinant(const Value& m) {
-  int n = m.type.rows();
+  const int n = m.type.rows();
   if (n < 2 || n > 4 || m.type.columns() != n)
     return 0.0f;
-  float a[16];
-  MatToRowMajor(m, n, n, a);
-  float det = 1.0f;
-  for (int i = 0; i < n; ++i) {
-    int pivot = i;
-    for (int r = i + 1; r < n; ++r) {
-      if (std::fabs(a[r * n + i]) > std::fabs(a[pivot * n + i]))
-        pivot = r;
-    }
-    if (std::fabs(a[pivot * n + i]) < 1e-12f)
-      return 0.0f;
-    if (pivot != i) {
-      for (int c = 0; c < n; ++c)
-        std::swap(a[i * n + c], a[pivot * n + c]);
-      det = -det;
-    }
-    const float diagonal = a[i * n + i];
-    det *= diagonal;
-    for (int r = i + 1; r < n; ++r) {
-      const float factor = a[r * n + i] / diagonal;
-      for (int c = i; c < n; ++c)
-        a[r * n + c] -= factor * a[i * n + c];
-    }
+  const float* d = m.data;
+  if (n == 2) {
+    return d[0] * d[3] - d[2] * d[1];
+  }
+  if (n == 3) {
+    return Det3(d[0], d[3], d[6], d[1], d[4], d[7], d[2], d[5], d[8]);
+  }
+  float det = 0.0f;
+  for (int r = 0; r < 4; ++r) {
+    float minor[9];
+    int index = 0;
+    for (int c = 1; c < 4; ++c)
+      for (int rr = 0; rr < 4; ++rr)
+        if (rr != r)
+          minor[index++] = d[c * 4 + rr];
+    const float term = Det3(minor[0], minor[1], minor[2], minor[3], minor[4],
+                            minor[5], minor[6], minor[7], minor[8]);
+    det += (r & 1 ? -1.0f : 1.0f) * d[r] * term;
   }
   return det;
 }
@@ -206,18 +227,21 @@ bool Invert(const Value& m, Value* out) {
   const int n = m.type.rows();
   if (n < 2 || n > 4 || m.type.columns() != n)
     return false;
-  float a[16];
-  float inv[16] = {0.0f};
-  MatToRowMajor(m, n, n, a);
+  double a[16];
+  double inv[16] = {};
+  float row_major[16];
+  MatToRowMajor(m, n, n, row_major);
+  for (int i = 0; i < 16; ++i)
+    a[i] = row_major[i];
   for (int i = 0; i < n; ++i)
-    inv[i * n + i] = 1.0f;
+    inv[i * n + i] = 1.0;
   for (int i = 0; i < n; ++i) {
     int pivot = i;
     for (int r = i + 1; r < n; ++r) {
       if (std::fabs(a[r * n + i]) > std::fabs(a[pivot * n + i]))
         pivot = r;
     }
-    if (std::fabs(a[pivot * n + i]) < 1e-12f)
+    if (std::fabs(a[pivot * n + i]) < 1e-30)
       return false;
     if (pivot != i) {
       for (int c = 0; c < n; ++c) {
@@ -225,7 +249,7 @@ bool Invert(const Value& m, Value* out) {
         std::swap(inv[i * n + c], inv[pivot * n + c]);
       }
     }
-    const float diagonal = a[i * n + i];
+    const double diagonal = a[i * n + i];
     for (int c = 0; c < n; ++c) {
       a[i * n + c] /= diagonal;
       inv[i * n + c] /= diagonal;
@@ -242,7 +266,12 @@ bool Invert(const Value& m, Value* out) {
       }
     }
   }
-  *out = RowMajorToMat(inv, n, n);
+  for (int i = 0; i < 16; ++i)
+    row_major[i] = static_cast<float>(inv[i]);
+  *out = RowMajorToMat(row_major, n, n);
+  for (int i = 0; i < out->size(); ++i)
+    if (std::isnan(out->data[i]))
+      out->data[i] = 0.0f;
   return true;
 }
 
@@ -272,6 +301,10 @@ class Evaluator {
     varyings_out_ = out;
   }
   void set_sampler(TextureSampler* sampler) { sampler_ = sampler; }
+  void set_varying_derivatives(const float* dx, const float* dy) {
+    varyings_dx_ = dx;
+    varyings_dy_ = dy;
+  }
   void set_fragment_coord(const float coord[4]) {
     fragment_coord_[0] = coord[0];
     fragment_coord_[1] = coord[1];
@@ -279,6 +312,14 @@ class Evaluator {
     fragment_coord_[3] = coord[3];
   }
   void set_front_facing(bool front) { front_facing_ = front; }
+  void set_depth_range(float near_value, float far_value) {
+    depth_range_[0] = near_value;
+    depth_range_[1] = far_value;
+    depth_range_[2] = far_value - near_value;
+    if (getenv("ZGL_DEBUG_DR"))
+      fprintf(stderr, "[dr] set near=%.2f far=%.2f diff=%.2f\n", near_value,
+              far_value, depth_range_[2]);
+  }
   void set_point_coord(const float coord[2]) {
     point_coord_[0] = coord[0];
     point_coord_[1] = coord[1];
@@ -327,10 +368,13 @@ class Evaluator {
   Value EvalBinary(const Expr& expr);
   Value EvalUnary(const Expr& expr);
   Value EvalAssignment(const Expr& expr);
-  Value CallUserFunction(int function_index, const std::vector<Value>& args);
+  Value CallUserFunction(int function_index,
+                         const std::vector<Value>& args,
+                         std::vector<Value>* out_values = nullptr);
   bool CallFunction(const Function& function,
                     const std::vector<Value>& args,
-                    Value* result);
+                    Value* result,
+                    std::vector<Value>* out_values = nullptr);
 
   Value BinaryOp(Op op,
                  const Value& left,
@@ -356,14 +400,20 @@ class Evaluator {
   int instance_id_ = 0;
   const float* varyings_in_ = nullptr;
   float* varyings_out_ = nullptr;
+  const float* varyings_dx_ = nullptr;
+  const float* varyings_dy_ = nullptr;
   TextureSampler* sampler_ = nullptr;
   float fragment_coord_[4] = {0.0f, 0.0f, 0.0f, 1.0f};
   int sample_id_ = 0;
   uint32_t sample_mask_ = 0xFFFFFFFFu;
   bool front_facing_ = true;
+  float depth_range_[3] = {0.0f, 1.0f, 1.0f};
   float point_coord_[2] = {0.0f, 0.0f};
 
   std::vector<Value> locals_;
+  std::vector<Value> neighbor_x_;
+  std::vector<Value> neighbor_y_;
+  int neighbor_mode_ = 0;
   Value return_value_;
   bool returned_ = false;
   bool broke_ = false;
@@ -387,9 +437,15 @@ bool Evaluator::BudgetExceeded() {
 
 int Evaluator::BuiltinSlot(BuiltinId id) const {
   const int index = static_cast<int>(id);
-  if (index < 0 || index >= static_cast<int>(ast_.builtin_slots.size()))
-    return -1;
-  return ast_.builtin_slots[index];
+  if (index >= 0 && index < static_cast<int>(ast_.builtin_slots.size()) &&
+      ast_.builtin_slots[index] >= 0) {
+    return ast_.builtin_slots[index];
+  }
+  for (const Variable& variable : ast_.globals) {
+    if (variable.builtin == id)
+      return variable.index;
+  }
+  return -1;
 }
 
 void Evaluator::StoreBuiltin(BuiltinId id, const Value& value) {
@@ -400,6 +456,11 @@ void Evaluator::StoreBuiltin(BuiltinId id, const Value& value) {
 }
 
 void Evaluator::PrepareBuiltins() {
+  Value depth_range(Type::Vec(3));
+  depth_range.data[0] = depth_range_[0];
+  depth_range.data[1] = depth_range_[1];
+  depth_range.data[2] = depth_range_[2];
+  StoreBuiltin(BuiltinId::kDepthRange, depth_range);
   if (ast_.stage == Stage::kVertex) {
     StoreBuiltin(BuiltinId::kVertexId, MakeInt(vertex_id_));
     StoreBuiltin(BuiltinId::kInstanceId, MakeInt(instance_id_));
@@ -410,6 +471,12 @@ void Evaluator::PrepareBuiltins() {
     coord.data[i] = fragment_coord_[i];
   StoreBuiltin(BuiltinId::kFragCoord, coord);
   StoreBuiltin(BuiltinId::kFrontFacing, MakeBool(front_facing_));
+  if (getenv("ZGL_DEBUG_DR"))
+    fprintf(stderr, "[dr] prepare stage=%d slot=%d slots=%d/%d value=%.2f %.2f %.2f\n",
+            (int)ast_.stage, BuiltinSlot(BuiltinId::kDepthRange),
+            (int)ast_.builtin_slots.size(), (int)BuiltinId::kDepthRange,
+            depth_range.data[0], depth_range.data[1], depth_range.data[2]);
+  StoreBuiltin(BuiltinId::kDepthRange, depth_range);
   Value point(Type::Vec(2));
   point.data[0] = point_coord_[0];
   point.data[1] = point_coord_[1];
@@ -433,7 +500,8 @@ bool Evaluator::RunMain() {
 
 bool Evaluator::CallFunction(const Function& function,
                              const std::vector<Value>& args,
-                             Value* result) {
+                             Value* result,
+                             std::vector<Value>* out_values) {
   if (call_depth_ >= kMaxCallDepth) {
     Fail("call depth exceeded in '" + function.name + "'");
     return false;
@@ -451,8 +519,13 @@ bool Evaluator::CallFunction(const Function& function,
     return false;
   }
   locals_.resize(needed);
-  for (size_t i = base; i < locals_.size(); ++i)
+  neighbor_x_.resize(needed);
+  neighbor_y_.resize(needed);
+  for (size_t i = base; i < locals_.size(); ++i) {
     locals_[i] = Value();
+    neighbor_x_[i] = Value();
+    neighbor_y_[i] = Value();
+  }
   for (size_t i = 0; i < args.size(); ++i) {
     locals_[base + i] = Convert(args[i], function.parameters[i].type);
   }
@@ -470,6 +543,60 @@ bool Evaluator::CallFunction(const Function& function,
   ExecBody(function.body);
 
   const Value returned_value = return_value_;
+  if (getenv("ZGL_DEBUG_INOUT") && function.name == "test") {
+    for (size_t i = 0; i < function.parameters.size(); ++i)
+      fprintf(stderr, "[inout] test-p%zu = %.1f %.1f %.1f %.1f\n", i,
+              locals_[base + i].Data()[0], locals_[base + i].Data()[1],
+              locals_[base + i].Data()[2], locals_[base + i].Data()[3]);
+  }
+  if (getenv("ZGL_DEBUG_INOUT") && function.name == "test") {
+    fprintf(stderr, "[inout] test-ret=%.1f type=%s\n", returned_value.Data()[0],
+            returned_value.type.Name().c_str());
+  }
+  if (getenv("ZGL_DEBUG_INOUT") && function.name == "get") {
+    fprintf(stderr, "[inout] get-ret=%.1f %.1f %.1f %.1f\n",
+            returned_value.Data()[0], returned_value.Data()[1],
+            returned_value.Data()[2], returned_value.Data()[3]);
+  }
+  if (getenv("ZGL_DEBUG_INOUT") && function.name == "set") {
+    for (size_t i = 0; i < function.parameters.size(); ++i)
+      fprintf(stderr, "[inout] set-p%zu type=%s vals=%.1f %.1f %.1f %.1f\n", i,
+              function.parameters[i].type.Name().c_str(),
+              locals_[base + i].Data()[0], locals_[base + i].Data()[1],
+              locals_[base + i].Data()[2], locals_[base + i].Data()[3]);
+  }
+  if (getenv("ZGL_DEBUG_INOUT") && function.name == "func") {
+    for (size_t i = 0; i < args.size(); ++i)
+      fprintf(stderr, "[inout] arg%zu = %.1f %.1f %.1f %.1f\n", i,
+              args[i].Data()[0], args[i].Data()[1], args[i].Data()[2],
+              args[i].Data()[3]);
+  }
+  if (getenv("ZGL_DEBUG_INOUT") && (function.name == "func" ||
+                                     function.name == "isEqual")) {
+    for (size_t i = 0; i < function.parameters.size(); ++i)
+      fprintf(stderr, "[inout] %s p%zu q=%d vals=%.1f %.1f %.1f %.1f\n",
+              function.name.c_str(), i,
+              function.parameters[i].parameter_qualifier,
+              locals_[base + i].Data()[0], locals_[base + i].Data()[1],
+              locals_[base + i].Data()[2], locals_[base + i].Data()[3]);
+  }
+  if (getenv("ZGL_DEBUG_INOUT"))
+    fprintf(stderr, "[inout] fn=%s ret=%.2f type=%s\n", function.name.c_str(),
+            returned_value.Data()[0], returned_value.type.Name().c_str());
+  if (getenv("ZGL_DEBUG_INOUT"))
+    fprintf(stderr, "[inout] fn=%s args=%zu out=%d first=%.2f\n",
+            function.name.c_str(), args.size(), out_values ? 1 : 0,
+            args.empty() ? 0.0f : args[0].Data()[0]);
+  if (out_values) {
+    out_values->clear();
+    for (size_t i = 0; i < function.parameters.size(); ++i) {
+      out_values->push_back(locals_[base + i]);
+      if (getenv("ZGL_DEBUG_INOUT"))
+        fprintf(stderr, "[inout]   p%zu q=%d val0=%.2f\n", i,
+                function.parameters[i].parameter_qualifier,
+                locals_[base + i].Data()[0]);
+    }
+  }
   returned_ = saved_returned;
   broke_ = saved_broke;
   continued_ = saved_continued;
@@ -517,6 +644,26 @@ void Evaluator::Exec(const Statement& statement) {
         variable.index = declarator.variable.index;
         variable.type = declarator.variable.type;
         WriteVariable(variable, value);
+        const int slot = local_base_ + declarator.variable.index;
+        if (slot >= 0 && slot < static_cast<int>(neighbor_x_.size())) {
+          neighbor_x_[slot] = value;
+          neighbor_y_[slot] = value;
+          if (declarator.initializer &&
+              !HasSideEffects(*declarator.initializer)) {
+            const int saved_mode = neighbor_mode_;
+            const float* saved_varyings = varyings_in_;
+            neighbor_mode_ = 1;
+            varyings_in_ = varyings_dx_;
+            neighbor_x_[slot] =
+                Convert(Eval(*declarator.initializer), declarator.variable.type);
+            neighbor_mode_ = 2;
+            varyings_in_ = varyings_dy_;
+            neighbor_y_[slot] =
+                Convert(Eval(*declarator.initializer), declarator.variable.type);
+            neighbor_mode_ = saved_mode;
+            varyings_in_ = saved_varyings;
+          }
+        }
       }
       return;
     }
@@ -598,6 +745,40 @@ void Evaluator::Exec(const Statement& statement) {
           return;
       }
     }
+    case Statement::Kind::kSwitch: {
+      const Value selector = Eval(*statement.expression);
+      const uint32_t key = selector.IntData()[0];
+      int start = -1;
+      int default_index = -1;
+      for (size_t i = 0; i < statement.cases.size(); ++i) {
+        const Statement::SwitchCase& entry = statement.cases[i];
+        if (!entry.label) {
+          default_index = static_cast<int>(i);
+          continue;
+        }
+        const Value label = Eval(*entry.label);
+        if (label.IntData()[0] == key) {
+          start = static_cast<int>(i);
+          break;
+        }
+      }
+      if (start < 0)
+        start = default_index;
+      if (start >= 0) {
+        for (size_t i = static_cast<size_t>(start); i < statement.cases.size();
+             ++i) {
+          for (const StmtPtr& child : statement.cases[i].statements) {
+            Exec(*child);
+            if (returned_ || broke_ || continued_ || discarded_ || HasError())
+              break;
+          }
+          if (returned_ || broke_ || continued_ || discarded_ || HasError())
+            break;
+        }
+      }
+      broke_ = false;
+      return;
+    }
     case Statement::Kind::kReturn:
       if (statement.expression)
         return_value_ = Eval(*statement.expression);
@@ -618,14 +799,25 @@ void Evaluator::Exec(const Statement& statement) {
 
 Value Evaluator::ReadVariable(const Expr& expr) {
   switch (expr.storage) {
-    case Storage::kLocal:
-      if (expr.index >= 0 && expr.index < static_cast<int>(locals_.size()))
-        return Convert(locals_[local_base_ + expr.index], expr.type);
-      return Value(expr.type);
+    case Storage::kLocal: {
+      const int slot = local_base_ + expr.index;
+      if (expr.index < 0 || slot >= static_cast<int>(locals_.size()))
+        return Value(expr.type);
+      if (neighbor_mode_ == 1 && slot < static_cast<int>(neighbor_x_.size()))
+        return Convert(neighbor_x_[slot], expr.type);
+      if (neighbor_mode_ == 2 && slot < static_cast<int>(neighbor_y_.size()))
+        return Convert(neighbor_y_[slot], expr.type);
+      return Convert(locals_[slot], expr.type);
+    }
     case Storage::kGlobal:
       if (globals_ && expr.index >= 0 &&
-          expr.index < static_cast<int>(globals_->size()))
+          expr.index < static_cast<int>(globals_->size())) {
+        if (getenv("ZGL_DEBUG_IDX") && expr.text == "sideEffectCounter")
+          fprintf(stderr, "[idx] read global counter=%d int=%u\n",
+                  (int)(*globals_)[expr.index].Data()[0],
+                  (*globals_)[expr.index].IntData()[0]);
         return Convert((*globals_)[expr.index], expr.type);
+      }
       return Value(expr.type);
     case Storage::kUniform: {
       const int program_index = uniform_map_ ? uniform_map_[expr.index] : -1;
@@ -662,14 +854,23 @@ Value Evaluator::ReadVariable(const Expr& expr) {
           expr.index >= 0 && expr.index < static_cast<int>(ast_.varyings.size())
               ? ast_.varyings[expr.index].varying_offset
               : -1;
+      if (getenv("ZGL_DEBUG_VIEWPORT")) {
+        static int vd = 0;
+        if (vd < 8) {
+          fprintf(stderr, "[vineval] %s idx=%d size=%zu off=%d ptr=%p v0=%f\n",
+                  expr.text.c_str(), expr.index, ast_.varyings.size(), offset,
+                  (const void*)varyings_in_, varyings_in_ ? varyings_in_[0] : -1.0f);
+          ++vd;
+        }
+      }
       if (varyings_in_ && offset >= 0) {
         const bool integer = expr.type.base() == BaseType::kInt ||
                              expr.type.base() == BaseType::kUInt;
-        for (int i = 0; i < std::min(4, expr.type.components()); ++i) {
+        for (int i = 0; i < std::min(static_cast<int>(kValueFloats), expr.type.components()); ++i) {
           const float raw = varyings_in_[offset + i];
-          value.data[i] = raw;
+          value.Data()[i] = raw;
           if (integer)
-            memcpy(&value.int_data[i], &raw, sizeof(raw));
+            memcpy(&value.IntData()[i], &raw, sizeof(raw));
         }
       }
       return value;
@@ -681,8 +882,11 @@ Value Evaluator::ReadVariable(const Expr& expr) {
               ? ast_.varyings[expr.index].varying_offset
               : -1;
       if (varyings_out_ && offset >= 0) {
-        for (int i = 0; i < std::min(4, expr.type.components()); ++i)
-          value.data[i] = varyings_out_[offset + i];
+        if (getenv("ZGL_DEBUG_VARY"))
+          fprintf(stderr, "[vary] write offset=%d comps=%d first=%.2f\n", offset,
+                  expr.type.components(), value.Data()[0]);
+        for (int i = 0; i < std::min(static_cast<int>(kValueFloats), expr.type.components()); ++i)
+          value.Data()[i] = varyings_out_[offset + i];
       }
       return value;
     }
@@ -696,8 +900,18 @@ void Evaluator::WriteVariable(const Expr& expr, const Value& value) {
   const Value converted = Convert(value, expr.type);
   switch (expr.storage) {
     case Storage::kLocal:
-      if (expr.index >= 0 && expr.index < static_cast<int>(locals_.size()))
-        locals_[local_base_ + expr.index] = converted;
+      if (expr.index >= 0 && expr.index < static_cast<int>(locals_.size())) {
+        const int slot = local_base_ + expr.index;
+        if (getenv("ZGL_DEBUG_IDX") && expr.text == "sideEffectCounter")
+          fprintf(stderr, "[idx] write local counter=%d int=%u\n",
+                  (int)converted.Data()[0], converted.IntData()[0]);
+        locals_[slot] = converted;
+        if (converted.type.is_integer() && slot >= 0 &&
+            slot < static_cast<int>(neighbor_x_.size())) {
+          neighbor_x_[slot] = converted;
+          neighbor_y_[slot] = converted;
+        }
+      }
       return;
     case Storage::kGlobal:
       if (globals_ && expr.index >= 0 &&
@@ -712,12 +926,12 @@ void Evaluator::WriteVariable(const Expr& expr, const Value& value) {
       if (varyings_out_ && offset >= 0) {
         const bool integer = expr.type.base() == BaseType::kInt ||
                              expr.type.base() == BaseType::kUInt;
-        for (int i = 0; i < std::min(4, expr.type.components()); ++i) {
+        for (int i = 0; i < std::min(static_cast<int>(kValueFloats), expr.type.components()); ++i) {
           if (integer) {
-            memcpy(&varyings_out_[offset + i], &converted.int_data[i],
+            memcpy(&varyings_out_[offset + i], &converted.IntData()[i],
                    sizeof(uint32_t));
           } else {
-            varyings_out_[offset + i] = converted.data[i];
+            varyings_out_[offset + i] = converted.Data()[i];
           }
         }
       }
@@ -732,6 +946,12 @@ void Evaluator::WriteVariable(const Expr& expr, const Value& value) {
 void Evaluator::Assign(const Expr& target, const Value& value) {
   if (target.kind == Expr::Kind::kVariable) {
     WriteVariable(target, value);
+    if (getenv("ZGL_DEBUG_INOUT") && target.text == "arr")
+      fprintf(stderr, "[inout] assign arr idx=%d base=%d now=%.1f %.1f %.1f %.1f\n",
+              target.index, local_base_, locals_[local_base_ + target.index].Data()[0],
+              locals_[local_base_ + target.index].Data()[1],
+              locals_[local_base_ + target.index].Data()[2],
+              locals_[local_base_ + target.index].Data()[3]);
     return;
   }
   if (target.kind == Expr::Kind::kField) {
@@ -784,6 +1004,9 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
       const int count = element_type.components();
       const Value converted = Convert(value, element_type);
       WriteSlice(&base, index * count, converted, count);
+      if (getenv("ZGL_DEBUG_VARY"))
+        fprintf(stderr, "[vary] idx=%d elem=%d base0=%.2f val0=%.2f\n", index,
+                count, base.Data()[0], converted.Data()[0]);
       Assign(*target.base, base);
       return;
     }
@@ -902,6 +1125,31 @@ Value Evaluator::EvalConstructor(const Expr& expr) {
     }
     return out;
   }
+  if (expr.type.is_matrix()) {
+    for (const ExprPtr& argument : expr.args) {
+      const Value source = Eval(*argument);
+      if (getenv("ZGL_DEBUG_MAT"))
+        fprintf(stderr, "[mat] dst=%dx%d src=%dx%d srcmat=%d\n",
+                expr.type.columns(), expr.type.rows(), source.type.columns(),
+                source.type.rows(), (int)source.type.is_matrix());
+      if (!source.type.is_matrix())
+        continue;
+      Value out(expr.type);
+      const int dst_rows = expr.type.rows();
+      const int dst_cols = expr.type.columns();
+      const int src_rows = source.type.rows();
+      const int src_cols = source.type.columns();
+      for (int c = 0; c < dst_cols; ++c) {
+        for (int r = 0; r < dst_rows; ++r) {
+          out.data[c * dst_rows + r] =
+              (c < src_cols && r < src_rows)
+                  ? source.Data()[c * src_rows + r]
+                  : ((c == r) ? 1.0f : 0.0f);
+        }
+      }
+      return out;
+    }
+  }
   float components[kValueFloats] = {0.0f};
   uint32_t int_components[kValueFloats] = {};
   int count = 0;
@@ -917,7 +1165,13 @@ Value Evaluator::EvalConstructor(const Expr& expr) {
       int_components[count] = value.IntData()[component];
     } else if (destination == BaseType::kInt ||
                destination == BaseType::kUInt) {
-      int_components[count] = static_cast<uint32_t>(components[count]);
+      // Convert through the signed type for kInt so that negative values keep
+      // their two's-complement bit pattern.  Casting a negative float straight
+      // to uint32_t saturates to zero on some targets (VFP on ARM).
+      int_components[count] =
+          destination == BaseType::kInt
+              ? static_cast<uint32_t>(static_cast<int32_t>(components[count]))
+              : static_cast<uint32_t>(components[count]);
     }
     ++count;
   };
@@ -955,6 +1209,10 @@ Value Evaluator::EvalConstructor(const Expr& expr) {
     }
     return out;
   }
+  if (getenv("ZGL_DEBUG_CTOR"))
+    fprintf(stderr, "[ctor] type=%s count=%d c0=%.2f c1=%.2f\n",
+            expr.type.Name().c_str(), count, components[0],
+            count > 1 ? components[1] : 0.0f);
   const int total = expr.type.is_scalar() ? 1 : expr.type.components();
   for (int i = 0; i < total; ++i) {
     if (i < count) {
@@ -977,6 +1235,14 @@ Value Evaluator::Eval(const Expr& expr) {
     case Expr::Kind::kLiteral: {
       Value value(expr.type);
       value.data[0] = expr.literal;
+      if (expr.type.base() == BaseType::kInt) {
+        const int32_t raw = static_cast<int32_t>(expr.integer_literal);
+        value.data[0] = static_cast<float>(raw);
+        value.int_data[0] = static_cast<uint32_t>(raw);
+      } else if (expr.type.base() == BaseType::kUInt) {
+        value.data[0] = static_cast<float>(expr.integer_literal);
+        value.int_data[0] = static_cast<uint32_t>(expr.integer_literal);
+      }
       return value;
     }
     case Expr::Kind::kVariable:
@@ -992,9 +1258,62 @@ Value Evaluator::Eval(const Expr& expr) {
         return EvalBuiltin(expr);
       std::vector<Value> args;
       args.reserve(expr.args.size());
-      for (const ExprPtr& argument : expr.args)
-        args.push_back(Eval(*argument));
-      return CallUserFunction(expr.function_index, args);
+      struct IndexLValue {
+        bool valid = false;
+        Value base;
+        int offset = 0;
+        int count = 0;
+      };
+      std::vector<IndexLValue> index_lvalues(expr.args.size());
+      const Function& call_callee = ast_.functions[expr.function_index];
+      for (size_t a = 0; a < expr.args.size(); ++a) {
+        const Expr& argument = *expr.args[a];
+        if (a < call_callee.parameters.size() &&
+            call_callee.parameters[a].parameter_qualifier != 0 &&
+            argument.kind == Expr::Kind::kIndex) {
+          IndexLValue& cache = index_lvalues[a];
+          cache.base = Eval(*argument.base);
+          const Value index_value = Eval(*argument.args[0]);
+          const int index = static_cast<int>(ComponentAt(index_value, 0));
+          cache.offset = index;
+          cache.count = argument.type.components();
+          if (cache.base.type.is_array())
+            cache.offset = index * cache.base.type.array_element().components();
+          else if (cache.base.type.is_matrix())
+            cache.offset = index * cache.base.type.rows();
+          Value value(argument.type);
+          for (int i = 0; i < cache.count && cache.offset + i < cache.base.size();
+               ++i)
+            value.Data()[i] = cache.base.Data()[cache.offset + i];
+          args.push_back(value);
+          cache.valid = true;
+          continue;
+        }
+        args.push_back(Eval(argument));
+      }
+      std::vector<Value> out_values;
+      Value result =
+          CallUserFunction(expr.function_index, args, &out_values);
+      const Function& callee = ast_.functions[expr.function_index];
+      for (size_t i = 0; i < out_values.size() &&
+                      i < expr.args.size() && i < callee.parameters.size();
+           ++i) {
+      if (getenv("ZGL_DEBUG_INOUT") && expr.text == "func")
+        fprintf(stderr, "[inout] out%zu target=%s type=%s val=%.1f %.1f %.1f %.1f\n",
+                i, expr.args[i]->text.c_str(), expr.args[i]->type.Name().c_str(),
+                out_values[i].Data()[0], out_values[i].Data()[1],
+                out_values[i].Data()[2], out_values[i].Data()[3]);
+        if (callee.parameters[i].parameter_qualifier != 0) {
+          if (index_lvalues[i].valid) {
+            WriteSlice(&index_lvalues[i].base, index_lvalues[i].offset,
+                       out_values[i], index_lvalues[i].count);
+            Assign(*expr.args[i]->base, index_lvalues[i].base);
+          } else {
+            Assign(*expr.args[i], out_values[i]);
+          }
+        }
+      }
+      return result;
     }
     case Expr::Kind::kUnary:
       return EvalUnary(expr);
@@ -1018,14 +1337,20 @@ Value Evaluator::Eval(const Expr& expr) {
 }
 
 Value Evaluator::CallUserFunction(int function_index,
-                                  const std::vector<Value>& args) {
+                                  const std::vector<Value>& args,
+                                  std::vector<Value>* out_values) {
   if (function_index < 0 ||
       function_index >= static_cast<int>(ast_.functions.size())) {
     Fail("invalid function index");
     return Value();
   }
+  if (getenv("ZGL_DEBUG_INOUT") && ast_.functions[function_index].name == "test")
+    for (size_t i = 0; i < args.size(); ++i)
+      fprintf(stderr, "[inout] test-arg%zu = %.1f %.1f %.1f %.1f\n", i,
+              args[i].Data()[0], args[i].Data()[1], args[i].Data()[2],
+              args[i].Data()[3]);
   Value result;
-  CallFunction(ast_.functions[function_index], args, &result);
+  CallFunction(ast_.functions[function_index], args, &result, out_values);
   return result;
 }
 
@@ -1034,11 +1359,46 @@ Value Evaluator::EvalUnary(const Expr& expr) {
   if (op == Op::kPreIncrement || op == Op::kPreDecrement ||
       op == Op::kPostIncrement || op == Op::kPostDecrement) {
     const Expr& target = *expr.args[0];
+    if (target.kind == Expr::Kind::kIndex) {
+      Value base = Eval(*target.base);
+      const Value index_value = Eval(*target.args[0]);
+      const int index = static_cast<int>(ComponentAt(index_value, 0));
+      if (getenv("ZGL_DEBUG_IDX"))
+        fprintf(stderr, "[idx] ++ target=%s base=%s index=%d\n",
+                target.base->text.c_str(), target.base->type.Name().c_str(),
+                index);
+      int offset = index;
+      int count = target.type.components();
+      if (base.type.is_array())
+        offset = index * base.type.array_element().components();
+      else if (base.type.is_matrix())
+        offset = index * base.type.rows();
+      Value old(target.type);
+      for (int i = 0; i < count && offset + i < base.size(); ++i)
+        old.Data()[i] = base.Data()[offset + i];
+      Value next(expr.type);
+      const bool increment =
+          op == Op::kPreIncrement || op == Op::kPostIncrement;
+      for (int i = 0; i < expr.type.components(); ++i) {
+        next.Data()[i] = old.Data()[i] + (increment ? 1.0f : -1.0f);
+        if (expr.type.is_integer())
+          next.IntData()[i] = old.IntData()[i] +
+                              (increment ? 1u : static_cast<uint32_t>(-1));
+      }
+      WriteSlice(&base, offset, next, count);
+      Assign(*target.base, base);
+      return (op == Op::kPostIncrement || op == Op::kPostDecrement) ? old
+                                                                    : next;
+    }
     const Value old = Eval(target);
     Value next(expr.type);
     const bool increment = op == Op::kPreIncrement || op == Op::kPostIncrement;
-    for (int i = 0; i < expr.type.components(); ++i)
+    for (int i = 0; i < expr.type.components(); ++i) {
       next.data[i] = old.data[i] + (increment ? 1.0f : -1.0f);
+      if (expr.type.is_integer())
+        next.IntData()[i] =
+            old.IntData()[i] + (increment ? 1u : static_cast<uint32_t>(-1));
+    }
     Assign(target, next);
     return (op == Op::kPostIncrement || op == Op::kPostDecrement) ? old : next;
   }
@@ -1047,14 +1407,22 @@ Value Evaluator::EvalUnary(const Expr& expr) {
   if (op == Op::kNot)
     return MakeBool(!IsTrue(operand));
   if (op == Op::kBitNot) {
-    Value out(Type::Int());
-    out.data[0] = static_cast<float>(~static_cast<int32_t>(operand.data[0]));
+    Value out(expr.type);
+    const int32_t raw = ~static_cast<int32_t>(operand.int_data[0]);
+    out.data[0] = static_cast<float>(raw);
+    out.int_data[0] = static_cast<uint32_t>(raw);
     return out;
   }
   if (op == Op::kNegate) {
     Value out(expr.type);
-    for (int i = 0; i < expr.type.components(); ++i)
+    for (int i = 0; i < expr.type.components(); ++i) {
       out.data[i] = -operand.data[i];
+      if (expr.type.base() == BaseType::kInt)
+        out.int_data[i] = static_cast<uint32_t>(
+            -static_cast<int32_t>(operand.int_data[i]));
+      else if (expr.type.base() == BaseType::kUInt)
+        out.int_data[i] = static_cast<uint32_t>(-operand.int_data[i]);
+    }
     return out;
   }
   return operand;
@@ -1098,6 +1466,12 @@ Value Evaluator::Multiply(const Value& left,
     return out;
   }
   if (left.type.is_matrix()) {
+    if (right.type.is_scalar()) {
+      Value out(left.type);
+      for (int i = 0; i < left.size(); ++i)
+        out.data[i] = left.data[i] * right.data[0];
+      return out;
+    }
     Value out(type);
     const int rows = left.type.rows();
     const int columns = left.type.columns();
@@ -1110,6 +1484,12 @@ Value Evaluator::Multiply(const Value& left,
     return out;
   }
   if (right.type.is_matrix()) {
+    if (left.type.is_scalar()) {
+      Value out(right.type);
+      for (int i = 0; i < right.size(); ++i)
+        out.data[i] = left.data[0] * right.data[i];
+      return out;
+    }
     Value out(type);
     const int rows = right.type.rows();
     const int columns = right.type.columns();
@@ -1323,10 +1703,79 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
                       base == BaseType::kUSampler3D;
   const bool array = base == BaseType::kSampler2DArray ||
                      base == BaseType::kISampler2DArray ||
-                     base == BaseType::kUSampler2DArray;
-  if (expr.builtin_func == BuiltinFunc::kTextureLod && args.size() > 2)
+                     base == BaseType::kUSampler2DArray ||
+                     base == BaseType::kSampler2DArrayShadow;
+  const bool shadow2d = base == BaseType::kSampler2DShadow;
+  const bool shadow_cube = base == BaseType::kSamplerCubeShadow;
+  const bool shadow_array = base == BaseType::kSampler2DArrayShadow;
+  const bool explicit_lod = expr.builtin_func == BuiltinFunc::kTextureLod;
+  if (explicit_lod && args.size() > 2)
     lod = args[2].data[0];
+  else if (args.size() > 2 && !explicit_lod)
+    lod = args[2].data[0];  // LOD bias for implicit lookups.
 
+  if (getenv("ZGL_DEBUG_LOD"))
+    fprintf(stderr, "[lod2] explicit=%d dx=%p kind=%d args=%zu\n", (int)explicit_lod,
+            (const void*)varyings_dx_, (int)expr.args[1]->kind, expr.args.size());
+  if (!explicit_lod && varyings_dx_ && varyings_dy_ &&
+      expr.args[1]->kind == Expr::Kind::kVariable) {
+    const Expr& coord_expr = *expr.args[1];
+    const int varying_index = coord_expr.index;
+    if (varying_index >= 0 &&
+        varying_index < static_cast<int>(ast_.varyings.size())) {
+      const int offset = ast_.varyings[varying_index].varying_offset;
+      int size[3] = {1, 1, 1};
+      sampler_->Size(unit, size);
+      const bool cube =
+          base == BaseType::kSamplerCube ||
+          base == BaseType::kISamplerCube ||
+          base == BaseType::kUSamplerCube;
+      if (cube) {
+        size[1] = size[0];
+        size[2] = size[0];
+      }
+      const int dims = array ? 2 : coord_expr.type.components();
+      float rho_dx = 0.0f;
+      float rho_dy = 0.0f;
+      for (int i = 0; i < dims; ++i) {
+        const float scale = static_cast<float>(size[i]) *
+            (cube ? 0.5f : 1.0f);
+        const float current_coord = args[1].data[i];
+        const float dx =
+            (varyings_dx_[offset + i] - current_coord) * scale;
+        const float dy =
+            (varyings_dy_[offset + i] - current_coord) * scale;
+        rho_dx += dx * dx;
+        rho_dy += dy * dy;
+      }
+      const float rho = std::sqrt(std::max(rho_dx, rho_dy));
+      if (rho > 0.0f)
+        lod += std::log2(rho);
+      if (getenv("ZGL_DEBUG_LOD"))
+        fprintf(stderr, "[lod] var=%d off=%d dims=%d dx=%.6f dy=%.6f rho=%.5f lod=%.4f\n",
+                varying_index, offset, dims, varyings_dx_[offset],
+                varyings_dy_[offset], rho, lod);
+    }
+  }
+
+  if (shadow2d) {
+    out = Value(Type::Vec(4));
+    sampler_->Sample2DShadow(unit, args[1].data[0], args[1].data[1],
+                             args[1].data[2], lod, out.data);
+    return out;
+  }
+  if (shadow_array) {
+    sampler_->Sample2DArrayShadow(unit, args[1].data[0], args[1].data[1],
+                                  args[1].data[2], args[1].data[3], lod,
+                                  out.data);
+    return out;
+  }
+  if (shadow_cube) {
+    for (int i = 0; i < 3; ++i)
+      coords[i] = args[1].data[i];
+    sampler_->SampleCubeShadow(unit, coords, args[1].data[3], lod, out.data);
+    return out;
+  }
   if (cube) {
     for (int i = 0; i < 3; ++i)
       coords[i] = args[1].data[i];
@@ -1353,7 +1802,28 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
   coords[0] = args[1].data[0];
   coords[1] = args[1].data[1];
   out = Value(Type::Vec(4));
+  if (getenv("ZGL_DEBUG_VIEWPORT")) {
+    static int td = 0;
+    if (td < 40 && (unit != 0 || (coords[0] < 0.01f && coords[1] > 0.97f))) {
+      int sz[3] = {0, 0, 0};
+      sampler_->Size(unit, sz);
+      fprintf(stderr, "[tex2] unit=%d size=%dx%d coord=%.4f,%.4f lod=%.3f\n",
+              unit, sz[0], sz[1], coords[0], coords[1], lod);
+      ++td;
+    }
+  }
   sampler_->Sample2D(unit, coords[0], coords[1], lod, out.data);
+  if (getenv("ZGL_DEBUG_VIEWPORT") && coords[0] < 0.01f && coords[1] > 0.97f) {
+    static int rd = 0;
+    if (rd < 12) {
+      int sz[3] = {0, 0, 0};
+      sampler_->Size(unit, sz);
+      fprintf(stderr, "[sres] unit=%d size=%dx%d uv=%.4f,%.4f r=%.6f i=%u,%u\n",
+              unit, sz[0], sz[1], coords[0], coords[1], out.data[0],
+              out.int_data[0], out.int_data[1]);
+      ++rd;
+    }
+  }
   return out;
 }
 
@@ -1374,10 +1844,28 @@ Value Evaluator::EvaluateBuiltinMath(const BuiltinFunc function,
       return MapFastScalars(a, type, fastmath::Cos, fastmath::Cos4);
     case BuiltinFunc::kTan:
       return MapScalars(a, type, [](float v) { return fastmath::Tan(v); });
+    case BuiltinFunc::kSinh:
+      return MapScalars(a, type, [](float v) {
+        const float e = std::exp(v);
+        return (e - std::exp(-v)) * 0.5f;
+      });
+    case BuiltinFunc::kCosh:
+      return MapScalars(a, type, [](float v) {
+        const float e = std::exp(v);
+        return (e + std::exp(-v)) * 0.5f;
+      });
+    case BuiltinFunc::kTanh:
+      return MapScalars(a, type, [](float v) { return std::tanh(v); });
     case BuiltinFunc::kAsin:
       return MapScalars(a, type, [](float v) { return fastmath::Asin(v); });
     case BuiltinFunc::kAcos:
       return MapScalars(a, type, [](float v) { return fastmath::Acos(v); });
+    case BuiltinFunc::kAsinh:
+      return MapScalars(a, type, [](float v) { return std::asinh(v); });
+    case BuiltinFunc::kAcosh:
+      return MapScalars(a, type, [](float v) { return std::acosh(v); });
+    case BuiltinFunc::kAtanh:
+      return MapScalars(a, type, [](float v) { return std::atanh(v); });
     case BuiltinFunc::kAtan:
       if (args.size() == 2) {
         return MapPairs(args[0], args[1], type,
@@ -1401,15 +1889,42 @@ Value Evaluator::EvaluateBuiltinMath(const BuiltinFunc function,
       return MapScalars(a, type,
                         [](float v) { return fastmath::InverseSqrt(v); });
     case BuiltinFunc::kAbs:
-      return MapScalars(a, type, [](float v) { return std::fabs(v); });
-    case BuiltinFunc::kSign:
-      return MapScalars(a, type, [](float v) {
-        return v > 0.0f ? 1.0f : (v < 0.0f ? -1.0f : 0.0f);
+    case BuiltinFunc::kSign: {
+      const bool is_abs = function == BuiltinFunc::kAbs;
+      if (a.type.is_integer()) {
+        Value out(type);
+        for (int i = 0; i < type.components(); ++i) {
+          if (type.base() == BaseType::kUInt) {
+            const uint32_t v = a.IntData()[i];
+            out.IntData()[i] = is_abs ? v : (v != 0u ? 1u : 0u);
+            out.data[i] = static_cast<float>(out.IntData()[i]);
+          } else {
+            const int32_t v = static_cast<int32_t>(a.IntData()[i]);
+            const int32_t r = is_abs ? (v < 0 ? -v : v)
+                                     : (v > 0 ? 1 : (v < 0 ? -1 : 0));
+            out.IntData()[i] = static_cast<uint32_t>(r);
+            out.data[i] = static_cast<float>(r);
+          }
+        }
+        return out;
+      }
+      return MapScalars(a, type, [is_abs](float v) {
+        return is_abs ? std::fabs(v)
+                                                     : (v > 0.0f ? 1.0f
+                                                        : (v < 0.0f ? -1.0f
+                                                                    : 0.0f));
       });
+    }
     case BuiltinFunc::kFloor:
       return MapScalars(a, type, [](float v) { return std::floor(v); });
     case BuiltinFunc::kCeil:
       return MapScalars(a, type, [](float v) { return std::ceil(v); });
+    case BuiltinFunc::kTrunc:
+      return MapScalars(a, type, [](float v) { return std::trunc(v); });
+    case BuiltinFunc::kRound:
+      return MapScalars(a, type, [](float v) { return std::round(v); });
+    case BuiltinFunc::kRoundEven:
+      return MapScalars(a, type, [](float v) { return std::nearbyint(v); });
     case BuiltinFunc::kFract:
       return MapScalars(a, type, [](float v) { return v - std::floor(v); });
     case BuiltinFunc::kMod:
@@ -1533,6 +2048,18 @@ Value Evaluator::EvaluateBuiltinMath(const BuiltinFunc function,
         out.data[i] = args[0].data[i] * args[1].data[i];
       return out;
     }
+    case BuiltinFunc::kOuterProduct: {
+      const int columns = args[0].type.rows();
+      const int rows = args[1].type.rows();
+      Value out(Type::Mat(rows, columns));
+      for (int c = 0; c < columns; ++c) {
+        for (int r = 0; r < rows; ++r) {
+          const float value = args[0].data[c] * args[1].data[r];
+          out.data[c * rows + r] = std::isnan(value) ? 0.0f : value;
+        }
+      }
+      return out;
+    }
     case BuiltinFunc::kTranspose: {
       const int rows = args[0].type.rows();
       const int columns = args[0].type.columns();
@@ -1603,12 +2130,65 @@ Value Evaluator::EvalBuiltin(const Expr& expr) {
     return BuiltinTexture(expr);
   }
 
+  if (expr.builtin_func == BuiltinFunc::kDfdx ||
+      expr.builtin_func == BuiltinFunc::kDfdy ||
+      expr.builtin_func == BuiltinFunc::kFwidth) {
+    const Value current = Eval(*expr.args[0]);
+    const float* neighbor = expr.builtin_func == BuiltinFunc::kDfdy
+                                ? varyings_dy_
+                                : varyings_dx_;
+    Value out(expr.type);
+    if (!neighbor)
+      return out;
+    const float* saved = varyings_in_;
+    const int saved_mode = neighbor_mode_;
+    varyings_in_ = neighbor;
+    neighbor_mode_ = expr.builtin_func == BuiltinFunc::kDfdy ? 2 : 1;
+    const Value adjacent = Eval(*expr.args[0]);
+    neighbor_mode_ = saved_mode;
+    varyings_in_ = saved;
+    if (getenv("ZGL_DEBUG_DER")) {
+      static int dbg = 0;
+      if (dbg < 12) {
+        fprintf(stderr, "[der] %s cur=%.4f adj=%.4f\n",
+                expr.args[0]->text.c_str(), current.Data()[0],
+                adjacent.Data()[0]);
+        ++dbg;
+      }
+    }
+    for (int i = 0; i < expr.type.components(); ++i) {
+      const float dx = adjacent.data[i] - current.data[i];
+      if (expr.builtin_func == BuiltinFunc::kFwidth) {
+        const float* other = varyings_dy_;
+        varyings_in_ = other;
+        neighbor_mode_ = 2;
+        const Value adjacent_y = Eval(*expr.args[0]);
+        neighbor_mode_ = saved_mode;
+        varyings_in_ = saved;
+        out.data[i] = std::fabs(dx) + std::fabs(adjacent_y.data[i] - current.data[i]);
+      } else {
+        out.data[i] = dx;
+      }
+    }
+    return out;
+  }
+
   std::vector<Value> args;
   args.reserve(expr.args.size());
   for (const ExprPtr& argument : expr.args)
     args.push_back(Eval(*argument));
 
   switch (expr.builtin_func) {
+    case BuiltinFunc::kModf: {
+      const Value x = Convert(args[0], expr.type);
+      Value integral(expr.type);
+      Value fraction(expr.type);
+      for (int i = 0; i < expr.type.components(); ++i)
+        fraction.data[i] = std::modf(x.data[i], &integral.data[i]);
+      if (expr.args.size() > 1)
+        Assign(*expr.args[1], Convert(integral, expr.args[1]->type));
+      return fraction;
+    }
     case BuiltinFunc::kLessThan:
     case BuiltinFunc::kLessThanEqual:
     case BuiltinFunc::kGreaterThan:
@@ -1649,36 +2229,135 @@ Value Evaluator::EvalBuiltin(const Expr& expr) {
       return out;
     }
     case BuiltinFunc::kFloatBitsToUint:
+    case BuiltinFunc::kFloatBitsToInt:
     case BuiltinFunc::kUIntBitsToFloat:
     case BuiltinFunc::kIntBitsToFloat: {
       Value out(expr.type);
       for (int i = 0; i < expr.type.components(); ++i) {
-        const float source = ComponentAt(args[0], i);
         uint32_t bits;
-        memcpy(&bits, &source, sizeof(bits));
-        if (expr.builtin_func == BuiltinFunc::kFloatBitsToUint) {
-          out.data[i] = static_cast<float>(bits);
-          out.IntData()[i] = bits;
+        if (expr.builtin_func == BuiltinFunc::kFloatBitsToUint ||
+            expr.builtin_func == BuiltinFunc::kFloatBitsToInt) {
+          const float source = ComponentAt(args[0], i);
+          memcpy(&bits, &source, sizeof(bits));
         } else {
-          const float converted = [&]() {
-            float value;
-            memcpy(&value, &bits, sizeof(value));
-            return value;
-          }();
-          out.data[i] = converted;
-          uint32_t exact = 0;
-          memcpy(&exact, &converted, sizeof(exact));
-          out.IntData()[i] = exact;
+          bits = args[0].IntData()[i];
+        }
+        const float converted = [&]() {
+          float value;
+          memcpy(&value, &bits, sizeof(value));
+          return value;
+        }();
+        out.data[i] = converted;
+        out.IntData()[i] = bits;
+      }
+      return out;
+    }
+    case BuiltinFunc::kPackUnorm2x16:
+    case BuiltinFunc::kPackSnorm2x16:
+    case BuiltinFunc::kUnpackUnorm2x16:
+    case BuiltinFunc::kUnpackSnorm2x16: {
+      if (expr.builtin_func == BuiltinFunc::kPackUnorm2x16 ||
+          expr.builtin_func == BuiltinFunc::kPackSnorm2x16) {
+        const bool snorm = expr.builtin_func == BuiltinFunc::kPackSnorm2x16;
+        const float lo = snorm ? -1.0f : 0.0f;
+        const float hi = 1.0f;
+        const float scale = snorm ? 32767.0f : 65535.0f;
+        uint32_t packed = 0;
+        for (int i = 0; i < 2; ++i) {
+          float v = ComponentAt(args[0], i);
+          v = std::min(hi, std::max(lo, v));
+          int32_t q = static_cast<int32_t>(std::round(v * scale));
+          if (snorm) {
+            if (q < -32768) q = -32768;
+            if (q > 32767) q = 32767;
+            packed |= (static_cast<uint32_t>(q) & 0xffffu) << (i * 16);
+          } else {
+            packed |= static_cast<uint32_t>(q) << (i * 16);
+          }
+        }
+        Value out(expr.type);
+        out.data[0] = static_cast<float>(packed);
+        out.IntData()[0] = packed;
+        return out;
+      }
+      if (expr.builtin_func == BuiltinFunc::kUnpackUnorm2x16 ||
+          expr.builtin_func == BuiltinFunc::kUnpackSnorm2x16) {
+        const bool snorm = expr.builtin_func == BuiltinFunc::kUnpackSnorm2x16;
+        const uint32_t packed = args[0].IntData()[0];
+        Value out(expr.type);
+        for (int i = 0; i < 2; ++i) {
+          const uint32_t raw = (packed >> (i * 16)) & 0xffffu;
+          if (snorm) {
+            const int32_t s = (raw & 0x8000u) ? static_cast<int32_t>(raw) - 65536
+                                               : static_cast<int32_t>(raw);
+            out.data[i] = std::max(-1.0f, static_cast<float>(s) / 32767.0f);
+          } else {
+            out.data[i] = static_cast<float>(raw) / 65535.0f;
+          }
+        }
+        return out;
+      }
+    }
+    case BuiltinFunc::kPackHalf2x16:
+    case BuiltinFunc::kUnpackHalf2x16: {
+      Value out(expr.type);
+      if (expr.builtin_func == BuiltinFunc::kPackHalf2x16) {
+        uint32_t packed = 0;
+        for (int i = 0; i < 2; ++i) {
+          const float v = ComponentAt(args[0], i);
+          uint32_t bits;
+          memcpy(&bits, &v, sizeof(bits));
+          const uint32_t sign = (bits >> 31) & 1u;
+          const int32_t exp = static_cast<int32_t>((bits >> 23) & 0xffu) - 127;
+          uint32_t mant = bits & 0x7fffffu;
+          uint32_t half;
+          if (exp > 15) {
+            half = 0x7c00u;  // Infinity
+          } else if (exp < -24) {
+            half = sign << 15;
+          } else if (exp < -14) {
+            mant |= 0x800000u;
+            const int shift = -14 - exp;
+            half = (mant >> (13 + shift)) | (sign << 15);
+          } else {
+            half = ((static_cast<uint32_t>(exp + 15) << 10) |
+                    (mant >> 13)) | (sign << 15);
+          }
+          packed |= half << (i * 16);
+        }
+        out.data[0] = static_cast<float>(packed);
+        out.IntData()[0] = packed;
+      } else {
+        const uint32_t packed = args[0].IntData()[0];
+        for (int i = 0; i < 2; ++i) {
+          const uint32_t half = (packed >> (i * 16)) & 0xffffu;
+          const uint32_t sign = (half >> 15) & 1u;
+          const uint32_t exp = (half >> 10) & 0x1fu;
+          const uint32_t mant = half & 0x3ffu;
+          float v;
+          if (exp == 0) {
+            v = (mant == 0) ? 0.0f : std::ldexp(static_cast<float>(mant), -24);
+          } else if (exp == 31) {
+            v = mant ? std::numeric_limits<float>::quiet_NaN()
+                     : std::numeric_limits<float>::infinity();
+          } else {
+            v = std::ldexp(1.0f + static_cast<float>(mant) / 1024.0f,
+                           static_cast<int>(exp) - 15);
+          }
+          out.data[i] = sign ? -v : v;
         }
       }
       return out;
     }
-    case BuiltinFunc::kDfdx:
-    case BuiltinFunc::kDfdy:
-    case BuiltinFunc::kFwidth: {
-      // No neighbour information reaches the interpreter; the derivative
-      // built-ins report zero and are documented as such.
+    case BuiltinFunc::kIsInf:
+    case BuiltinFunc::kIsNan: {
       Value out(expr.type);
+      for (int i = 0; i < expr.type.components(); ++i) {
+        const float v = ComponentAt(args[0], i);
+        out.data[i] = expr.builtin_func == BuiltinFunc::kIsInf
+                          ? (std::isinf(v) ? 1.0f : 0.0f)
+                          : (std::isnan(v) ? 1.0f : 0.0f);
+      }
       return out;
     }
     default:
@@ -1688,6 +2367,21 @@ Value Evaluator::EvalBuiltin(const Expr& expr) {
 }
 
 // ---- Program entry points ------------------------------------------------
+
+namespace {
+int BuiltinSlotFor(const ShaderAst& ast, BuiltinId id) {
+  const int index = static_cast<int>(id);
+  if (index >= 0 && index < static_cast<int>(ast.builtin_slots.size()) &&
+      ast.builtin_slots[index] >= 0) {
+    return ast.builtin_slots[index];
+  }
+  for (const Variable& variable : ast.globals) {
+    if (variable.builtin == id)
+      return variable.index;
+  }
+  return -1;
+}
+}  // namespace
 
 void Program::RunVertex(const VertexInput& input,
                         float out_position[4],
@@ -1702,6 +2396,14 @@ void Program::RunVertex(const VertexInput& input,
   if (!linked_ || !vertex_)
     return;
   vertex_globals_ = vertex_global_initials_;
+  if (getenv("ZGL_DEBUG_DR")) {
+    fprintf(stderr, "[dr] run globals=%d slots=%d b17=%d\n",
+            (int)vertex_->globals.size(), (int)vertex_->builtin_slots.size(),
+            (int)vertex_->builtin_slots[17]);
+    for (const Variable& v : vertex_->globals)
+      fprintf(stderr, "[dr] global %s idx=%d builtin=%d\n", v.name.c_str(),
+              v.index, (int)v.builtin);
+  }
   if (varying_floats_ > 0 && out_varyings)
     memset(out_varyings, 0, sizeof(float) * varying_floats_);
 
@@ -1709,6 +2411,7 @@ void Program::RunVertex(const VertexInput& input,
   evaluator.set_uniforms(input.uniforms, vertex_uniform_map_.data());
   evaluator.set_attributes(input.attributes, input.attribute_int,
                            input.vertex_id, input.instance_id);
+  evaluator.set_depth_range(input.depth_range[0], input.depth_range[1]);
   evaluator.set_varyings(nullptr, out_varyings);
   evaluator.set_sampler(input.sampler);
 
@@ -1735,7 +2438,7 @@ void Program::RunVertex(const VertexInput& input,
   }
 
   const int position_slot =
-      vertex_->builtin_slots[static_cast<int>(BuiltinId::kPosition)];
+      BuiltinSlotFor(*vertex_, BuiltinId::kPosition);
   if (position_slot >= 0 &&
       position_slot < static_cast<int>(vertex_globals_.size())) {
     const Value& value = vertex_globals_[position_slot];
@@ -1744,7 +2447,7 @@ void Program::RunVertex(const VertexInput& input,
   }
   if (out_point_size) {
     const int slot =
-        vertex_->builtin_slots[static_cast<int>(BuiltinId::kPointSize)];
+        BuiltinSlotFor(*vertex_, BuiltinId::kPointSize);
     if (slot >= 0 && slot < static_cast<int>(vertex_globals_.size()))
       *out_point_size = vertex_globals_[slot].data[0];
   }
@@ -1791,12 +2494,33 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
     }
   }
 
+  if (getenv("ZGL_DEBUG_VIEWPORT")) {
+    static size_t last_uniform_count = 0;
+    if (fragment_->uniforms.size() != last_uniform_count) {
+      last_uniform_count = fragment_->uniforms.size();
+      fprintf(stderr, "[uni] count=%zu\n", last_uniform_count);
+      for (size_t i = 0; i < fragment_->uniforms.size() && i < 30; ++i) {
+        const int slot = i < fragment_uniform_map_.size()
+                             ? fragment_uniform_map_[i]
+                             : -1;
+        const Value* value = slot >= 0 ? &input.uniforms[slot] : nullptr;
+        fprintf(stderr, "[uni] %s slot=%d v=%.6f,%.6f,%.6f,%.6f\n",
+                fragment_->uniforms[i].name.c_str(), slot,
+                value ? value->data[0] : -999.0f,
+                value ? value->data[1] : -999.0f,
+                value ? value->data[2] : -999.0f,
+                value ? value->data[3] : -999.0f);
+      }
+    }
+  }
   Evaluator evaluator(*fragment_, &fragment_globals_, this);
   evaluator.set_uniforms(input.uniforms, fragment_uniform_map_.data());
   evaluator.set_varyings(input.varyings, nullptr);
+  evaluator.set_varying_derivatives(input.varyings_dx, input.varyings_dy);
   evaluator.set_sampler(input.sampler);
   evaluator.set_fragment_coord(input.frag_coord);
   evaluator.set_front_facing(input.front_facing);
+  evaluator.set_depth_range(input.depth_range[0], input.depth_range[1]);
   evaluator.set_point_coord(input.point_coord);
   evaluator.set_sample_id(input.sample_id);
   evaluator.set_sample_mask(input.sample_mask);
@@ -1809,10 +2533,16 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
     jit_inputs.uniforms = input.uniforms;
     jit_inputs.uniform_map = fragment_uniform_map_.data();
     jit_inputs.varyings_in = input.varyings;
+    jit_inputs.varyings_dx = input.varyings_dx;
+    jit_inputs.varyings_dy = input.varyings_dy;
     jit_inputs.sampler = input.sampler;
     jit_inputs.globals = fragment_globals_.data();
     bool discarded = false;
     used_jit = fragment_jit_->Run(jit_inputs, &discarded);
+    if (getenv("ZGL_DEBUG_VIEWPORT")) {
+      static int ed = 0;
+      if (ed++ < 6) fprintf(stderr, "[exec] jit=%d\n", used_jit ? 1 : 0);
+    }
     if (used_jit && discarded) {
       output->discarded = true;
       return true;
@@ -1849,10 +2579,18 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
     }
     output->color_base[fragment_output.location] = fragment_output.base;
     output->written[fragment_output.location] = true;
+    if (getenv("ZGL_DEBUG_FRAGOUT") && fragment_output.base != BaseType::kFloat) {
+      fprintf(stderr, "fragout loc=%d comps=%d ints=%u,%u,%u,%u floats=%.1f,%.1f,%.1f,%.1f\n",
+              fragment_output.location, components, output->color_int[fragment_output.location][0],
+              output->color_int[fragment_output.location][1], output->color_int[fragment_output.location][2],
+              output->color_int[fragment_output.location][3], output->color[fragment_output.location][0],
+              output->color[fragment_output.location][1], output->color[fragment_output.location][2],
+              output->color[fragment_output.location][3]);
+    }
   }
   if (uses_frag_depth_) {
     const int depth_slot =
-        fragment_->builtin_slots[static_cast<int>(BuiltinId::kFragDepth)];
+        BuiltinSlotFor(*fragment_, BuiltinId::kFragDepth);
     if (depth_slot >= 0 &&
         depth_slot < static_cast<int>(fragment_globals_.size())) {
       output->depth = fragment_globals_[depth_slot].data[0];

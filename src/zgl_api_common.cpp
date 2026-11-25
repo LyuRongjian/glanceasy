@@ -26,25 +26,62 @@ void SetUniformFloats(GLint location,
                       const float* values,
                       int components,
                       int element_count,
-                      bool integer) {
-  (void)integer;
+                      int numeric_kind) {
   Context* context = ApiContext();
   if (!context || !values)
     return;
   ProgramObject* object = CurrentProgramObject();
-  // The specification allows uniform updates with no program bound; they are
-  // silently ignored, so only a bound but unlinked program reports an error.
-  if (!object)
-    return;
-  if (!object->linked || !object->program) {
+  if (!object || !object->linked || !object->program) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (components < 1 || element_count < 1 || location < 0)
+  if (location == -1)
     return;
+  if (components < 1 || element_count < 1 || location < 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   glsl::Value* value = object->program->uniform_value(location);
-  if (!value)
+  if (getenv("ZGL_DEBUG_UNI") && location >= 0 &&
+      location < static_cast<int>(object->program->uniforms().size())) {
+    static int uni_debug = 0;
+    if (uni_debug < 60) {
+      const auto& info = object->program->uniforms()[location];
+      fprintf(stderr, "[uni] %s comps=%d count=%d vals=%.3f %.3f %.3f %.3f\n",
+              info.name.c_str(), components, element_count,
+              values[0], components > 1 ? values[1] : 0.0f,
+              components > 2 ? values[2] : 0.0f,
+              components > 3 ? values[3] : 0.0f);
+      ++uni_debug;
+    }
+  }
+  if (!value) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
+  }
+  const glsl::Type& scalar_type =
+      value->type.is_array() ? value->type.array_element() : value->type;
+  const glsl::BaseType base = scalar_type.base();
+  const bool is_sampler = scalar_type.is_sampler();
+  const bool signed_integer =
+      base == glsl::BaseType::kInt || base == glsl::BaseType::kBool;
+  const bool unsigned_integer =
+      base == glsl::BaseType::kUInt || base == glsl::BaseType::kBool;
+  bool compatible = false;
+  if (numeric_kind == 0) {
+    // Floating-point uploads are also accepted for bool uniforms; any
+    // non-zero value becomes true when the value is queried as an integer.
+    compatible = !is_sampler && base != glsl::BaseType::kInt &&
+                 base != glsl::BaseType::kUInt;
+  } else if (numeric_kind == 1) {
+    compatible = signed_integer || (is_sampler && components == 1);
+  } else {
+    compatible = unsigned_integer;
+  }
+  if (!compatible || scalar_type.is_matrix()) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   if (value->type.is_array()) {
     const glsl::Type& element = value->type.array_element();
     if (element.components() != components ||
@@ -53,16 +90,26 @@ void SetUniformFloats(GLint location,
       return;
     }
     const int total = components * element_count;
-    for (int i = 0; i < total; ++i)
+    for (int i = 0; i < total; ++i) {
       value->Data()[i] = values[i];
+      if (numeric_kind == 1)
+        value->IntData()[i] = static_cast<uint32_t>(static_cast<int32_t>(values[i]));
+      else if (numeric_kind == 2)
+        value->IntData()[i] = static_cast<uint32_t>(values[i]);
+    }
     return;
   }
   if (element_count != 1 || value->type.components() != components) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  for (int i = 0; i < components; ++i)
+  for (int i = 0; i < components; ++i) {
     value->Data()[i] = values[i];
+    if (numeric_kind == 1)
+      value->IntData()[i] = static_cast<uint32_t>(static_cast<int32_t>(values[i]));
+    else if (numeric_kind == 2)
+      value->IntData()[i] = static_cast<uint32_t>(values[i]);
+  }
 }
 
 void SetUniformMatrix(GLint location,
@@ -75,21 +122,27 @@ void SetUniformMatrix(GLint location,
   if (!context || !values)
     return;
   ProgramObject* object = CurrentProgramObject();
-  if (!object)
-    return;
-  if (!object->linked || !object->program) {
+  if (!object || !object->linked || !object->program) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (rows < 1 || columns < 1 || element_count < 1 || location < 0)
+  if (location == -1)
     return;
+  if (rows < 1 || columns < 1 || element_count < 1 || location < 0) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   glsl::Value* value = object->program->uniform_value(location);
-  if (!value)
+  if (!value) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
+  }
   const glsl::Type* matrix_type = &value->type;
   if (value->type.is_array()) {
-    if (element_count > value->type.array_size())
+    if (element_count > value->type.array_size()) {
+      context->SetError(GL_INVALID_OPERATION);
       return;
+    }
     matrix_type = &value->type.array_element();
   } else if (element_count != 1) {
     context->SetError(GL_INVALID_OPERATION);

@@ -80,6 +80,16 @@ bool UploadTextureImageFloat(TextureImage* image,
                              int skip_pixels,
                              const void* pixels);
 
+bool UploadTextureImageInteger(TextureImage* image,
+                               int width,
+                               int height,
+                               GLenum format,
+                               GLenum type,
+                               int row_length,
+                               int skip_rows,
+                               int skip_pixels,
+                               const void* pixels);
+
 // Fills the mip chain below level 0 with box-filtered copies of level 0.
 void GenerateMipmap(Texture* texture);
 

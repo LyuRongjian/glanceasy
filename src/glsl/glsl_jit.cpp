@@ -54,6 +54,8 @@ struct JitRuntime {
   const int* uniform_map;
   const float* attributes;
   const float* varyings_in;
+  const float* varyings_dx;
+  const float* varyings_dy;
   float* varyings_out;
   TextureSampler* sampler;
   Value* globals;
@@ -72,6 +74,10 @@ struct JitTextureCall {
   BuiltinFunc function = BuiltinFunc::kNone;
   int arg_count = 0;
   Type arg_types[kMaxBuiltinArgs];
+  // Offset of the coordinate varying in the interpolated varying array, or
+  // -1 when the coordinate is not a plain varying input.  Used for implicit
+  // LOD selection.
+  int coord_offset = -1;
 };
 
 float ComponentOf(const float* data, const Type& type, int index) {
@@ -139,13 +145,65 @@ void JitTexture(const JitRuntime* runtime,
                       base == BaseType::kUSampler3D;
   const bool array = base == BaseType::kSampler2DArray ||
                      base == BaseType::kISampler2DArray ||
-                     base == BaseType::kUSampler2DArray;
-  if (call->function == BuiltinFunc::kTextureLod && call->arg_count > 2)
+                     base == BaseType::kUSampler2DArray ||
+                     base == BaseType::kSampler2DArrayShadow;
+  const bool shadow2d = base == BaseType::kSampler2DShadow;
+  const bool shadow_cube = base == BaseType::kSamplerCubeShadow;
+  const bool shadow_array = base == BaseType::kSampler2DArrayShadow;
+  const bool explicit_lod = call->function == BuiltinFunc::kTextureLod;
+  if (explicit_lod && call->arg_count > 2)
     lod = args[2 * kValueFloats];
+  else if (call->arg_count > 2)
+    lod = args[2 * kValueFloats];
+  if (!explicit_lod && call->coord_offset >= 0 && runtime->varyings_dx &&
+      runtime->varyings_dy) {
+    const int dims = array ? 2 : call->arg_types[1].components();
+    int size[3] = {1, 1, 1};
+    runtime->sampler->Size(unit, size);
+    if (cube) {
+      size[1] = size[0];
+      size[2] = size[0];
+    }
+    float rho_dx = 0.0f;
+    float rho_dy = 0.0f;
+    for (int i = 0; i < dims; ++i) {
+      const float scale = static_cast<float>(size[i]) *
+          (cube ? 0.5f : 1.0f);
+      const float dx =
+          (runtime->varyings_dx[call->coord_offset + i] - coord[i]) * scale;
+      const float dy =
+          (runtime->varyings_dy[call->coord_offset + i] - coord[i]) * scale;
+      rho_dx += dx * dx;
+      rho_dy += dy * dy;
+    }
+    const float rho = std::sqrt(std::max(rho_dx, rho_dy));
+    if (rho > 0.0f)
+      lod += std::log2(rho);
+    if (getenv("ZGL_DEBUG_LOD")) {
+      static int lod_dbg = 0;
+      if (lod_dbg < 20000) {
+        fprintf(stderr, "[jitlod] rho=%.3f lod=%.3f dims=%d coord=%.3f %.3f %.3f dx=%.3f %.3f %.3f off=%d\n",
+                rho, lod, dims, coord[0], coord[1], coord[2],
+                runtime->varyings_dx[call->coord_offset],
+                runtime->varyings_dx[call->coord_offset + 1],
+                runtime->varyings_dx[call->coord_offset + 2],
+                call->coord_offset);
+        ++lod_dbg;
+      }
+    }
+  }
   for (int i = 0; i < 3; ++i)
     coords[i] = coord[i];
 
-  if (cube)
+  if (shadow2d)
+    runtime->sampler->Sample2DShadow(unit, coords[0], coords[1], coord[2],
+                                     lod, out);
+  else if (shadow_array)
+    runtime->sampler->Sample2DArrayShadow(unit, coords[0], coords[1],
+                                          coords[2], coord[3], lod, out);
+  else if (shadow_cube)
+    runtime->sampler->SampleCubeShadow(unit, coords, coord[3], lod, out);
+  else if (cube)
     runtime->sampler->SampleCube(unit, coords, lod, out);
   else if (volume)
     runtime->sampler->Sample3D(unit, coords, lod, out);
@@ -319,6 +377,12 @@ bool ShaderJit::Impl::ConstantIndex(const Expr& expr, int* index) const {
 bool ShaderJit::Impl::ScanExpr(const Expr& expr) {
   if (!IsSupportedType(expr.type) && !IsSamplerType(expr.type))
     return false;
+  if (expr.is_constructor && expr.type.base() == BaseType::kBool) {
+    for (const ExprPtr& argument : expr.args) {
+      if (argument->type.base() != BaseType::kBool)
+        return false;
+    }
+  }
   if (expr.kind == Expr::Kind::kCall && !expr.is_constructor) {
     if (expr.builtin_func == BuiltinFunc::kNone)
       return false;
@@ -756,6 +820,25 @@ ShaderJit::Impl::Temp ShaderJit::Impl::EmitConstructor(const Expr& expr) {
   }
 
   if (expr.type.is_matrix()) {
+    if (args.size() == 1 && args[0].type.is_matrix()) {
+      const int dst_rows = expr.type.rows();
+      const int dst_columns = expr.type.columns();
+      const int src_rows = args[0].type.rows();
+      const int src_columns = args[0].type.columns();
+      for (int c = 0; c < dst_columns; ++c) {
+        for (int r = 0; r < dst_rows; ++r) {
+          if (c < src_columns && r < src_rows)
+            EmitMoveComponent(result.slot, c * dst_rows + r, args[0].slot,
+                              c * src_rows + r);
+          else
+            EmitSetComponent(result.slot, c * dst_rows + r,
+                             (c == r) ? 1.0f : 0.0f);
+        }
+      }
+      for (const Temp& t : args)
+        Release(t);
+      return result;
+    }
     if (args.size() == 1 && args[0].type.is_scalar()) {
       Temp scalar = args[0];
       for (int c = 0; c < expr.type.columns(); ++c) {
@@ -1184,6 +1267,66 @@ bool ShaderJit::Impl::EmitTextureCall(const Expr& expr,
   call->arg_count = static_cast<int>(expr.args.size());
   for (int i = 0; i < call->arg_count; ++i)
     call->arg_types[i] = expr.args[i]->type;
+  if (getenv("ZGL_DEBUG_CUBE")) {
+    static int emb = 0;
+    if (emb++ < 4)
+      fprintf(stderr, "[emittex] func=%d coordoff=%d arg1kind=%d comps=%d idx=%d vary=%zu\n",
+              (int)expr.builtin_func, call->coord_offset,
+              expr.args.size() > 1 ? (int)expr.args[1]->kind : -1,
+              expr.args.size() > 1 ? expr.args[1]->type.components() : 0,
+              expr.args.size() > 1 ? expr.args[1]->index : -1,
+              ast_.varyings.size());
+  }
+  if (expr.args.size() > 1) {
+    const auto varying_offset = [&](int index) {
+      int offset = ast_.varyings[index].varying_offset;
+      if (offset < 0) {
+        offset = 0;
+        for (int i = 0; i < index; ++i)
+          offset += ast_.varyings[i].type.components();
+      }
+      return offset;
+    };
+    const Expr* coord_expr = expr.args[1].get();
+    int first_component = -1;
+    if (coord_expr->kind == Expr::Kind::kVariable) {
+      const int varying_index = coord_expr->index;
+      if (varying_index >= 0 &&
+          varying_index < static_cast<int>(ast_.varyings.size()))
+        call->coord_offset = varying_offset(varying_index);
+    } else if (coord_expr->kind == Expr::Kind::kField &&
+               coord_expr->base &&
+               coord_expr->base->kind == Expr::Kind::kVariable &&
+               coord_expr->base->index >= 0 &&
+               coord_expr->base->index <
+                   static_cast<int>(ast_.varyings.size())) {
+      const std::string& swizzle = coord_expr->text;
+      bool contiguous = true;
+      for (size_t i = 0; i < swizzle.size(); ++i) {
+        int component = -1;
+        switch (swizzle[i]) {
+          case 'x': component = 0; break;
+          case 'y': component = 1; break;
+          case 'z': component = 2; break;
+          case 'w': component = 3; break;
+          default: contiguous = false; break;
+        }
+        if (component < 0) {
+          contiguous = false;
+          break;
+        }
+        if (i == 0)
+          first_component = component;
+        else if (component != first_component + static_cast<int>(i))
+          contiguous = false;
+      }
+      if (contiguous && first_component >= 0 &&
+          first_component + static_cast<int>(swizzle.size()) <= 4) {
+        call->coord_offset =
+            varying_offset(coord_expr->base->index) + first_component;
+      }
+    }
+  }
 
   std::vector<Temp> args;
   args.reserve(expr.args.size());
@@ -1617,6 +1760,24 @@ bool ShaderJit::Impl::EmitIf(const Statement& statement) {
 
 bool ShaderJit::Impl::Compile(std::string* reason) {
   g_jit_counters.compile_attempts++;
+  if (ast_.uses_depth_range) {
+    if (reason)
+      *reason = "gl_DepthRange requires the interpreter";
+    g_jit_counters.fallback_stages++;
+    return false;
+  }
+  if (ast_.uses_out_params) {
+    if (reason)
+      *reason = "out and inout parameters require the interpreter";
+    g_jit_counters.fallback_stages++;
+    return false;
+  }
+  if (ast_.uses_switch) {
+    if (reason)
+      *reason = "switch statements require the interpreter";
+    g_jit_counters.fallback_stages++;
+    return false;
+  }
   if (getenv("ZGL_JIT_TRACE"))
     fprintf(stderr, "JIT compile start stage=%d\n", static_cast<int>(ast_.stage));
   if (!Scan()) {
@@ -1694,6 +1855,8 @@ bool ShaderJit::Impl::Run(const JitRunInputs& inputs, bool* discarded) {
   runtime.uniform_map = inputs.uniform_map;
   runtime.attributes = inputs.attributes;
   runtime.varyings_in = inputs.varyings_in;
+  runtime.varyings_dx = inputs.varyings_dx;
+  runtime.varyings_dy = inputs.varyings_dy;
   runtime.varyings_out = inputs.varyings_out;
   runtime.sampler = inputs.sampler;
   runtime.globals = inputs.globals;

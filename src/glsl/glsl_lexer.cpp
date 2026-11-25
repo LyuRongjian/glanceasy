@@ -1041,9 +1041,19 @@ Token Lexer::ScanNumber() {
     return token;
   }
   bool is_float = false;
+  const size_t digits_start = pos_;
   while (pos_ < source_.size() &&
          std::isdigit(static_cast<unsigned char>(source_[pos_])))
     ++pos_;
+  const bool octal = pos_ - digits_start > 1 && source_[digits_start] == '0';
+  if (octal) {
+    for (size_t i = digits_start + 1; i < pos_; ++i) {
+      if (source_[i] == '8' || source_[i] == '9') {
+        Fail("invalid digit in octal literal");
+        return token;
+      }
+    }
+  }
   if (pos_ < source_.size() && source_[pos_] == '.') {
     is_float = true;
     ++pos_;
@@ -1065,8 +1075,8 @@ Token Lexer::ScanNumber() {
         ++pos_;
     }
   }
-  if (pos_ < source_.size() && (source_[pos_] == 'f' || source_[pos_] == 'F')) {
-    is_float = true;
+  if (is_float && pos_ < source_.size() &&
+      (source_[pos_] == 'f' || source_[pos_] == 'F')) {
     ++pos_;
   }
   bool is_unsigned = false;
@@ -1078,7 +1088,12 @@ Token Lexer::ScanNumber() {
   token.text = source_.substr(start, pos_ - start);
   token.kind = is_float ? Token::Kind::kFloatLiteral : Token::Kind::kIntLiteral;
   token.is_unsigned = is_unsigned;
-  token.number = std::strtod(token.text.c_str(), nullptr);
+  if (!is_float && octal) {
+    token.number = static_cast<double>(
+        std::strtol(token.text.c_str(), nullptr, 8));
+  } else {
+    token.number = std::strtod(token.text.c_str(), nullptr);
+  }
   return token;
 }
 

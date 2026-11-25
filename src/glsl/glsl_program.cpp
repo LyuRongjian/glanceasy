@@ -546,7 +546,7 @@ int Program::UniformLocation(const std::string& name) const {
             info.type.is_array() && element < info.type.array_size()) {
           if (element == 0)
             return info.location;
-          return -(info.location * 256 + element + 1);
+          return 0x10000000 + info.location * 256 + element;
         }
       }
     }

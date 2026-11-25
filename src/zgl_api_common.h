@@ -18,14 +18,14 @@ Context* ApiContext();
 ProgramObject* CurrentProgramObject();
 
 // Binds |location| of the current program to |element_count| elements of
-// |components| floats each.  |integer| is true for the glUniform*i* entry
-// points; the interpreter keeps integers in float registers.  Unknown
-// locations are ignored, as the specification requires.
+// |components| floats each.  |numeric_kind| is 0 for glUniform*f*, 1 for
+// signed integer entry points and 2 for unsigned integer entry points.  The
+// interpreter keeps all numeric values in float registers.
 void SetUniformFloats(GLint location,
                       const float* values,
                       int components,
                       int element_count,
-                      bool integer);
+                      int numeric_kind);
 
 // Binds a matrix uniform (or an array of matrices).  |transpose| selects
 // GL_FALSE row-major input; the interpreter stores matrices column major.

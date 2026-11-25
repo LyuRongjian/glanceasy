@@ -126,10 +126,16 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = GL_COMPRESSED_RGB8_ETC2;
       *count = 10;
       return true;
-    case GL_SAMPLES:
-    case GL_SAMPLE_BUFFERS:
-      *first = 0;
+    case GL_SAMPLES: {
+      const RenderTarget target = context->GetReadTarget();
+      *first = target.multisampled() ? target.samples : 0;
       return true;
+    }
+    case GL_SAMPLE_BUFFERS: {
+      const RenderTarget target = context->GetReadTarget();
+      *first = target.multisampled() ? 1 : 0;
+      return true;
+    }
     case GL_NUM_SHADER_BINARY_FORMATS:
     case GL_NUM_EXTENSIONS:
       *first = 0;
@@ -349,10 +355,10 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = state.depth.mask ? GL_TRUE : GL_FALSE;
       return true;
     case GL_STENCIL_WRITEMASK:
-      *first = static_cast<GLint>(state.stencil.write_mask & 0xFF);
+      *first = static_cast<GLint>(state.stencil.front.write_mask & 0xFF);
       return true;
     case GL_STENCIL_BACK_WRITEMASK:
-      *first = static_cast<GLint>(state.stencil.write_mask & 0xFF);
+      *first = static_cast<GLint>(state.stencil.back.write_mask & 0xFF);
       return true;
     case GL_STENCIL_FUNC:
       *first = static_cast<GLint>(state.stencil.front.func);
@@ -361,7 +367,7 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = state.stencil.front.reference;
       return true;
     case GL_STENCIL_VALUE_MASK:
-      *first = static_cast<GLint>(state.stencil.mask & 0xFF);
+      *first = static_cast<GLint>(state.stencil.front.compare_mask & 0xFF);
       return true;
     case GL_STENCIL_FAIL:
       *first = static_cast<GLint>(state.stencil.front.op_fail);
@@ -379,7 +385,7 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = state.stencil.back.reference;
       return true;
     case GL_STENCIL_BACK_VALUE_MASK:
-      *first = static_cast<GLint>(state.stencil.mask & 0xFF);
+      *first = static_cast<GLint>(state.stencil.back.compare_mask & 0xFF);
       return true;
     case GL_STENCIL_BACK_FAIL:
       *first = static_cast<GLint>(state.stencil.back.op_fail);
@@ -515,11 +521,17 @@ const GLubyte* glGetString(GLenum name) {
 }
 
 const GLubyte* glGetStringi(GLenum name, GLuint index) {
-  (void)index;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return nullptr;
   if (name != GL_EXTENSIONS) {
-    zgl::Context* context = zgl::ApiContext();
-    if (context)
-      context->SetError(GL_INVALID_ENUM);
+    context->SetError(GL_INVALID_ENUM);
+    return nullptr;
+  }
+  // No extensions are advertised, so every index is out of range.
+  if (index >= 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return nullptr;
   }
   return nullptr;
 }
@@ -832,6 +844,8 @@ void glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
     return;
   }
   context->state.viewport = zgl::Rect{x, y, width, height};
+  if (getenv("ZGL_DEBUG_VIEWPORT"))
+    fprintf(stderr, "[vp] %d %d %d %d\n", x, y, width, height);
 }
 
 void glScissor(GLint x, GLint y, GLsizei width, GLsizei height) {
@@ -910,15 +924,24 @@ void glClearStencil(GLint value) {
 }
 
 void glClear(GLbitfield mask) {
+  if (getenv("ZGL_DEBUG_ERROR"))
+    fprintf(stderr, "[glclear] mask=0x%x\n", static_cast<unsigned>(mask));
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  if (mask & ~(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
+               GL_STENCIL_BUFFER_BIT)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   zgl::RenderTarget target = context->GetDrawTarget();
   if (!target.valid()) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
   const zgl::State& state = context->state;
+  if (state.rasterizer_discard)
+    return;
   zgl::Rect area{0, 0, target.width, target.height};
   if (state.scissor_test) {
     const zgl::Rect scissor{state.scissor.x,
@@ -1414,7 +1437,12 @@ void glGetShaderPrecisionFormat(GLenum shader_type,
                                 GLenum precision_type,
                                 GLint* range,
                                 GLint* precision) {
-  (void)shader_type;
+  if (shader_type != GL_VERTEX_SHADER && shader_type != GL_FRAGMENT_SHADER) {
+    zgl::Context* context = zgl::ApiContext();
+    if (context)
+      context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (precision_type != GL_LOW_FLOAT && precision_type != GL_MEDIUM_FLOAT &&
       precision_type != GL_HIGH_FLOAT && precision_type != GL_LOW_INT &&
       precision_type != GL_MEDIUM_INT && precision_type != GL_HIGH_INT) {
@@ -1439,24 +1467,28 @@ void glFlush(void) {}
 
 void glGenQueries(GLsizei n, GLuint* ids) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !ids)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!ids)
+    return;
   for (GLsizei i = 0; i < n; ++i)
-    ids[i] = context->queries.Create();
+    ids[i] = context->queries.Generate();
 }
 
 void glDeleteQueries(GLsizei n, const GLuint* ids) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !ids)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!ids)
+    return;
   for (GLsizei i = 0; i < n; ++i)
     context->queries.Delete(ids[i]);
 }
@@ -1478,7 +1510,10 @@ void glBeginQuery(GLenum target, GLuint id) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::Query* query = context->queries.Get(id);
+  const GLenum query_target =
+      target == GL_ANY_SAMPLES_PASSED_CONSERVATIVE ? GL_ANY_SAMPLES_PASSED
+                                                   : target;
+  zgl::Query* query = context->queries.GetOrCreateReserved(id);
   if (!query) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -1487,15 +1522,24 @@ void glBeginQuery(GLenum target, GLuint id) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
-    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
-    if (!feedback || !feedback->active || feedback->paused) {
+  if (query->target != 0 && query->target != query_target) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  for (int name = 1; name <= context->queries.size(); ++name) {
+    const zgl::Query* active =
+        context->queries.Get(static_cast<GLuint>(name));
+    if (active && active->active && active->target == query_target) {
       context->SetError(GL_INVALID_OPERATION);
       return;
     }
-    query->start_primitives = feedback->primitives_written;
   }
-  query->target = target;
+  if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
+    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+    query->start_primitives =
+        feedback ? feedback->primitives_written : 0;
+  }
+  query->target = query_target;
   query->active = true;
   query->start_fragments = context->stats.fragments_written;
   query->result = 0;
@@ -1505,16 +1549,24 @@ void glEndQuery(GLenum target) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  const GLenum query_target =
+      target == GL_ANY_SAMPLES_PASSED_CONSERVATIVE ? GL_ANY_SAMPLES_PASSED
+                                                   : target;
+  target = query_target;
+  if (target != GL_ANY_SAMPLES_PASSED &&
+      target != GL_ANY_SAMPLES_PASSED_CONSERVATIVE &&
+      target != GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
     zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
-    if (!feedback || !feedback->active) {
-      context->SetError(GL_INVALID_OPERATION);
-      return;
-    }
     for (int name = 1; name <= context->queries.size(); ++name) {
       zgl::Query* query = context->queries.Get(static_cast<GLuint>(name));
       if (query && query->active && query->target == target) {
-        query->result = feedback->primitives_written - query->start_primitives;
+        query->result = feedback ? feedback->primitives_written -
+                                       query->start_primitives
+                                 : 0;
         query->active = false;
         return;
       }
@@ -1538,6 +1590,12 @@ void glGetQueryiv(GLenum target, GLenum pname, GLint* params) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !params)
     return;
+  if (target != GL_ANY_SAMPLES_PASSED &&
+      target != GL_ANY_SAMPLES_PASSED_CONSERVATIVE &&
+      target != GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (pname == GL_CURRENT_QUERY) {
     params[0] = 0;
     for (int name = 1; name <= context->queries.size(); ++name) {
@@ -1558,6 +1616,10 @@ void glGetQueryObjectuiv(GLuint id, GLenum pname, GLuint* params) {
     return;
   const zgl::Query* query = context->queries.Get(id);
   if (!query) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (query->active) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -1606,6 +1668,13 @@ GLboolean glIsSync(GLsync sync) {
 }
 
 void glDeleteSync(GLsync sync) {
+  zgl::Context* context = zgl::ApiContext();
+  if (sync == nullptr)
+    return;
+  if (context && !glIsSync(sync)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   for (size_t i = 0; i < g_sync_objects.size(); ++i) {
     if (reinterpret_cast<GLsync>(g_sync_objects[i]) == sync) {
       delete g_sync_objects[i];

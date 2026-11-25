@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <utility>
@@ -146,6 +147,7 @@ struct TextureImage {
   int depth = 1;
   int samples = 1;
   bool integer_signed = false;
+  bool srgb = false;
   // 0xAABBGGRR per texel, one 32-bit word per pixel.  A multisample image
   // keeps the resolved plane here and the sample planes in |sample_rgba|.
   std::vector<uint32_t> rgba;
@@ -303,7 +305,11 @@ class SyncObject {
 template <typename T>
 class ObjectTable {
  public:
-  ObjectTable() { objects_.emplace_back(nullptr); }
+  explicit ObjectTable(bool reserve_name_one = false) {
+    objects_.emplace_back(nullptr);
+    if (reserve_name_one)
+      objects_.emplace_back(nullptr);
+  }
 
   GLuint Create() {
     if (!free_.empty()) {
@@ -316,11 +322,57 @@ class ObjectTable {
     return static_cast<GLuint>(objects_.size() - 1);
   }
 
+  // Reserves a name without creating the object.  glGen* has this
+  // behaviour; the object is materialised by the first bind or use.
+  GLuint Generate() {
+    GLuint name = 0;
+    if (!free_.empty()) {
+      name = free_.back();
+      free_.pop_back();
+    } else {
+      objects_.emplace_back();
+      name = static_cast<GLuint>(objects_.size() - 1);
+    }
+    reserved_.insert(name);
+    return name;
+  }
+
+  T* CreateAt(GLuint name) {
+    if (name == 0)
+      return nullptr;
+    if (name >= kDenseNameLimit) {
+      auto& object = sparse_[name];
+      object.reset(new T());
+      reserved_.erase(name);
+      return object.get();
+    }
+    if (name >= objects_.size())
+      objects_.resize(static_cast<size_t>(name) + 1);
+    objects_[name].reset(new T());
+    reserved_.erase(name);
+    return objects_[name].get();
+  }
+
   T* Get(GLuint name) {
     if (name < objects_.size())
       return objects_[name].get();
     auto it = sparse_.find(name);
     return it == sparse_.end() ? nullptr : it->second.get();
+  }
+
+  bool IsReserved(GLuint name) const { return reserved_.count(name) != 0; }
+
+  // Creates an object only for a name previously returned by Generate().
+  // Container objects (queries, transform feedbacks and vertex arrays) must
+  // reject names that were never generated.
+  T* GetOrCreateReserved(GLuint name) {
+    if (name == 0)
+      return nullptr;
+    if (T* object = Get(name))
+      return object;
+    if (!reserved_.count(name))
+      return nullptr;
+    return GetOrCreate(name);
   }
 
   // Binding a name that was never generated creates the object, as required
@@ -343,6 +395,7 @@ class ObjectTable {
       auto it = std::find(free_.begin(), free_.end(), name);
       if (it != free_.end())
         free_.erase(it);
+      reserved_.erase(name);
       objects_[name].reset(new T());
     }
     return objects_[name].get();
@@ -364,6 +417,12 @@ class ObjectTable {
   }
 
   bool Delete(GLuint name) {
+    if (name == 0)
+      return false;
+    if (reserved_.erase(name)) {
+      free_.push_back(name);
+      return true;
+    }
     if (name >= kDenseNameLimit) {
       auto it = sparse_.find(name);
       if (it == sparse_.end() || !it->second)
@@ -414,6 +473,7 @@ class ObjectTable {
   std::vector<std::unique_ptr<T>> objects_;
   std::map<GLuint, std::unique_ptr<T>> sparse_;
   std::vector<GLuint> free_;
+  std::set<GLuint> reserved_;
 };
 
 // ---------------------------------------------------------------------------
@@ -529,8 +589,9 @@ struct State {
   bool rasterizer_discard = false;
   GLenum generate_mipmap_hint = GL_DONT_CARE;
   GLenum fragment_shader_derivative_hint = GL_DONT_CARE;
-  bool primitive_restart = false;
-  bool primitive_restart_fixed_index = false;
+  // GLES 3.0 enables fixed-index primitive restart by default.
+  bool primitive_restart = true;
+  bool primitive_restart_fixed_index = true;
   GLuint primitive_restart_index = 0;
 
   GLenum active_texture = GL_TEXTURE0;
@@ -582,6 +643,8 @@ class Context {
   void SetError(GLenum error) {
     if (error == GL_NO_ERROR)
       return;
+    if (getenv("ZGL_DEBUG_ERROR"))
+      fprintf(stderr, "[glerr] 0x%x\n", static_cast<unsigned>(error));
     if (error_ == GL_NO_ERROR)
       error_ = error;
   }
@@ -603,9 +666,10 @@ class Context {
   // texture family so state setup calls on name 0 have a destination.
   Texture default_textures[4];
   ObjectTable<Renderbuffer> renderbuffers;
-  ObjectTable<Framebuffer> framebuffers;
+  ObjectTable<Framebuffer> framebuffers{true};
   ObjectTable<ShaderObject> shaders;
   ObjectTable<ProgramObject> programs;
+  GLuint next_shader_program_name = 1;
   ObjectTable<Query> queries;
   ObjectTable<TransformFeedback> transform_feedbacks;
   TransformFeedback default_transform_feedback;

@@ -124,6 +124,8 @@ bool IsFloatInternalFormat(GLenum format) {
     case GL_R32F:
     case GL_RG16F:
     case GL_RG32F:
+    case GL_R11F_G11F_B10F:
+    case GL_RGB9_E5:
       return true;
     default:
       return false;
@@ -400,6 +402,22 @@ bool IsKnownFormat(GLenum format) {
   }
 }
 
+namespace {
+
+bool IsSnormFormat(GLenum internal_format) {
+  switch (internal_format) {
+    case GL_R8_SNORM:
+    case GL_RG8_SNORM:
+    case GL_RGB8_SNORM:
+    case GL_RGBA8_SNORM:
+      return true;
+    default:
+      return false;
+  }
+}
+
+}  // namespace
+
 void UploadSlice(TextureImage* destination,
                  int xoffset,
                  int yoffset,
@@ -413,8 +431,16 @@ void UploadSlice(TextureImage* destination,
                  int skip_pixels,
                  const void* pixels) {
   TextureImage source;
-  if (!UploadTextureImage(&source, width, height, format, type, row_length,
-                          skip_rows, skip_pixels, pixels)) {
+  if (destination && !destination->integer_rgba.empty()) {
+    if (!UploadTextureImageInteger(&source, width, height, format, type,
+                                   row_length, skip_rows, skip_pixels, pixels))
+      return;
+  } else if (destination && !destination->float_rgba.empty()) {
+    if (!UploadTextureImageFloat(&source, width, height, format, type,
+                                 row_length, skip_rows, skip_pixels, pixels))
+      return;
+  } else if (!UploadTextureImage(&source, width, height, format, type,
+                                 row_length, skip_rows, skip_pixels, pixels)) {
     return;
   }
   if (!destination || destination->width < xoffset + width ||
@@ -443,6 +469,38 @@ void UploadSlice(TextureImage* destination,
                source.stencil8.data() + static_cast<size_t>(y) * source_stride,
                sizeof(uint8_t) * source_stride);
       }
+    }
+    return;
+  }
+  if (!destination->integer_rgba.empty()) {
+    if (source.integer_rgba.empty())
+      return;
+    for (int y = 0; y < height; ++y) {
+      const uint32_t* source_row =
+          source.integer_rgba.data() + static_cast<size_t>(y) * width * 4;
+      uint32_t* destination_row =
+          destination->integer_rgba.data() +
+          (static_cast<size_t>(zoffset) * slice +
+           static_cast<size_t>(y + yoffset) * destination_stride +
+           static_cast<size_t>(xoffset)) *
+              4;
+      memcpy(destination_row, source_row, sizeof(uint32_t) * width * 4);
+    }
+    return;
+  }
+  if (!destination->float_rgba.empty()) {
+    if (source.float_rgba.empty())
+      return;
+    for (int y = 0; y < height; ++y) {
+      const float* source_row =
+          source.float_rgba.data() + static_cast<size_t>(y) * width * 4;
+      float* destination_row =
+          destination->float_rgba.data() +
+          (static_cast<size_t>(zoffset) * slice +
+           static_cast<size_t>(y + yoffset) * destination_stride +
+           static_cast<size_t>(xoffset)) *
+              4;
+      memcpy(destination_row, source_row, sizeof(float) * width * 4);
     }
     return;
   }
@@ -949,6 +1007,9 @@ void SetTextureImage(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  if (getenv("ZGL_DEBUG_TEX"))
+    fprintf(stderr, "[tex] image2d level=%d %dx%d ifmt=%x ptr=%p cur_levels=%d\n",
+            level, width, height, internal_format, pixels, texture->levels);
   const int faces = texture->faces();
   const int levels = std::max(texture->levels, level + 1);
   texture->Resize(levels, faces);
@@ -972,11 +1033,25 @@ void SetTextureImage(GLenum target,
     const size_t texels = static_cast<size_t>(width) * height * image->depth;
     image->rgba.clear();
     image->float_rgba.assign(texels * 4, 0.0f);
-    if (pixels && texture->target != GL_TEXTURE_3D) {
+    if (pixels) {
       const PixelStoreState& store = context->state.pixel_store;
-      UploadTextureImageFloat(image, width, height, format, type,
-                              store.unpack_row_length, store.unpack_skip_rows,
-                              store.unpack_skip_pixels, pixels);
+      if (texture->target == GL_TEXTURE_3D ||
+          texture->target == GL_TEXTURE_2D_ARRAY) {
+        const size_t stride =
+            UnpackImageStride(store, width, height, format, type);
+        for (int z = 0; z < depth; ++z) {
+          const uint8_t* slice =
+              static_cast<const uint8_t*>(pixels) +
+              static_cast<size_t>(z) * stride;
+          UploadFloatSlice(image, 0, 0, z, width, height, format, type,
+                           store.unpack_row_length, 0, 0, slice);
+        }
+      } else {
+        UploadTextureImageFloat(image, width, height, format, type,
+                                store.unpack_row_length,
+                                store.unpack_skip_rows,
+                                store.unpack_skip_pixels, pixels);
+      }
     }
     return;
   }
@@ -1010,10 +1085,18 @@ void SetTextureImage(GLenum target,
   if (zgl::IsIntegerInternalFormat(internal_format)) {
     image->integer_signed = IsSignedIntegerInternalFormat(internal_format);
     image->integer_rgba.assign(texels * 4, 0u);
+  } else if (IsSnormFormat(internal_format)) {
+    // Signed normalized formats keep values in [-1, 1]; the 8-bit UNORM
+    // storage used for plain formats would clamp the negative half away.
+    image->float_rgba.assign(texels * 4, 0.0f);
+    for (size_t i = 0; i < texels; ++i)
+      image->float_rgba[i * 4 + 3] = 1.0f;
   } else {
     const uint8_t alpha =
         FormatColorChannels(internal_format) == 1 ? 255u : 0u;
     image->rgba.assign(texels, PackRgba(0, 0, 0, alpha));
+    image->srgb = internal_format == GL_SRGB8_ALPHA8 ||
+                  internal_format == GL_SRGB8;
   }
   if (pixels) {
     const PixelStoreState& store = context->state.pixel_store;
@@ -1239,7 +1322,7 @@ void glGenTextures(GLsizei n, GLuint* textures) {
     return;
   }
   for (GLsizei i = 0; i < n; ++i) {
-    textures[i] = context->textures.Create();
+    textures[i] = context->textures.Generate();
     zgl::Texture* object = context->textures.Get(textures[i]);
     if (object)
       object->generated_only = true;
@@ -1292,6 +1375,18 @@ void glDeleteTextures(GLsizei n, const GLuint* textures) {
       }
     });
     texture->delete_status = true;
+    for (int unit = 0; unit < zgl::kMaxCombinedTextureUnits; ++unit) {
+      if (context->state.textures[unit] == name)
+        context->state.textures[unit] = 0;
+      if (context->state.textures_2d[unit] == name)
+        context->state.textures_2d[unit] = 0;
+      if (context->state.textures_3d[unit] == name)
+        context->state.textures_3d[unit] = 0;
+      if (context->state.textures_cube[unit] == name)
+        context->state.textures_cube[unit] = 0;
+      if (context->state.textures_2d_array[unit] == name)
+        context->state.textures_2d_array[unit] = 0;
+    }
   }
 }
 
@@ -2084,12 +2179,14 @@ void glGenSamplers(GLsizei n, GLuint* samplers) {
 
 void glDeleteSamplers(GLsizei n, const GLuint* samplers) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !samplers)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!samplers)
+    return;
   for (GLsizei i = 0; i < n; ++i) {
     context->samplers.Delete(samplers[i]);
     for (int unit = 0; unit < zgl::kMaxCombinedTextureUnits; ++unit) {
@@ -2113,6 +2210,13 @@ void glSamplerParameteri(GLuint sampler, GLenum pname, GLint param) {
   zgl::Sampler* object = context->samplers.Get(sampler);
   if (!object) {
     context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if ((pname == GL_TEXTURE_WRAP_S || pname == GL_TEXTURE_WRAP_T ||
+       pname == GL_TEXTURE_WRAP_R) &&
+      param != GL_REPEAT && param != GL_CLAMP_TO_EDGE &&
+      param != GL_MIRRORED_REPEAT) {
+    context->SetError(GL_INVALID_ENUM);
     return;
   }
   switch (pname) {
@@ -2168,6 +2272,14 @@ void glSamplerParameterf(GLuint sampler, GLenum pname, GLfloat param) {
   zgl::Sampler* object = context->samplers.Get(sampler);
   if (!object) {
     context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if ((pname == GL_TEXTURE_WRAP_S || pname == GL_TEXTURE_WRAP_T ||
+       pname == GL_TEXTURE_WRAP_R) &&
+      param != static_cast<GLfloat>(GL_REPEAT) &&
+      param != static_cast<GLfloat>(GL_CLAMP_TO_EDGE) &&
+      param != static_cast<GLfloat>(GL_MIRRORED_REPEAT)) {
+    context->SetError(GL_INVALID_ENUM);
     return;
   }
   switch (pname) {

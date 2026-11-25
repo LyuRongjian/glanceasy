@@ -18,16 +18,21 @@
 
 namespace zgl {
 
+const GLint kUniformElementBase = 0x10000000;
+
 bool DecodeUniformLocation(GLint location, int* index, int* element) {
+  if (location >= kUniformElementBase) {
+    const int code = location - kUniformElementBase;
+    *index = code / 256;
+    *element = code % 256;
+    return true;
+  }
   if (location >= 0) {
     *index = location;
     *element = 0;
     return true;
   }
-  const int code = -location - 1;
-  *index = code / 256;
-  *element = code % 256;
-  return true;
+  return false;
 }
 
 
@@ -38,9 +43,24 @@ glsl::Stage ShaderStage(GLenum type) {
 
 ShaderObject* LookupShader(Context* context, GLuint name) {
   ShaderObject* shader = context->FindShader(name);
-  if (!shader)
-    context->SetError(GL_INVALID_VALUE);
+  if (!shader) {
+    // A program name passed to a shader entry point is an operation error,
+    // while an unused name is a value error.
+    zgl::ProgramObject* program = context->programs.Get(name);
+    context->SetError(program && !program->delete_status ? GL_INVALID_OPERATION
+                                                         : GL_INVALID_VALUE);
+  }
   return shader;
+}
+
+ProgramObject* LookupProgram(Context* context, GLuint name) {
+  ProgramObject* program = context->programs.Get(name);
+  if (!program) {
+    zgl::ShaderObject* shader = context->FindShader(name);
+    context->SetError(shader && !shader->delete_status ? GL_INVALID_OPERATION
+                                                       : GL_INVALID_VALUE);
+  }
+  return program;
 }
 
 void SetInfoLog(std::string* log, GLchar* info_log, GLsizei max_length) {
@@ -177,8 +197,8 @@ GLuint glCreateShader(GLenum type) {
     context->SetError(GL_INVALID_ENUM);
     return 0;
   }
-  const GLuint name = context->shaders.Create();
-  zgl::ShaderObject* shader = context->shaders.Get(name);
+  const GLuint name = context->next_shader_program_name++;
+  zgl::ShaderObject* shader = context->shaders.CreateAt(name);
   if (shader) {
     shader->name = name;
     shader->type = type;
@@ -188,10 +208,12 @@ GLuint glCreateShader(GLenum type) {
 
 void glDeleteShader(GLuint shader) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || shader == 0)
+  if (!context)
     return;
-  if (!context->shaders.Get(shader))
+  if (!zgl::LookupShader(context, shader)) {
+    context->SetError(GL_INVALID_VALUE);
     return;
+  }
   bool attached = false;
   for (int name = 1; name <= context->programs.size(); ++name) {
     const zgl::ProgramObject* program =
@@ -233,15 +255,17 @@ void glShaderSource(GLuint shader,
                     const GLchar* const* strings,
                     const GLint* lengths) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !strings)
-    return;
-  zgl::ShaderObject* object = zgl::LookupShader(context, shader);
-  if (!object)
+  if (!context)
     return;
   if (count < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  zgl::ShaderObject* object = zgl::LookupShader(context, shader);
+  if (!object)
+    return;
+  if (!strings)
+    return;
   std::string source;
   for (GLsizei i = 0; i < count; ++i) {
     if (!strings[i])
@@ -259,8 +283,10 @@ void glCompileShader(GLuint shader) {
   if (!context)
     return;
   zgl::ShaderObject* object = zgl::LookupShader(context, shader);
-  if (!object)
+  if (!object) {
+    context->SetError(GL_INVALID_VALUE);
     return;
+  }
   zgl::glsl::Parser parser(zgl::ShaderStage(object->type), object->source);
   object->ast = parser.Parse();
   object->compiled = object->ast != nullptr;
@@ -310,6 +336,10 @@ void glGetShaderInfoLog(GLuint shader,
   zgl::ShaderObject* object = zgl::LookupShader(context, shader);
   if (!object)
     return;
+  if (max_length < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   zgl::SetInfoLog(&object->log, info_log, max_length);
   if (length)
     *length = static_cast<GLsizei>(
@@ -321,23 +351,26 @@ GLuint glCreateProgram(void) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return 0;
-  return context->programs.Create();
+  const GLuint name = context->next_shader_program_name++;
+  context->programs.CreateAt(name);
+  return name;
 }
 
 void glDeleteProgram(GLuint program) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || program == 0)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
-    context->SetError(GL_INVALID_VALUE);
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
     return;
-  }
+
   // Keep the name queryable so GL_DELETE_STATUS remains observable, and leave
   // the current binding untouched until glUseProgram replaces it.
   object->delete_status = true;
   object->linked = false;
   object->program.reset();
+  object->shaders.clear();
+  context->CollectOrphanedShaders();
 }
 
 GLboolean glIsProgram(GLuint program) {
@@ -356,17 +389,20 @@ void glAttachShader(GLuint program, GLuint shader) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
-    context->SetError(GL_INVALID_VALUE);
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
     return;
-  }
-  if (!context->shaders.Get(shader)) {
-    context->SetError(GL_INVALID_VALUE);
+
+  if (!zgl::LookupShader(context, shader))
     return;
-  }
+  const zgl::ShaderObject* new_shader = context->FindShader(shader);
   for (GLuint attached : object->shaders) {
     if (attached == shader) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    const zgl::ShaderObject* existing = context->FindShader(attached);
+    if (new_shader && existing && new_shader->type == existing->type) {
       context->SetError(GL_INVALID_OPERATION);
       return;
     }
@@ -378,15 +414,12 @@ void glDetachShader(GLuint program, GLuint shader) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
-    context->SetError(GL_INVALID_VALUE);
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
     return;
-  }
-  if (!context->FindShader(shader)) {
-    context->SetError(GL_INVALID_VALUE);
+
+  if (!zgl::LookupShader(context, shader))
     return;
-  }
   auto& shaders = object->shaders;
   if (std::find(shaders.begin(), shaders.end(), shader) == shaders.end()) {
     context->SetError(GL_INVALID_OPERATION);
@@ -405,11 +438,14 @@ void glBindAttribLocation(GLuint program, GLuint index, const GLchar* name) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
+  if (name[0] == 'g' && name[1] == 'l' && name[2] == '_') {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+
   object->bindings.emplace_back(name, static_cast<int>(index));
 }
 
@@ -421,11 +457,14 @@ void glBindFragDataLocation(GLuint program, GLuint color, const GLchar* name) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
+  if (name && name[0] == 'g' && name[1] == 'l' && name[2] == '_') {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+
   if (name)
     object->frag_data_bindings.emplace_back(name, static_cast<int>(color));
 }
@@ -434,11 +473,15 @@ void glLinkProgram(GLuint program) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
-    context->SetError(GL_INVALID_VALUE);
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+  if (feedback && feedback->active && !feedback->paused) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
+
   zgl::glsl::ShaderAst* vertex = nullptr;
   zgl::glsl::ShaderAst* fragment = nullptr;
   bool failed = false;
@@ -473,17 +516,18 @@ void glLinkProgram(GLuint program) {
       vertex, fragment, object->bindings, object->frag_data_bindings,
       object->transform_feedback_varyings,
       object->transform_feedback_mode == GL_SEPARATE_ATTRIBS, &object->log);
+  if (getenv("ZGL_DEBUG_ERROR") && !object->linked)
+    fprintf(stderr, "[linkfail] %s\n", object->log.c_str());
 }
 
 void glGetProgramiv(GLuint program, GLenum pname, GLint* params) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !params)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
-    context->SetError(GL_INVALID_VALUE);
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
     return;
-  }
+
   switch (pname) {
     case GL_LINK_STATUS:
       params[0] = object->linked ? GL_TRUE : GL_FALSE;
@@ -587,8 +631,10 @@ void glGetProgramInfoLog(GLuint program,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (max_length < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -609,6 +655,10 @@ void glGetShaderSource(GLuint shader,
   zgl::ShaderObject* object = zgl::LookupShader(context, shader);
   if (!object)
     return;
+  if (max_length < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   const int copy = std::min(static_cast<int>(object->source.size()),
                             std::max(0, static_cast<int>(max_length) - 1));
   if (source && max_length > 0) {
@@ -627,11 +677,14 @@ void glGetAttachedShaders(GLuint program,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (max_count < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+
   const int total = static_cast<int>(object->shaders.size());
   const int written =
       max_count < 0 ? 0 : std::min(static_cast<int>(max_count), total);
@@ -648,8 +701,15 @@ void glUseProgram(GLuint program) {
   if (!context)
     return;
   if (program != 0) {
-    zgl::ProgramObject* object = context->programs.Get(program);
-    if (!object || !object->linked || !object->program) {
+    zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+    if (!object)
+      return;
+    if (!object->linked || !object->program) {
+      context->SetError(GL_INVALID_OPERATION);
+      return;
+    }
+    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+    if (feedback && feedback->active && !feedback->paused) {
       context->SetError(GL_INVALID_OPERATION);
       return;
     }
@@ -661,16 +721,17 @@ void glValidateProgram(GLuint program) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  if (!context->programs.Get(program))
-    context->SetError(GL_INVALID_VALUE);
+  zgl::LookupProgram(context, program);
 }
 
 int glGetAttribLocation(GLuint program, const GLchar* name) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !name)
     return -1;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return -1;
+  if (!object->program) {
     context->SetError(GL_INVALID_OPERATION);
     return -1;
   }
@@ -681,8 +742,10 @@ int glGetUniformLocation(GLuint program, const GLchar* name) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !name)
     return -1;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return -1;
+  if (!object->program) {
     context->SetError(GL_INVALID_OPERATION);
     return -1;
   }
@@ -693,13 +756,14 @@ int glGetFragDataLocation(GLuint program, const GLchar* name) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !name)
     return -1;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return -1;
+
+  if (!object->program) {
     context->SetError(GL_INVALID_OPERATION);
     return -1;
   }
-  if (!object->program)
-    return -1;
   return object->program->FragDataLocation(name);
 }
 
@@ -713,9 +777,15 @@ void glGetActiveAttrib(GLuint program,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (!object->program) {
     context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (buffer_size < 0) {
+    context->SetError(GL_INVALID_VALUE);
     return;
   }
   const auto& attributes = object->program->attributes();
@@ -751,9 +821,15 @@ void glGetActiveUniform(GLuint program,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (!object->program) {
     context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (buffer_size < 0) {
+    context->SetError(GL_INVALID_VALUE);
     return;
   }
   const auto& uniforms = object->program->uniforms();
@@ -787,8 +863,10 @@ void glGetActiveUniformBlockName(GLuint program,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program || !object->linked) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (!object->program || !object->linked) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -818,8 +896,10 @@ void glGetActiveUniformBlockiv(GLuint program,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program || !object->linked) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (!object->program || !object->linked) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -868,8 +948,10 @@ void glGetActiveUniformsiv(GLuint program,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program || !object->linked) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (!object->program || !object->linked) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -937,13 +1019,22 @@ void glGetActiveUniformsiv(GLuint program,
 
 // ---- Uniform values -------------------------------------------------------
 
+extern "C" void zglShaderBinaryStub(GLenum binary_format) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  // No shader binary format is advertised, so every format is invalid.
+  (void)binary_format;
+  context->SetError(GL_INVALID_ENUM);
+}
+
 namespace {
 
 void SetFloatArray(GLint location, GLsizei count, int components,
                    const GLfloat* value) {
   if (!value || count < 1)
     return;
-  zgl::SetUniformFloats(location, value, components, count, false);
+  zgl::SetUniformFloats(location, value, components, count, 0);
 }
 
 void SetIntArray(GLint location, GLsizei count, int components,
@@ -954,7 +1045,7 @@ void SetIntArray(GLint location, GLsizei count, int components,
                                  static_cast<size_t>(count));
   for (size_t i = 0; i < converted.size(); ++i)
     converted[i] = static_cast<GLfloat>(value[i]);
-  zgl::SetUniformFloats(location, converted.data(), components, count, true);
+  zgl::SetUniformFloats(location, converted.data(), components, count, 1);
 }
 
 void SetUIntArray(GLint location, GLsizei count, int components,
@@ -965,7 +1056,7 @@ void SetUIntArray(GLint location, GLsizei count, int components,
                                  static_cast<size_t>(count));
   for (size_t i = 0; i < converted.size(); ++i)
     converted[i] = static_cast<GLfloat>(value[i]);
-  zgl::SetUniformFloats(location, converted.data(), components, count, true);
+  zgl::SetUniformFloats(location, converted.data(), components, count, 2);
 }
 
 void SetMatrixArray(GLint location,
@@ -1160,8 +1251,14 @@ void glGetUniformfv(GLuint program, GLint location, GLfloat* params) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !params)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (!object->program) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (location < 0) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -1169,8 +1266,10 @@ void glGetUniformfv(GLuint program, GLint location, GLfloat* params) {
   int element = 0;
   zgl::DecodeUniformLocation(location, &index, &element);
   const zgl::glsl::Value* value = object->program->uniform_value(index);
-  if (!value)
+  if (!value) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
+  }
   const int components = value->type.is_array()
                              ? value->type.array_element().components()
                              : value->type.components();
@@ -1183,8 +1282,14 @@ void glGetUniformiv(GLuint program, GLint location, GLint* params) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !params)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (!object->program) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (location < 0) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -1192,8 +1297,10 @@ void glGetUniformiv(GLuint program, GLint location, GLint* params) {
   int element = 0;
   zgl::DecodeUniformLocation(location, &index, &element);
   const zgl::glsl::Value* value = object->program->uniform_value(index);
-  if (!value)
+  if (!value) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
+  }
   const int components = value->type.is_array()
                              ? value->type.array_element().components()
                              : value->type.components();
@@ -1206,19 +1313,31 @@ void glGetUniformiv(GLuint program, GLint location, GLint* params) {
 }
 
 void glGetUniformuiv(GLuint program, GLint location, GLuint* params) {
-  GLint converted[16] = {};
-  glGetUniformiv(program, location, converted);
   zgl::Context* context = zgl::ApiContext();
-  if (!context)
+  if (!context || !params)
     return;
-  const zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program)
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
     return;
-  const zgl::glsl::Value* value = object->program->uniform_value(location);
-  if (!value)
+  if (!object->program || location < 0) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
-  for (int i = 0; i < value->type.components(); ++i)
-    params[i] = static_cast<GLuint>(converted[i]);
+  }
+  int index = 0;
+  int element = 0;
+  zgl::DecodeUniformLocation(location, &index, &element);
+  const zgl::glsl::Value* value = object->program->uniform_value(index);
+  if (!value) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  const int components = value->type.is_array()
+                             ? value->type.array_element().components()
+                             : value->type.components();
+  const int offset = value->type.is_array() ? element * components : 0;
+  for (int i = 0; i < components; ++i)
+    params[i] = static_cast<GLuint>(
+        static_cast<int64_t>(value->Data()[offset + i]));
 }
 
 void glUniformBlockBinding(GLuint program,
@@ -1227,8 +1346,10 @@ void glUniformBlockBinding(GLuint program,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program || !object->linked) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (!object->program || !object->linked) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -1247,8 +1368,10 @@ GLuint glGetUniformBlockIndex(GLuint program, const GLchar* name) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return GL_INVALID_INDEX;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program || !object->linked) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return GL_INVALID_INDEX;
+  if (!object->program || !object->linked) {
     context->SetError(GL_INVALID_OPERATION);
     return GL_INVALID_INDEX;
   }
@@ -1267,8 +1390,10 @@ void glGetUniformIndices(GLuint program,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program || !object->linked) {
+  zgl::ProgramObject* object = zgl::LookupProgram(context, program);
+  if (!object)
+    return;
+  if (!object->program || !object->linked) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }

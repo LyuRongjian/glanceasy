@@ -10,6 +10,8 @@
 #include <cmath>
 #include <limits>
 
+#include <algorithm>
+
 #if defined(__ARM_NEON)
 #include <arm_neon.h>
 #endif
@@ -135,17 +137,24 @@ void SinCosNeon(float32x4_t x, float32x4_t* sin_out, float32x4_t* cos_out) {
 float Sin(float x) {
   if (!(x == x))
     return x;
-  if (x > 1.0e6f || x < -1.0e6f)
-    return std::sin(x);
-  return SinPolynomial(ReduceTwoPi(x));
+  float result;
+  if (x > 1.0e4f || x < -1.0e4f)
+    result = static_cast<float>(std::sin(static_cast<double>(x)));
+  else
+    result = SinPolynomial(ReduceTwoPi(x));
+  return std::max(-1.0f, std::min(1.0f, result));
 }
 
 float Cos(float x) {
   if (!(x == x))
     return x;
-  if (x > 1.0e6f || x < -1.0e6f)
-    return std::cos(x);
-  return CosPolynomial(ReduceTwoPi(x));
+  float result;
+  if (x > 1.0e4f || x < -1.0e4f)
+    result = static_cast<float>(std::cos(static_cast<double>(x)));
+  else
+    result = CosPolynomial(ReduceTwoPi(x));
+  // The polynomial can overshoot by one ulp around the extrema.
+  return std::max(-1.0f, std::min(1.0f, result));
 }
 
 float Tan(float x) {
