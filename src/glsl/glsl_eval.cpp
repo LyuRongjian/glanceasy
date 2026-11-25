@@ -139,10 +139,17 @@ template <typename F>
 Value MapPairs(const Value& a, const Value& b, const Type& type, F fn) {
   Value out(type);
   const int count = type.components();
+  const bool integer = type.base() == BaseType::kInt ||
+                       type.base() == BaseType::kUInt;
   for (int i = 0; i < count; ++i) {
     const float x = ComponentAt(a, i);
     const float y = ComponentAt(b, i);
     out.data[i] = fn(x, y);
+    if (integer)
+      out.IntData()[i] = type.base() == BaseType::kUInt
+                             ? static_cast<uint32_t>(out.data[i])
+                             : static_cast<uint32_t>(
+                                   static_cast<int32_t>(out.data[i]));
   }
   return out;
 }
@@ -617,6 +624,12 @@ void Evaluator::ExecBody(const std::vector<StmtPtr>& body) {
 }
 
 void Evaluator::Exec(const Statement& statement) {
+  const auto EvalCondition = [this](const Statement& condition) {
+    if (condition.kind == Statement::Kind::kDeclaration)
+      Exec(condition);
+    return condition.expression ? Eval(*condition.expression)
+                                : MakeBool(false);
+  };
   if (HasError() || returned_ || broke_ || continued_ || discarded_)
     return;
   if (BudgetExceeded())
@@ -672,9 +685,13 @@ void Evaluator::Exec(const Statement& statement) {
         Eval(*statement.expression);
       return;
     case Statement::Kind::kIf: {
-      Value condition = statement.condition && statement.condition->expression
-                            ? Eval(*statement.condition->expression)
-                            : MakeBool(false);
+      Value condition = MakeBool(false);
+      if (statement.condition) {
+        if (statement.condition->kind == Statement::Kind::kDeclaration)
+          Exec(*statement.condition);
+        if (statement.condition->expression)
+          condition = Eval(*statement.condition->expression);
+      }
       if (IsTrue(condition)) {
         if (statement.then_branch)
           Exec(*statement.then_branch);
@@ -690,7 +707,7 @@ void Evaluator::Exec(const Statement& statement) {
         if (returned_ || discarded_ || HasError())
           return;
         if (statement.condition) {
-          if (!IsTrue(Eval(*statement.condition->expression)))
+          if (!IsTrue(EvalCondition(*statement.condition)))
             return;
         }
         if (BudgetExceeded())
@@ -713,7 +730,7 @@ void Evaluator::Exec(const Statement& statement) {
       for (;;) {
         if (returned_ || discarded_ || HasError())
           return;
-        if (!IsTrue(Eval(*statement.condition->expression)))
+        if (!IsTrue(EvalCondition(*statement.condition)))
           return;
         if (BudgetExceeded())
           return;
@@ -741,7 +758,7 @@ void Evaluator::Exec(const Statement& statement) {
         }
         if (continued_)
           continued_ = false;
-        if (!IsTrue(Eval(*statement.condition->expression)))
+        if (!IsTrue(EvalCondition(*statement.condition)))
           return;
       }
     }
@@ -820,6 +837,14 @@ Value Evaluator::ReadVariable(const Expr& expr) {
       }
       return Value(expr.type);
     case Storage::kUniform: {
+      if (getenv("ZGL_DEBUG_UNIFORM")) {
+        const Value uv = uniforms_ && expr.index >= 0
+                             ? uniforms_[expr.index]
+                             : Value(expr.type);
+        fprintf(stderr, "[uniform] %s idx=%d %.3f %.3f %.3f %.3f\n",
+                expr.text.empty() ? "?" : expr.text.c_str(), expr.index,
+                uv.Data()[0], uv.Data()[1], uv.Data()[2], uv.Data()[3]);
+      }
       const int program_index = uniform_map_ ? uniform_map_[expr.index] : -1;
       const Value* value =
           program_ ? program_->uniform_value(program_index) : nullptr;
@@ -965,6 +990,10 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
       return;
     }
     const int length = static_cast<int>(target.text.size());
+    if (getenv("ZGL_DEBUG_ASSIGN"))
+      fprintf(stderr, "[assignfield] text=%s len=%d base=%s b0=%.2f b1=%.2f b2=%.2f v0=%.2f v1=%.2f\n",
+              target.text.c_str(), length, base.type.Name().c_str(), base.data[0],
+              base.data[1], base.data[2], value.data[0], value.data[1]);
     const char* sets[] = {"xyzw", "rgba", "stpq"};
     const std::string& field = target.text;
     for (int i = 0; i < length; ++i) {
@@ -988,9 +1017,19 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
                                           ? value.IntData()[0]
                                           : value.IntData()[i];
         }
+        if (getenv("ZGL_DEBUG_ASSIGN"))
+          fprintf(stderr, "[assignw] i=%d comp=%d src=%.2f now=%.2f %.2f %.2f\n",
+                  i, component, source, base.data[0], base.data[1], base.data[2]);
       }
     }
+    if (getenv("ZGL_DEBUG_ASSIGN"))
+      fprintf(stderr, "[assignend] b0=%.2f b1=%.2f b2=%.2f\n", base.data[0],
+              base.data[1], base.data[2]);
     Assign(*target.base, base);
+    if (getenv("ZGL_DEBUG_ASSIGN") && target.base->text == "color")
+      fprintf(stderr, "[assignpost] color now=%.2f %.2f %.2f %.2f\n",
+              Eval(*target.base).data[0], Eval(*target.base).data[1],
+              Eval(*target.base).data[2], Eval(*target.base).data[3]);
     return;
   }
   if (target.kind == Expr::Kind::kIndex) {
@@ -1159,6 +1198,9 @@ Value Evaluator::EvalConstructor(const Expr& expr) {
       return;
     const BaseType source = value.type.base();
     const float raw = value.Data()[component];
+    if (getenv("ZGL_DEBUG_RES") && expr.type.Name() == "vec2" && count < 2)
+      fprintf(stderr, "[vec2raw] cnt=%d src=%s raw=%.1f int=%u\n", count,
+              value.type.Name().c_str(), raw, value.IntData()[component]);
     components[count] = ConvertComponent(source, destination, raw);
     if ((destination == BaseType::kInt || destination == BaseType::kUInt) &&
         (source == BaseType::kInt || source == BaseType::kUInt)) {
@@ -1545,6 +1587,12 @@ Value Evaluator::BinaryOp(Op op,
       });
     case Op::kShiftLeft:
     case Op::kShiftRight:
+      if (getenv("ZGL_DEBUG_SHIFT")) {
+        fprintf(stderr, "[shift] op=%d lt=%s rt=%s a=%.1f %.1f b=%.1f %.1f isu=%d\n",
+                (int)op, left.type.Name().c_str(), right.type.Name().c_str(),
+                left.data[0], left.data[1], right.data[0], right.data[1],
+                (int)is_uint);
+      }
     case Op::kBitAnd:
     case Op::kBitXor:
     case Op::kBitOr:
@@ -1574,6 +1622,11 @@ Value Evaluator::BinaryOp(Op op,
           default:
             break;
         }
+        if (getenv("ZGL_DEBUG_SHIFT"))
+          fprintf(stderr, "[shiftout] x=%u y=%u v=%u isu=%d f=%.1f\n", x, y,
+                  value, (int)is_uint,
+                  is_uint ? static_cast<float>(value)
+                          : static_cast<float>(static_cast<int32_t>(value)));
         if (is_uint)
           return static_cast<float>(value);
         return static_cast<float>(static_cast<int32_t>(value));
@@ -1664,7 +1717,13 @@ Value Evaluator::EvalAssignment(const Expr& expr) {
     value = BinaryOp(op, Eval(target), value, target.type);
   }
   const Value converted = Convert(value, target.type);
+  if (getenv("ZGL_DEBUG_RES") && target.text == "res")
+    fprintf(stderr, "[resassign] data=%.1f %.1f ints=%u %u\n", converted.data[0],
+            converted.data[1], converted.IntData()[0], converted.IntData()[1]);
   Assign(target, converted);
+  if (getenv("ZGL_DEBUG_RES") && target.text == "res")
+    fprintf(stderr, "[respost] data=%.1f %.1f ints=%u %u\n", Eval(target).data[0],
+            Eval(target).data[1], Eval(target).IntData()[0], Eval(target).IntData()[1]);
   return converted;
 }
 
@@ -1813,6 +1872,13 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
     }
   }
   sampler_->Sample2D(unit, coords[0], coords[1], lod, out.data);
+  if (getenv("ZGL_DEBUG_TEXOUT")) {
+    static int od = 0;
+    if (od++ < 3)
+      fprintf(stderr, "[texout] unit=%d %.4f %.4f %.4f %.4f type=%s\n", unit,
+              out.data[0], out.data[1], out.data[2], out.data[3],
+              out.type.Name().c_str());
+  }
   if (getenv("ZGL_DEBUG_VIEWPORT") && coords[0] < 0.01f && coords[1] > 0.97f) {
     static int rd = 0;
     if (rd < 12) {
@@ -2577,6 +2643,14 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
       output->color_int[fragment_output.location][i] =
           i < components ? int_data[i] : (i == 3 ? 1u : 0u);
     }
+    if (getenv("ZGL_DEBUG_FRAGOUT"))
+      fprintf(stderr, "[fragout] loc=%d comp=%d data=%.3f %.3f %.3f %.3f\n",
+              fragment_output.location, components, data[0], data[1], data[2],
+              data[3]);
+    if (getenv("ZGL_DEBUG_FRAGOUT"))
+      fprintf(stderr, "[fragout] loc=%d base=%d data=%.3f %.3f %.3f %.3f\n",
+              fragment_output.location, (int)fragment_output.base, data[0],
+              data[1], data[2], data[3]);
     output->color_base[fragment_output.location] = fragment_output.base;
     output->written[fragment_output.location] = true;
     if (getenv("ZGL_DEBUG_FRAGOUT") && fragment_output.base != BaseType::kFloat) {

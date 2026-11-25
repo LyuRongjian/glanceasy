@@ -262,6 +262,17 @@ void FetchTexel(const TextureImage& image, size_t index, float rgba[4]) {
     return;
   }
   UnpackRgba(image.rgba[index], rgba);
+  if (getenv("ZGL_DEBUG_TEXFETCH")) {
+    static int dbg = 0;
+    if (dbg++ < 3) {
+      uint8_t px[4];
+      px[0] = static_cast<uint8_t>(rgba[0] * 255.0f + 0.5f);
+      px[1] = static_cast<uint8_t>(rgba[1] * 255.0f + 0.5f);
+      px[2] = static_cast<uint8_t>(rgba[2] * 255.0f + 0.5f);
+      px[3] = static_cast<uint8_t>(rgba[3] * 255.0f + 0.5f);
+      fprintf(stderr, "[texfetch] %u %u %u %u\n", px[0], px[1], px[2], px[3]);
+    }
+  }
   if (image.srgb) {
     if (getenv("ZGL_DEBUG_SRGB")) {
       static int dbg = 0;

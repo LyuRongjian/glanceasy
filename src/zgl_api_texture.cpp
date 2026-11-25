@@ -535,6 +535,9 @@ bool DecodeCompressedImage(GLenum format,
   image->height = height;
   image->depth = 1;
   image->float_rgba.clear();
+  image->srgb = format == GL_COMPRESSED_SRGB8_ETC2 ||
+                format == GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC ||
+                format == GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2;
   image->rgba.assign(static_cast<size_t>(width) * height,
                      PackRgba(0, 0, 0, 0));
   const uint8_t* source = static_cast<const uint8_t*>(data);
@@ -1263,6 +1266,8 @@ void SetTextureStorage(GLenum target,
       } else {
         image->float_rgba.clear();
         image->rgba.assign(texels, 0u);
+        image->srgb = internal_format == GL_SRGB8_ALPHA8 ||
+                      internal_format == GL_SRGB8;
       }
     }
     level_width = std::max(1, level_width / 2);

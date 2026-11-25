@@ -148,6 +148,10 @@ int FormatColorChannels(GLenum format) {
     case GL_SRGB8_ALPHA8:
     case GL_RGB10_A2:
     case GL_RGB10_A2UI:
+    case GL_COMPRESSED_RGBA8_ETC2_EAC:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC:
+    case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+    case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2:
       return 4;
     case GL_RGB:
     case GL_RGB8:
@@ -164,6 +168,8 @@ int FormatColorChannels(GLenum format) {
     case GL_RGB16UI:
     case GL_RGB32I:
     case GL_RGB32UI:
+    case GL_COMPRESSED_RGB8_ETC2:
+    case GL_COMPRESSED_SRGB8_ETC2:
       return 3;
     case GL_RG:
     case GL_LUMINANCE_ALPHA:
@@ -177,7 +183,11 @@ int FormatColorChannels(GLenum format) {
     case GL_RG16UI:
     case GL_RG32I:
     case GL_RG32UI:
+    case GL_COMPRESSED_RG11_EAC:
+    case GL_COMPRESSED_SIGNED_RG11_EAC:
       return 2;
+    case GL_COMPRESSED_R11_EAC:
+    case GL_COMPRESSED_SIGNED_R11_EAC:
     default:
       return 1;
   }

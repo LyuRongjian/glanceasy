@@ -72,7 +72,7 @@ class Parser {
                      const Qualifiers& qualifiers,
                      int line);
   bool ParseParameters(Function* function);
-  StmtPtr ParseDeclarationStatement();
+  StmtPtr ParseDeclarationStatement(bool in_condition = false);
   bool AddGlobalVariable(const std::string& name,
                          const Type& type,
                          const Qualifiers& qualifiers,

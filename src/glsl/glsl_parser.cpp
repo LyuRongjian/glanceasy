@@ -1400,7 +1400,7 @@ bool Parser::ParseUniformBlock(const Qualifiers& qualifiers, int line) {
   return ExpectPunct(";");
 }
 
-StmtPtr Parser::ParseDeclarationStatement() {
+StmtPtr Parser::ParseDeclarationStatement(bool in_condition) {
   Qualifiers qualifiers;
   if (!ParseQualifiers(&qualifiers))
     return nullptr;
@@ -1489,7 +1489,7 @@ StmtPtr Parser::ParseDeclarationStatement() {
     if (!AcceptPunct(","))
       break;
   }
-  if (!ExpectPunct(";"))
+  if (!in_condition && !ExpectPunct(";"))
     return nullptr;
   return statement;
 }
@@ -1536,26 +1536,69 @@ StmtPtr Parser::ParseIf() {
   Advance();  // if
   if (!ExpectPunct("("))
     return nullptr;
-  ExprPtr condition = ParseExpression(true);
-  if (!condition || !ExpectPunct(")"))
-    return nullptr;
-  if (condition->type.base() != BaseType::kBool) {
-    Fail("if condition must have type bool");
-    return nullptr;
-  }
-  StmtPtr condition_statement(new Statement());
-  condition_statement->kind = Statement::Kind::kExpression;
-  condition_statement->line = statement->line;
-  condition_statement->expression = std::move(condition);
-  statement->condition = std::move(condition_statement);
-  statement->then_branch = ParseStatement();
-  if (!statement->then_branch)
-    return nullptr;
-  if (AcceptIdent("else")) {
-    statement->else_branch = ParseStatement();
-    if (!statement->else_branch)
+  scopes_.emplace_back();
+  StmtPtr condition_statement;
+  if (IsDeclarationStart()) {
+    condition_statement = ParseDeclarationStatement(true);
+    if (!condition_statement) {
+      scopes_.pop_back();
       return nullptr;
+    }
+    if (condition_statement->declarators.size() != 1) {
+      Fail("if condition must declare exactly one variable");
+      scopes_.pop_back();
+      return nullptr;
+    }
+    const Variable& variable = condition_statement->declarators[0].variable;
+    if (variable.type.base() != BaseType::kBool) {
+      Fail("if condition must have type bool");
+      scopes_.pop_back();
+      return nullptr;
+    }
+    ExprPtr read = MakeExpr(Expr::Kind::kVariable, statement->line);
+    read->text = variable.name;
+    read->storage = variable.storage;
+    read->index = variable.index;
+    read->type = variable.type;
+    condition_statement->expression = std::move(read);
+  } else {
+    ExprPtr condition = ParseExpression(true);
+    if (!condition) {
+      scopes_.pop_back();
+      return nullptr;
+    }
+    if (condition->type.base() != BaseType::kBool) {
+      Fail("if condition must have type bool");
+      scopes_.pop_back();
+      return nullptr;
+    }
+    condition_statement.reset(new Statement());
+    condition_statement->kind = Statement::Kind::kExpression;
+    condition_statement->line = statement->line;
+    condition_statement->expression = std::move(condition);
   }
+  if (!ExpectPunct(")")) {
+    scopes_.pop_back();
+    return nullptr;
+  }
+  statement->condition = std::move(condition_statement);
+  scopes_.emplace_back();
+  statement->then_branch = ParseStatement();
+  scopes_.pop_back();
+  if (!statement->then_branch) {
+    scopes_.pop_back();
+    return nullptr;
+  }
+  if (AcceptIdent("else")) {
+    scopes_.emplace_back();
+    statement->else_branch = ParseStatement();
+    scopes_.pop_back();
+    if (!statement->else_branch) {
+      scopes_.pop_back();
+      return nullptr;
+    }
+  }
+  scopes_.pop_back();
   return statement;
 }
 
@@ -1617,7 +1660,9 @@ StmtPtr Parser::ParseFor() {
     return nullptr;
 
   ++loop_depth_;
+  scopes_.emplace_back();
   statement->then_branch = ParseStatement();
+  scopes_.pop_back();
   --loop_depth_;
   scopes_.pop_back();
   if (!statement->then_branch)
@@ -1632,23 +1677,62 @@ StmtPtr Parser::ParseWhile() {
   Advance();  // while
   if (!ExpectPunct("("))
     return nullptr;
-  ExprPtr condition = ParseExpression(true);
-  if (!condition || !ExpectPunct(")"))
-    return nullptr;
-  if (condition->type.base() != BaseType::kBool) {
-    Fail("while condition must have type bool");
+  scopes_.emplace_back();
+  StmtPtr condition_statement;
+  if (IsDeclarationStart()) {
+    condition_statement = ParseDeclarationStatement(true);
+    if (!condition_statement) {
+      scopes_.pop_back();
+      return nullptr;
+    }
+    if (condition_statement->declarators.size() != 1) {
+      Fail("while condition must declare exactly one variable");
+      scopes_.pop_back();
+      return nullptr;
+    }
+    const Variable& variable = condition_statement->declarators[0].variable;
+    if (variable.type.base() != BaseType::kBool) {
+      Fail("while condition must have type bool");
+      scopes_.pop_back();
+      return nullptr;
+    }
+    ExprPtr read = MakeExpr(Expr::Kind::kVariable, statement->line);
+    read->text = variable.name;
+    read->storage = variable.storage;
+    read->index = variable.index;
+    read->type = variable.type;
+    condition_statement->expression = std::move(read);
+  } else {
+    ExprPtr condition = ParseExpression(true);
+    if (!condition) {
+      scopes_.pop_back();
+      return nullptr;
+    }
+    if (condition->type.base() != BaseType::kBool) {
+      Fail("while condition must have type bool");
+      scopes_.pop_back();
+      return nullptr;
+    }
+    condition_statement.reset(new Statement());
+    condition_statement->kind = Statement::Kind::kExpression;
+    condition_statement->line = statement->line;
+    condition_statement->expression = std::move(condition);
+  }
+  if (!ExpectPunct(")")) {
+    scopes_.pop_back();
     return nullptr;
   }
-  StmtPtr condition_statement(new Statement());
-  condition_statement->kind = Statement::Kind::kExpression;
-  condition_statement->line = statement->line;
-  condition_statement->expression = std::move(condition);
   statement->condition = std::move(condition_statement);
   ++loop_depth_;
+  scopes_.emplace_back();
   statement->then_branch = ParseStatement();
+  scopes_.pop_back();
   --loop_depth_;
-  if (!statement->then_branch)
+  if (!statement->then_branch) {
+    scopes_.pop_back();
     return nullptr;
+  }
+  scopes_.pop_back();
   return statement;
 }
 
@@ -1658,7 +1742,9 @@ StmtPtr Parser::ParseDoWhile() {
   statement->line = current_.line;
   Advance();  // do
   ++loop_depth_;
+  scopes_.emplace_back();
   statement->then_branch = ParseStatement();
+  scopes_.pop_back();
   --loop_depth_;
   if (!statement->then_branch)
     return nullptr;
@@ -2613,9 +2699,7 @@ Type Parser::BinaryResultType(Op op, const Type& left, const Type& right) {
       return Type::Bool();
     case Op::kBitAnd:
     case Op::kBitXor:
-    case Op::kBitOr:
-    case Op::kShiftLeft:
-    case Op::kShiftRight: {
+    case Op::kBitOr: {
       const int rows = std::max(left.rows(), right.rows());
       const BaseType base = (left.base() == BaseType::kUInt ||
                              right.base() == BaseType::kUInt)
@@ -2623,6 +2707,12 @@ Type Parser::BinaryResultType(Op op, const Type& left, const Type& right) {
                                 : BaseType::kInt;
       return Type(base, rows, 1);
     }
+    case Op::kShiftLeft:
+    case Op::kShiftRight:
+      // GLSL ES 3.0: the result of a shift has the type of the left operand.
+      return Type(left.base() == BaseType::kUInt ? BaseType::kUInt
+                                                 : BaseType::kInt,
+                  std::max(left.rows(), 1), 1);
     case Op::kMultiply: {
       if (left.is_matrix() && right.is_matrix())
         return Type::Mat(right.columns(), left.rows());
