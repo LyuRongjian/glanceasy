@@ -135,6 +135,33 @@ Value MapFastScalars(const Value& a,
   return out;
 }
 
+// Pairwise math with a four-lane fast path.  Inputs may be scalars (broadcast)
+// or vec4; other widths use the scalar lambda.
+Value MapFastPairs(const Value& a,
+                   const Value& b,
+                   const Type& type,
+                   float (*scalar)(float, float),
+                   void (*vector)(const float*, const float*, float*)) {
+  const int count = type.components();
+  if (vector && count == 4 && !type.is_aggregate() &&
+      (a.size() == 1 || a.size() == 4) &&
+      (b.size() == 1 || b.size() == 4)) {
+    float in0[4];
+    float in1[4];
+    for (int lane = 0; lane < 4; ++lane) {
+      in0[lane] = a.size() == 1 ? a.data[0] : a.data[lane];
+      in1[lane] = b.size() == 1 ? b.data[0] : b.data[lane];
+    }
+    Value out(type);
+    vector(in0, in1, out.data);
+    return out;
+  }
+  Value out(type);
+  for (int i = 0; i < count; ++i)
+    out.data[i] = scalar(ComponentAt(a, i), ComponentAt(b, i));
+  return out;
+}
+
 // Scalar-safe read of an integer component:  scalar operands broadcast across
 // vector-width operations, mirroring ComponentAt() for float data.
 uint32_t IntComponentAt(const Value& value, int index) {
@@ -2307,8 +2334,8 @@ Value Evaluator::EvaluateBuiltinMath(const BuiltinFunc function,
       }
       return MapScalars(a, type, [](float v) { return fastmath::Atan(v); });
     case BuiltinFunc::kPow:
-      return MapPairs(args[0], args[1], type,
-                      [](float x, float y) { return fastmath::Pow(x, y); });
+      return MapFastPairs(args[0], args[1], type, fastmath::Pow,
+                          fastmath::Pow4);
     case BuiltinFunc::kExp:
       return MapScalars(a, type, [](float v) { return fastmath::Exp(v); });
     case BuiltinFunc::kLog:

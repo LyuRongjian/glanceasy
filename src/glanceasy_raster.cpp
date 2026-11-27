@@ -143,8 +143,16 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
   const float z0 = v0->z - v2->z;
   const float z1 = v1->z - v2->z;
 
+  Fragment batch[4];
+  int batch_count = 0;
+  auto flush_batch = [&]() {
+    if (batch_count > 0) {
+      sink->ShadeBatch(batch, batch_count);
+      batch_count = 0;
+    }
+  };
   auto shade_pixel = [&](int x, int y, float w0, float w1) {
-    Fragment fragment;
+    Fragment& fragment = batch[batch_count++];
     fragment.x = x;
     fragment.y = y;
     fragment.depth = v2->z + w0 * z0 + w1 * z1;
@@ -161,7 +169,8 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
     fragment.vertex[1] = i1;
     fragment.vertex[2] = i2;
     fragment.provoking = index_c;
-    sink->Shade(fragment);
+    if (batch_count == 4)
+      flush_batch();
   };
 
   // A run is a short horizontal span of pixels that share the same row.  For
@@ -264,6 +273,7 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
         }
       }
     }
+    flush_batch();
   }
 }
 

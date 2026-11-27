@@ -34,6 +34,9 @@ float InverseSqrt(float x);
 // same polynomial coefficients.
 void Sin4(const float in[4], float out[4]);
 void Cos4(const float in[4], float out[4]);
+// Four-lane pow(x, y) = exp2(y * log2(x)).  It falls back to the scalar
+// implementation for zero, negative or subnormal bases.
+void Pow4(const float base[4], const float exponent[4], float out[4]);
 
 }  // namespace fastmath
 }  // namespace glanceasy

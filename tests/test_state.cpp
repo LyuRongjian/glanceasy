@@ -640,3 +640,81 @@ TEST(SampleCoverageIsAcceptedAsNoOp) {
   EXPECT_TRUE(glIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE));
   glanceasyDestroyContext();
 }
+
+TEST(Vec4PowUsesTheFourLanePath) {
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
+  const char* vertex =
+      "#version 100\n"
+      "attribute vec2 a_pos;\n"
+      "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+  const char* fragment =
+      "#version 100\n"
+      "precision mediump float;\n"
+      "void main() {\n"
+      "  gl_FragColor = pow(vec4(0.25, 0.5, 1.0, 2.0),\n"
+      "                     vec4(2.0, 3.0, 0.5, 0.5));\n"
+      "}\n";
+  const GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+  glShaderSource(vs, 1, &vertex, nullptr);
+  glCompileShader(vs);
+  const GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(fs, 1, &fragment, nullptr);
+  glCompileShader(fs);
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vs);
+  glAttachShader(program, fs);
+  glLinkProgram(program);
+  glUseProgram(program);
+
+  const float triangle[6] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, triangle);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+  unsigned char rgba[4] = {};
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_NEAR(rgba[0], 16, 1);
+  EXPECT_NEAR(rgba[1], 32, 1);
+  EXPECT_NEAR(rgba[2], 255, 1);
+  EXPECT_NEAR(rgba[3], 255, 1);
+  glDeleteProgram(program);
+  glanceasyDestroyContext();
+}
+
+TEST(Vec4PowHandlesFractionalNegativeExponent) {
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
+  const char* vertex =
+      "#version 100\n"
+      "attribute vec2 a_pos;\n"
+      "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+  const char* fragment =
+      "#version 100\n"
+      "precision mediump float;\n"
+      "void main() {\n"
+      "  gl_FragColor = vec4(pow(vec4(0.25), vec4(0.3)).rgb, 1.0);\n"
+      "}\n";
+  const GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+  glShaderSource(vs, 1, &vertex, nullptr);
+  glCompileShader(vs);
+  const GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(fs, 1, &fragment, nullptr);
+  glCompileShader(fs);
+  const GLuint program = glCreateProgram();
+  glAttachShader(program, vs);
+  glAttachShader(program, fs);
+  glLinkProgram(program);
+  glUseProgram(program);
+  const float triangle[6] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, triangle);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
+  unsigned char rgba[4] = {};
+  glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  EXPECT_NEAR(rgba[0], 168, 1);
+  EXPECT_NEAR(rgba[3], 255, 1);
+  glDeleteProgram(program);
+  glanceasyDestroyContext();
+}

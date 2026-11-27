@@ -4,6 +4,10 @@
 
 #include "src/glanceasy_texture.h"
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -287,6 +291,58 @@ void FetchTexel(const TextureImage& image, size_t index, float rgba[4]) {
   }
 }
 
+// Bilinear RGBA8 fetch.  Four packed texels are converted to float channels
+// with NEON, then the two horizontal and one vertical interpolations run on
+// four lanes.  The scalar path below is used on non-ARM hosts.
+inline void BilinearRgba8(const uint32_t* texels,
+                          size_t i00,
+                          size_t i10,
+                          size_t i01,
+                          size_t i11,
+                          float fx,
+                          float fy,
+                          float out[4]) {
+#if defined(__ARM_NEON)
+  const uint32_t packed_values[4] = {texels[i00], texels[i10],
+                                     texels[i01], texels[i11]};
+  const uint32x4_t packed = vld1q_u32(packed_values);
+  const uint32x4_t mask = vdupq_n_u32(0xFFu);
+  const float32x4_t r =
+      vcvtq_f32_u32(vandq_u32(packed, mask));
+  const float32x4_t g =
+      vcvtq_f32_u32(vandq_u32(vshrq_n_u32(packed, 8), mask));
+  const float32x4_t b =
+      vcvtq_f32_u32(vandq_u32(vshrq_n_u32(packed, 16), mask));
+  const float32x4_t a =
+      vcvtq_f32_u32(vshrq_n_u32(packed, 24));
+  const auto interpolate = [fx, fy](float32x4_t channel) {
+    // Lanes are c00, c10, c01, c11.  Reversing each pair produces the
+    // horizontal delta; lane 0 becomes the top value, lane 2 the bottom.
+    const float32x4_t reversed = vrev64q_f32(channel);
+    const float32x4_t horizontal =
+        vmlaq_n_f32(channel, vsubq_f32(reversed, channel), fx);
+    const float top = vgetq_lane_f32(horizontal, 0);
+    const float bottom = vgetq_lane_f32(horizontal, 2);
+    return (top + (bottom - top) * fy) * (1.0f / 255.0f);
+  };
+  out[0] = interpolate(r);
+  out[1] = interpolate(g);
+  out[2] = interpolate(b);
+  out[3] = interpolate(a);
+#else
+  float c00[4], c10[4], c01[4], c11[4];
+  UnpackRgba(texels[i00], c00);
+  UnpackRgba(texels[i10], c10);
+  UnpackRgba(texels[i01], c01);
+  UnpackRgba(texels[i11], c11);
+  for (int i = 0; i < 4; ++i) {
+    const float top = c00[i] + (c10[i] - c00[i]) * fx;
+    const float bottom = c01[i] + (c11[i] - c01[i]) * fx;
+    out[i] = top + (bottom - top) * fy;
+  }
+#endif
+}
+
 }  // namespace
 
 GLenum BaseFilter(GLenum filter) {
@@ -501,20 +557,16 @@ void SampleTexture2D(const Texture& texture,
       const int y0 = static_cast<int>(std::floor(py));
       const float fx = px - static_cast<float>(x0);
       const float fy = py - static_cast<float>(y0);
-      float c00[4], c10[4], c01[4], c11[4];
-      UnpackRgba(fast_image->rgba[static_cast<size_t>(WrapTexel(y0, fh, wrap_t)) * fw +
-                                WrapTexel(x0, fw, wrap_s)], c00);
-      UnpackRgba(fast_image->rgba[static_cast<size_t>(WrapTexel(y0, fh, wrap_t)) * fw +
-                                WrapTexel(x0 + 1, fw, wrap_s)], c10);
-      UnpackRgba(fast_image->rgba[static_cast<size_t>(WrapTexel(y0 + 1, fh, wrap_t)) * fw +
-                                WrapTexel(x0, fw, wrap_s)], c01);
-      UnpackRgba(fast_image->rgba[static_cast<size_t>(WrapTexel(y0 + 1, fh, wrap_t)) * fw +
-                                WrapTexel(x0 + 1, fw, wrap_s)], c11);
-      for (int i = 0; i < 4; ++i) {
-        const float top = c00[i] + (c10[i] - c00[i]) * fx;
-        const float bottom = c01[i] + (c11[i] - c01[i]) * fx;
-        out[i] = top + (bottom - top) * fy;
-      }
+      const int cy0 = WrapTexel(y0, fh, wrap_t);
+      const int cy1 = WrapTexel(y0 + 1, fh, wrap_t);
+      const int cx0 = WrapTexel(x0, fw, wrap_s);
+      const int cx1 = WrapTexel(x0 + 1, fw, wrap_s);
+      BilinearRgba8(fast_image->rgba.data(),
+                    static_cast<size_t>(cy0) * fw + cx0,
+                    static_cast<size_t>(cy0) * fw + cx1,
+                    static_cast<size_t>(cy1) * fw + cx0,
+                    static_cast<size_t>(cy1) * fw + cx1,
+                    fx, fy, out);
       return;
     }
   }

@@ -115,8 +115,53 @@ At 800x600, `build` alone (`duration=2`): **1569.4 -> 804.5 ms/frame**
 (1.95x). The full default list without `terrain` runs at score 1 after the
 optimisation (`duration=1`); before it rounded down to 0.
 
-The main wins on this board were not new approximate maths, but removing work
-from the per-fragment path:
+A second pass added four targeted paths: fixed-point RGBA8 blending for
+`GL_FUNC_ADD`, four-fragment batching in the triangle sink, NEON RGBA8 bilinear
+sampling, and a four-lane NEON `pow`. The table below compares this pass against
+the previous optimised library built from `f196950`, using the same glmark2
+binary and the same board (320x240, `duration=2`, medians of three runs (two for 800x600)):
+
+| Scene | f196950 | Second pass | Change |
+| --- | ---: | ---: | ---: |
+| `build` | 447.4 ms/frame | 440.0 ms/frame | 1.7% faster |
+| `texture`, nearest | 250.5 ms/frame | 241.5 ms/frame | 3.7% faster |
+| `texture`, linear | 252.6 ms/frame | 242.8 ms/frame | 4.0% faster |
+| `shading`, phong | 5268.4 ms/frame | 5267.9 ms/frame | unchanged |
+| `pulsar` | 239.8 ms/frame | 222.2 ms/frame | 7.9% faster |
+| `desktop` | 3048.7 ms/frame | 2784.5 ms/frame | 9.5% faster |
+| `build`, 800x600 | 804.4 ms/frame | 786.7 ms/frame | 2.3% faster |
+
+The phong shader does not call a four-component `pow`, so it does not exercise
+the new vector path; its frame time is unchanged. The `Pow4` helper itself
+measures 2.21x faster than four scalar `Pow` calls on the board (200000
+iterations, 72.9 ms versus 161.0 ms), including its scalar fallback checks. The
+texture scenes exercise both batching and bilinear sampling; `desktop` and
+`pulsar` are the blend-heavy scenes.
+
+Implementation notes for the second pass:
+
+- RGBA8 blending evaluates the common `GL_FUNC_ADD` source/destination factors
+  from 8-bit bytes, with a nearest-integer divide by 255. Factors that need the
+  blend colour, sRGB attachments, masked writes and subtract/min/max equations
+  still take the float path. The byte path can differ from the float path by at
+  most one LSB on an 8-bit attachment.
+- The triangle rasteriser accumulates up to four `Fragment`s and calls
+  `FragmentSink::ShadeBatch`. `Pipeline` implements the batch entry point so
+  target validation and scissor setup are hoisted out of the per-fragment
+  virtual call. MSAA, line and point paths still use the single-fragment
+  interface.
+- The RGBA8 bilinear path loads four packed texels, converts the four channels
+  to floats in four lanes, interpolates horizontally with a reversed-lane
+  subtraction, then blends the two rows. The generic sampler remains for other
+  formats and wrap/mip combinations.
+- `Pow4` computes `exp2(y * log2(x))` with four-lane NEON polynomials and falls
+  back to scalar `Pow` when any lane has a non-positive or subnormal base, a
+  non-finite exponent, or an exponent result above 127. A regression test covers
+  a fractional negative exponent, where the integer exponent must be floored
+  rather than truncated.
+
+The main wins in the first pass were not new approximate maths, but removing
+work from the per-fragment path:
 
 - `Value` inline storage was reduced from 64 to 16 floats. A scalar temporary
   was 600+ bytes and was copied for nearly every GLSL operation; a mat4 fits in

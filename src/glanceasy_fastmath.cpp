@@ -292,6 +292,94 @@ float InverseSqrt(float x) {
 #endif
 }
 
+#if defined(__ARM_NEON)
+// log2 of four normal positive floats.  Kept separate from the scalar
+// polynomial so Pow4 can reuse the same coefficients.
+float32x4_t Log2Neon(float32x4_t x) {
+  uint32x4_t bits = vreinterpretq_u32_f32(x);
+  const int32x4_t exponent =
+      vsubq_s32(vreinterpretq_s32_u32(vshrq_n_u32(bits, 23)),
+                vdupq_n_s32(127));
+  const uint32x4_t mantissa_bits =
+      vorrq_u32(vandq_u32(bits, vdupq_n_u32(0x007FFFFFu)),
+                vdupq_n_u32(0x3F800000u));
+  const float32x4_t f =
+      vsubq_f32(vreinterpretq_f32_u32(mantissa_bits), vdupq_n_f32(1.0f));
+  float32x4_t p = vdupq_n_f32(0.0074818443136277675f);
+  p = vmlaq_f32(vdupq_n_f32(-0.0421416881996659f), f, p);
+  p = vmlaq_f32(vdupq_n_f32(0.11186758511703668f), f, p);
+  p = vmlaq_f32(vdupq_n_f32(-0.19597542461228148f), f, p);
+  p = vmlaq_f32(vdupq_n_f32(0.27491970550867834f), f, p);
+  p = vmlaq_f32(vdupq_n_f32(-0.35815854010426523f), f, p);
+  p = vmlaq_f32(vdupq_n_f32(0.4806484607172325f), f, p);
+  p = vmlaq_f32(vdupq_n_f32(-0.7213367877175271f), f, p);
+  p = vmlaq_f32(vdupq_n_f32(1.4426949267971692f), f, p);
+  return vaddq_f32(vcvtq_f32_s32(exponent), vmulq_f32(f, p));
+}
+
+float32x4_t Exp2Neon(float32x4_t x) {
+  int32x4_t exponent = vcvtq_s32_f32(x);
+  const uint32x4_t rounded_down =
+      vcltq_f32(x, vcvtq_f32_s32(exponent));
+  // rounded_down is all ones for lanes below the truncated integer, i.e.
+  // -1, so add it to decrement the exponent.
+  exponent = vaddq_s32(exponent, vreinterpretq_s32_u32(rounded_down));
+  const float32x4_t fraction =
+      vsubq_f32(x, vcvtq_f32_s32(exponent));
+  float32x4_t p = vdupq_n_f32(0.00020823112435402593f);
+  p = vmlaq_f32(vdupq_n_f32(0.0012683808179469174f), fraction, p);
+  p = vmlaq_f32(vdupq_n_f32(0.009653717346266869f), fraction, p);
+  p = vmlaq_f32(vdupq_n_f32(0.055495068538714956f), fraction, p);
+  p = vmlaq_f32(vdupq_n_f32(0.24022742055953297f), fraction, p);
+  p = vmlaq_f32(vdupq_n_f32(0.6931471586519163f), fraction, p);
+  const float32x4_t power =
+      vaddq_f32(vdupq_n_f32(1.0f), vmulq_f32(fraction, p));
+
+  const uint32x4_t normal_bits = vshlq_n_u32(
+      vaddq_u32(vreinterpretq_u32_s32(exponent), vdupq_n_u32(127)), 23);
+  const uint32x4_t subnormal_bits = vshlq_u32(
+      vdupq_n_u32(1),
+      vaddq_s32(exponent, vdupq_n_s32(149)));
+  const uint32x4_t normal_mask =
+      vcgeq_s32(exponent, vdupq_n_s32(-126));
+  return vmulq_f32(
+      power, vreinterpretq_f32_u32(
+                 vbslq_u32(normal_mask, normal_bits, subnormal_bits)));
+}
+#endif
+
+void Pow4(const float base[4], const float exponent[4], float out[4]) {
+#if defined(__ARM_NEON)
+  for (int i = 0; i < 4; ++i) {
+    if (!(base[i] > 0.0f) ||
+        base[i] < std::numeric_limits<float>::min() ||
+        base[i] > std::numeric_limits<float>::max() ||
+        !(exponent[i] == exponent[i]) ||
+        std::fabs(exponent[i]) > 1.0e6f) {
+      for (int j = 0; j < 4; ++j)
+        out[j] = Pow(base[j], exponent[j]);
+      return;
+    }
+  }
+  float32x4_t z = vmulq_f32(vld1q_f32(exponent), Log2Neon(vld1q_f32(base)));
+  float z_values[4];
+  vst1q_f32(z_values, z);
+  for (int i = 0; i < 4; ++i) {
+    if (!(z_values[i] == z_values[i]) || z_values[i] > 127.0f) {
+      for (int j = 0; j < 4; ++j)
+        out[j] = Pow(base[j], exponent[j]);
+      return;
+    }
+  }
+  // Clamp only the lower end; exp2() underflows to zero far below -149.
+  z = vmaxq_f32(z, vdupq_n_f32(-200.0f));
+  vst1q_f32(out, Exp2Neon(z));
+#else
+  for (int i = 0; i < 4; ++i)
+    out[i] = Pow(base[i], exponent[i]);
+#endif
+}
+
 void Sin4(const float in[4], float out[4]) {
 #if defined(__ARM_NEON)
   for (int i = 0; i < 4; ++i) {

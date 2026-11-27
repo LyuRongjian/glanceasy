@@ -346,6 +346,63 @@ float BlendFactorValue(GLenum factor,
   }
 }
 
+// Blend factors that can be evaluated exactly from 8-bit source/destination
+// bytes.  Constant-colour factors are intentionally absent: they need the
+// blend colour, which the fixed-point path does not carry.
+bool FastBlendFactorSupported(GLenum factor) {
+  switch (factor) {
+    case GL_ZERO:
+    case GL_ONE:
+    case GL_SRC_COLOR:
+    case GL_ONE_MINUS_SRC_COLOR:
+    case GL_DST_COLOR:
+    case GL_ONE_MINUS_DST_COLOR:
+    case GL_SRC_ALPHA:
+    case GL_ONE_MINUS_SRC_ALPHA:
+    case GL_DST_ALPHA:
+    case GL_ONE_MINUS_DST_ALPHA:
+    case GL_SRC_ALPHA_SATURATE:
+      return true;
+    default:
+      return false;
+  }
+}
+
+int FastBlendFactorByte(GLenum factor,
+                        const uint8_t src[4],
+                        const uint8_t dst[4],
+                        int channel) {
+  switch (factor) {
+    case GL_ZERO:
+      return 0;
+    case GL_ONE:
+      return 255;
+    case GL_SRC_COLOR:
+      return src[channel];
+    case GL_ONE_MINUS_SRC_COLOR:
+      return 255 - src[channel];
+    case GL_DST_COLOR:
+      return dst[channel];
+    case GL_ONE_MINUS_DST_COLOR:
+      return 255 - dst[channel];
+    case GL_SRC_ALPHA:
+      return src[3];
+    case GL_ONE_MINUS_SRC_ALPHA:
+      return 255 - src[3];
+    case GL_DST_ALPHA:
+      return dst[3];
+    case GL_ONE_MINUS_DST_ALPHA:
+      return 255 - dst[3];
+    case GL_SRC_ALPHA_SATURATE:
+      return channel == 3
+                 ? 255
+                 : std::min(static_cast<int>(src[3]),
+                            255 - static_cast<int>(dst[3]));
+    default:
+      return 0;
+  }
+}
+
 float BlendCombine(GLenum equation, float src, float dst, float sf, float df) {
   switch (equation) {
     case GL_FUNC_SUBTRACT:
@@ -461,6 +518,7 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
 
   // FragmentSink implementation.
   void Shade(const Fragment& fragment) override;
+  void ShadeBatch(const Fragment* fragments, int count) override;
 
   // glsl::TextureSampler implementation.
   void Sample2D(int unit,
@@ -526,6 +584,10 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
     bool valid = false;
   };
 
+  void ShadeFragment(const Fragment& fragment,
+                     size_t pixel,
+                     int gl_y,
+                     const State& state);
   bool Prepare();
   const State& state() const;
   void FetchAttributes(GLuint index,
@@ -1622,6 +1684,34 @@ void Pipeline::Shade(const Fragment& fragment) {
   const size_t pixel =
       static_cast<size_t>(fragment.y) * target_.width + fragment.x +
       sample_offset;
+  ShadeFragment(fragment, pixel, gl_y, state);
+}
+
+void Pipeline::ShadeBatch(const Fragment* fragments, int count) {
+  if (!target_.valid() || count <= 0)
+    return;
+  const State& state = this->state();
+  for (int i = 0; i < count; ++i) {
+    const Fragment& fragment = fragments[i];
+    if (fragment.x < 0 || fragment.y < 0 || fragment.x >= target_.width ||
+        fragment.y >= target_.height)
+      continue;
+    const int gl_y = target_.height - 1 - fragment.y;
+    if (state.scissor_test && !state.scissor.Contains(fragment.x, gl_y))
+      continue;
+    const size_t sample_offset =
+        static_cast<size_t>(fragment.sample) * target_.sample_texels;
+    const size_t pixel =
+        static_cast<size_t>(fragment.y) * target_.width + fragment.x +
+        sample_offset;
+    ShadeFragment(fragment, pixel, gl_y, state);
+  }
+}
+
+void Pipeline::ShadeFragment(const Fragment& fragment,
+                             size_t pixel,
+                             int gl_y,
+                             const State& state) {
   context_->stats.fragments_shaded++;
 
   const float interpolated_depth =
@@ -1871,6 +1961,48 @@ void Pipeline::StoreFragmentColor(size_t pixel,
               state.blend.dst_rgb);
       ++bdbg;
     }
+  }
+  // Fixed-point fast path for the common GL_FUNC_ADD cases.  All source and
+  // destination factors are derived from 8-bit values, matching what a
+  // byte-oriented GPU does; the generic float path below remains for
+  // constant-colour factors and the subtract/min/max equations.
+  if (state.blend.enabled && !target_.color_is_srgb[attachment] &&
+      state.blend.equation_rgb == GL_FUNC_ADD &&
+      state.blend.equation_alpha == GL_FUNC_ADD &&
+      state.color_mask[0] && state.color_mask[1] && state.color_mask[2] &&
+      state.color_mask[3] &&
+      FastBlendFactorSupported(state.blend.src_rgb) &&
+      FastBlendFactorSupported(state.blend.dst_rgb) &&
+      FastBlendFactorSupported(state.blend.src_alpha) &&
+      FastBlendFactorSupported(state.blend.dst_alpha)) {
+    uint32_t existing;
+    memcpy(&existing, destination + pixel * 4, sizeof(existing));
+    const uint8_t dst[4] = {
+        static_cast<uint8_t>(existing & 0xFFu),
+        static_cast<uint8_t>((existing >> 8) & 0xFFu),
+        static_cast<uint8_t>((existing >> 16) & 0xFFu),
+        static_cast<uint8_t>((existing >> 24) & 0xFFu)};
+    uint8_t src[4];
+    for (int i = 0; i < 4; ++i)
+      src[i] = FloatToUnorm8(color[i]);
+    uint8_t out[4];
+    for (int i = 0; i < 3; ++i) {
+      const int sf = FastBlendFactorByte(state.blend.src_rgb, src, dst, i);
+      const int df = FastBlendFactorByte(state.blend.dst_rgb, src, dst, i);
+      const int sum = static_cast<int>(src[i]) * sf +
+                      static_cast<int>(dst[i]) * df;
+      out[i] = static_cast<uint8_t>(std::min(255, (sum + 127) / 255));
+    }
+    {
+      const int sf = FastBlendFactorByte(state.blend.src_alpha, src, dst, 3);
+      const int df = FastBlendFactorByte(state.blend.dst_alpha, src, dst, 3);
+      const int sum = static_cast<int>(src[3]) * sf +
+                      static_cast<int>(dst[3]) * df;
+      out[3] = static_cast<uint8_t>(std::min(255, (sum + 127) / 255));
+    }
+    const uint32_t packed = PackRgba(out[0], out[1], out[2], out[3]);
+    memcpy(destination + pixel * 4, &packed, sizeof(packed));
+    return;
   }
   if (state.blend.enabled) {
     float destination_color[4];

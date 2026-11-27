@@ -46,6 +46,13 @@ class FragmentSink {
  public:
   virtual ~FragmentSink() = default;
   virtual void Shade(const Fragment& fragment) = 0;
+  // Optional four-fragment entry point.  The default keeps existing sinks
+  // working; pipelines override it to hoist per-draw validation out of the
+  // inner loop and to avoid one virtual dispatch per pixel.
+  virtual void ShadeBatch(const Fragment* fragments, int count) {
+    for (int i = 0; i < count; ++i)
+      Shade(fragments[i]);
+  }
 };
 
 // Scanline-free triangle rasteriser: for every row of the bounding box the
