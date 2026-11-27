@@ -163,6 +163,32 @@ cmake --build build-egl -j
 See [docs/BENCHMARK.md](docs/BENCHMARK.md) for the glmark2 build, the QEMU
 commands, the current scores and their caveats.
 
+### RV1106G3 measurements
+
+The board numbers below were collected off-screen with
+`glmark2-es2-null`, `duration=1` and the exact 11-tap desktop blur (no
+`GLANCEASY_APPROX_BLUR`). They are Cortex-A7 results, not QEMU estimates.
+
+| Scene | 40x30 | 60x45 |
+| --- | ---: | ---: |
+| `build` | 9.3 ms / 108 fps | 11.7 ms / 86 fps |
+| `texture` | 2.5 ms / 403 fps | 5.3 ms / 191 fps |
+| `shading` | 19.3 ms / 52 fps | 22.2 ms / 46 fps |
+| `bump` | 5.9 ms / 171 fps | 8.2 ms / 122 fps |
+| `effect2d` | 5.5 ms / 183 fps | 11.0 ms / 91 fps |
+| `pulsar` | 2.2 ms / 446 fps | 4.1 ms / 244 fps |
+| `conditionals` | 24.7 ms / 41 fps | 27.6 ms / 37 fps |
+| `function` | 25.1 ms / 40 fps | 28.5 ms / 36 fps |
+| `loop` | 24.6 ms / 41 fps | 28.2 ms / 36 fps |
+| `desktop` (exact blur) | 13.6 ms / 74 fps | 27.9 ms / 36 fps |
+| `jellyfish` | 145.8 ms / 7 fps | 168.8 ms / 6 fps |
+
+Exact desktop blur clears 30 fps at 40x30 and 60x45. At 80x60 it is about
+50 ms / 20 fps, so a 60x45 internal target followed by an upscale is the
+practical 30 fps configuration. `jellyfish` is vertex-bound (13.2k vertices
+with a heavy vertex shader), not fragment-bound; see the full per-pass notes
+and the approximation switches in `docs/BENCHMARK.md`.
+
 ## Rendering the demo
 
 `examples/render_cube.cpp` draws a perspective-projected, depth-tested cube into

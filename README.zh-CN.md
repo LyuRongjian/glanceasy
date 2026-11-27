@@ -154,6 +154,31 @@ cmake --build build-egl -j
 glmark2 的构建、QEMU 运行命令、当前分数和注意事项见
 [docs/BENCHMARK.md](docs/BENCHMARK.md)。
 
+### RV1106G3 实机测试
+
+下表数据均在 RV1106G3 板端以 `glmark2-es2-null` 离屏运行，`duration=1`，
+desktop 使用精确的 11-tap 模糊（未开启 `GLANCEASY_APPROX_BLUR`）。这些是
+Cortex-A7 实机结果，不是 QEMU 估算。
+
+| 场景 | 40x30 | 60x45 |
+| --- | ---: | ---: |
+| `build` | 9.3 ms / 108 fps | 11.7 ms / 86 fps |
+| `texture` | 2.5 ms / 403 fps | 5.3 ms / 191 fps |
+| `shading` | 19.3 ms / 52 fps | 22.2 ms / 46 fps |
+| `bump` | 5.9 ms / 171 fps | 8.2 ms / 122 fps |
+| `effect2d` | 5.5 ms / 183 fps | 11.0 ms / 91 fps |
+| `pulsar` | 2.2 ms / 446 fps | 4.1 ms / 244 fps |
+| `conditionals` | 24.7 ms / 41 fps | 27.6 ms / 37 fps |
+| `function` | 25.1 ms / 40 fps | 28.5 ms / 36 fps |
+| `loop` | 24.6 ms / 41 fps | 28.2 ms / 36 fps |
+| `desktop`（精确模糊） | 13.6 ms / 74 fps | 27.9 ms / 36 fps |
+| `jellyfish` | 145.8 ms / 7 fps | 168.8 ms / 6 fps |
+
+精确 desktop 模糊在 40x30 和 60x45 均已达到 30 fps；80x60 时约
+50 ms / 20 fps，因此实际 30 fps 配置建议内部按 60x45 渲染再放大。
+`jellyfish` 受 13.2k 顶点和复杂顶点 shader 限制，属于顶点瓶颈，不是
+fragment 瓶颈。完整的分轮数据和近似开关见 `docs/BENCHMARK.md`。
+
 ## 渲染示例
 
 `examples/render_cube.cpp` 使用公开 API 绘制一个带透视投影和深度测试的立方体，
