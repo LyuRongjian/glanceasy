@@ -79,17 +79,6 @@ const Type& Type::array_element() const {
   return element_ ? *element_ : empty;
 }
 
-int Type::components() const {
-  switch (kind_) {
-    case TypeKind::kBasic:
-      return is_matrix() ? rows_ * columns_ : rows_;
-    case TypeKind::kArray:
-      return array_size_ * array_element().components();
-    case TypeKind::kStruct:
-      return struct_ ? struct_->components : 0;
-  }
-  return 0;
-}
 
 std::string Type::Name() const {
   if (kind_ == TypeKind::kArray)

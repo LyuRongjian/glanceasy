@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/glanceasy_common.h"
 #include "src/glanceasy_texture_compressed.h"
 
 #include <algorithm>
@@ -309,7 +310,7 @@ void DecodeEac11(uint8_t* rgba, uint64_t src, bool signed_mode, int channel) {
       value = multiplier != 0 ? base * 8 + multiplier * modifier * 8
                               : base * 8 + modifier;
       value = std::max(-1023, std::min(1023, value));
-      if (getenv("GLANCEASY_DEBUG_EAC") && i < 4)
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_EAC") && i < 4)
         fprintf(stderr, "[eac] src=%llx base=%d mul=%d tab=%u idx=%u mod=%d raw=%d\n",
                 (unsigned long long)src, base, multiplier, table, index,
                 modifier, value);

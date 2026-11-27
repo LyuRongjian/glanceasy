@@ -253,7 +253,7 @@ void JitTexture(const JitRuntime* runtime,
                    std::sqrt(dudy * dudy + dvdy * dvdy));
       if (rho > 0.0f)
         lod += std::log2(rho);
-      if (getenv("GLANCEASY_DEBUG_CUBE_LOD")) {
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_CUBE_LOD")) {
         static int cld = 0;
         if (cld++ < 3)
           fprintf(stderr,
@@ -283,7 +283,7 @@ void JitTexture(const JitRuntime* runtime,
     const float rho = std::sqrt(std::max(rho_dx, rho_dy));
     if (rho > 0.0f)
       lod += std::log2(rho);
-    if (getenv("GLANCEASY_DEBUG_LOD")) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_LOD")) {
       static int lod_dbg = 0;
       if (lod_dbg < 20000) {
         fprintf(stderr, "[jitlod] rho=%.3f lod=%.3f dims=%d coord=%.3f %.3f %.3f dx=%.3f %.3f %.3f off=%d\n",
@@ -1381,7 +1381,7 @@ bool ShaderJit::Impl::EmitTextureCall(const Expr& expr,
   call->arg_count = static_cast<int>(expr.args.size());
   for (int i = 0; i < call->arg_count; ++i)
     call->arg_types[i] = expr.args[i]->type;
-  if (getenv("GLANCEASY_DEBUG_CUBE")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_CUBE")) {
     static int emb = 0;
     if (emb++ < 4)
       fprintf(stderr, "[emittex] func=%d coordoff=%d arg1kind=%d comps=%d idx=%d vary=%zu\n",
@@ -1924,7 +1924,7 @@ bool ShaderJit::Impl::Compile(std::string* reason) {
     g_jit_counters.fallback_stages++;
     return false;
   }
-  if (getenv("GLANCEASY_JIT_TRACE"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_JIT_TRACE"))
     fprintf(stderr, "JIT compile start stage=%d\n", static_cast<int>(ast_.stage));
   if (!Scan()) {
     g_jit_counters.fallback_stages++;
@@ -1932,10 +1932,10 @@ bool ShaderJit::Impl::Compile(std::string* reason) {
       *reason = "shader uses a construct outside the SLJIT fast path";
     return false;
   }
-  if (getenv("GLANCEASY_JIT_TRACE"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_JIT_TRACE"))
     fprintf(stderr, "JIT scan ok stage=%d\n", static_cast<int>(ast_.stage));
   compiler_ = sljit_create_compiler(nullptr);
-  if (compiler_ && getenv("GLANCEASY_JIT_VERBOSE"))
+  if (compiler_ && GLANCEASY_DEBUG_FLAG("GLANCEASY_JIT_VERBOSE"))
     sljit_compiler_verbose(compiler_, stderr);
   if (!compiler_) {
     g_jit_counters.fallback_stages++;
@@ -1960,7 +1960,7 @@ bool ShaderJit::Impl::Compile(std::string* reason) {
     g_jit_counters.fallback_stages++;
     return false;
   }
-  if (getenv("GLANCEASY_JIT_TRACE"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_JIT_TRACE"))
     fprintf(stderr, "JIT lowered stage=%d\n", static_cast<int>(ast_.stage));
   end_label_ = sljit_emit_label(compiler_);
   for (sljit_jump* jump : end_jumps_)
@@ -1968,7 +1968,7 @@ bool ShaderJit::Impl::Compile(std::string* reason) {
   sljit_emit_return_void(compiler_);
 
   void* code = sljit_generate_code(compiler_, 0, nullptr);
-  if (getenv("GLANCEASY_JIT_TRACE"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_JIT_TRACE"))
     fprintf(stderr, "JIT generated stage=%d code=%p\n",
             static_cast<int>(ast_.stage), code);
   sljit_free_compiler(compiler_);
@@ -1982,7 +1982,7 @@ bool ShaderJit::Impl::Compile(std::string* reason) {
   code_ = code;
   entry_ = reinterpret_cast<Entry>(code);
   locals_.assign(static_cast<size_t>(frame_slots_) * kValueFloats, 0.0f);
-  if (getenv("GLANCEASY_JIT_TRACE")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_JIT_TRACE")) {
     fprintf(stderr, "JIT compiled stage=%d slots=%d code=%p\n",
             static_cast<int>(ast_.stage), frame_slots_, code);
   }
@@ -1993,7 +1993,7 @@ bool ShaderJit::Impl::Compile(std::string* reason) {
 bool ShaderJit::Impl::Run(const JitRunInputs& inputs, bool* discarded) {
   if (!entry_)
     return false;
-  if (getenv("GLANCEASY_JIT_TRACE"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_JIT_TRACE"))
     fprintf(stderr, "JIT run stage=%d entry=%p\n", static_cast<int>(ast_.stage),
             reinterpret_cast<void*>(entry_));
   JitRuntime runtime = {};
@@ -2025,7 +2025,7 @@ ShaderJit::~ShaderJit() = default;
 
 std::unique_ptr<ShaderJit> ShaderJit::Compile(const ShaderAst& ast,
                                               std::string* reason) {
-  if (getenv("GLANCEASY_DISABLE_JIT")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DISABLE_JIT")) {
     glanceasy::glsl::g_jit_counters.fallback_stages++;
     if (reason)
       *reason = "disabled by GLANCEASY_DISABLE_JIT";

@@ -6,11 +6,19 @@
 #define GLANCEASY_SRC_COMMON_H_
 
 #include <stdint.h>
+#include <stdlib.h>
 
 #include <algorithm>
 #include <cmath>
 
 namespace glanceasy {
+
+// Debug switches are read once per call site instead of on every pixel.  A
+// plain getenv() in a per-fragment branch shows up as several percent of the
+// frame on Cortex-A7, so cache the lookup in a function-local static.
+#define GLANCEASY_DEBUG_FLAG(name) \
+  ([]() { static const char* value = ::getenv(name); return value; }())
+
 
 // ES 3.0 minimum limits.  The CPU backend advertises exactly these numbers
 // so that applications written against the minimum feature set are happy.
@@ -30,10 +38,10 @@ constexpr int kMaxTransformFeedbackBuffers = 4;
 constexpr int kMaxColorAttachments = 4;
 constexpr int kMaxSamples = 4;
 
-// Number of floats reserved for a single uniform / varying slot.  Transform
-// feedback can capture a whole mat4 array, whose flattened value spans more
-// than the sixteen floats of one matrix.
-constexpr int kValueFloats = 64;
+// Inline storage for one Value.  Sixteen floats cover a mat4, the largest
+// basic GLSL type; arrays and structures use Value::aggregate instead.  This
+// used to be 64, which made every scalar temporary 600+ bytes on Cortex-A7.
+constexpr int kValueFloats = 16;
 
 struct Rect {
   int x = 0;

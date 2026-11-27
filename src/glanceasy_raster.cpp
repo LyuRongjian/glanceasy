@@ -77,7 +77,7 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
   int x1 = std::min(clip_.right() - 1, static_cast<int>(std::ceil(max_x)));
   int y0 = std::max(clip_.y, static_cast<int>(std::floor(min_y)));
   int y1 = std::min(clip_.bottom() - 1, static_cast<int>(std::ceil(max_y)));
-  if (getenv("GLANCEASY_DEBUG_RAST")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_RAST")) {
     static int dbg = 0;
     if (dbg < 8) {
       fprintf(stderr, "[rast] bbox=%d,%d..%d,%d clip=%d,%d,%d,%d\n", x0, y0, x1,
@@ -143,6 +143,54 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
   const float z0 = v0->z - v2->z;
   const float z1 = v1->z - v2->z;
 
+  auto shade_pixel = [&](int x, int y, float w0, float w1) {
+    Fragment fragment;
+    fragment.x = x;
+    fragment.y = y;
+    fragment.depth = v2->z + w0 * z0 + w1 * z1;
+    fragment.bary[0] = w0;
+    fragment.bary[1] = w1;
+    fragment.bary[2] = 1.0f - w0 - w1;
+    fragment.dbary[0][0] = db0_dx;
+    fragment.dbary[0][1] = db0_dy;
+    fragment.dbary[1][0] = db1_dx;
+    fragment.dbary[1][1] = db1_dy;
+    fragment.dbary[2][0] = -db0_dx - db1_dx;
+    fragment.dbary[2][1] = -db0_dy - db1_dy;
+    fragment.vertex[0] = i0;
+    fragment.vertex[1] = i1;
+    fragment.vertex[2] = i2;
+    fragment.provoking = index_c;
+    sink->Shade(fragment);
+  };
+
+  // A run is a short horizontal span of pixels that share the same row.  For
+  // a convex triangle, every pixel between two strictly interior endpoints is
+  // also inside; checking the endpoints once removes three edge functions per
+  // pixel for the common fill-heavy case.
+  auto run_inside = [&](int xa, int xb, int y) {
+    if (det_int == 0 || xa > xb)
+      return false;
+    const int64_t qy = QuantizeSubpixel(static_cast<float>(y) + 0.5f);
+    const int64_t qxa = QuantizeSubpixel(static_cast<float>(xa) + 0.5f);
+    const int64_t qxb = QuantizeSubpixel(static_cast<float>(xb) + 0.5f);
+    const bool positive = det_int > 0;
+    const auto inside_edge = [&](int64_t e) {
+      return positive ? e > 0 : e < 0;
+    };
+    const auto edge_values = [&](int64_t qx, int64_t* e0, int64_t* e1,
+                                 int64_t* e2) {
+      *e0 = EdgeFunction(qx1, qy1, qx2, qy2, qx, qy);
+      *e1 = EdgeFunction(qx2, qy2, qx0, qy0, qx, qy);
+      *e2 = det_int - *e0 - *e1;
+    };
+    int64_t a0, a1, a2, b0, b1, b2;
+    edge_values(qxa, &a0, &a1, &a2);
+    edge_values(qxb, &b0, &b1, &b2);
+    return inside_edge(a0) && inside_edge(a1) && inside_edge(a2) &&
+           inside_edge(b0) && inside_edge(b1) && inside_edge(b2);
+  };
+
   for (int y = y0; y <= y1; ++y) {
     const float py = static_cast<float>(y) + 0.5f;
     float px = static_cast<float>(x0) + 0.5f;
@@ -155,8 +203,8 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
     const float step0 = dw0_dx;
     const float step1 = dw1_dx;
 
-    for (int x = x0; x <= x1; ++x) {
-      if (samples_ > 1 && sample_positions_) {
+    if (samples_ > 1 && sample_positions_) {
+      for (int x = x0; x <= x1; ++x) {
         for (int sample = 0; sample < samples_; ++sample) {
           const float sx = static_cast<float>(x) + 0.5f +
                            sample_positions_[sample][0];
@@ -193,29 +241,28 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
           fragment.provoking = index_c;
           sink->Shade(fragment);
         }
-      } else if (covers(QuantizeSubpixel(px), QuantizeSubpixel(py))) {
-        Fragment fragment;
-        fragment.x = x;
-        fragment.y = y;
-        fragment.depth = v2->z + w0 * z0 + w1 * z1;
-        fragment.bary[0] = w0;
-        fragment.bary[1] = w1;
-        fragment.bary[2] = 1.0f - w0 - w1;
-        fragment.dbary[0][0] = db0_dx;
-        fragment.dbary[0][1] = db0_dy;
-        fragment.dbary[1][0] = db1_dx;
-        fragment.dbary[1][1] = db1_dy;
-        fragment.dbary[2][0] = -db0_dx - db1_dx;
-        fragment.dbary[2][1] = -db0_dy - db1_dy;
-        fragment.vertex[0] = i0;
-        fragment.vertex[1] = i1;
-        fragment.vertex[2] = i2;
-        fragment.provoking = index_c;
-        sink->Shade(fragment);
+        w0 += step0;
+        w1 += step1;
+        px += 1.0f;
       }
-      w0 += step0;
-      w1 += step1;
-      px += 1.0f;
+    } else {
+      int x = x0;
+      while (x <= x1) {
+        const int run_end = std::min(x + 7, x1);
+        // A convex triangle is covered everywhere between two interior
+        // endpoints, so an eight-pixel run usually needs no per-pixel edge
+        // tests at all.
+        const bool interior = run_inside(x, run_end, y);
+        for (; x <= run_end; ++x) {
+          if (interior ||
+              covers(QuantizeSubpixel(px), QuantizeSubpixel(py))) {
+            shade_pixel(x, y, w0, w1);
+          }
+          w0 += step0;
+          w1 += step1;
+          px += 1.0f;
+        }
+      }
     }
   }
 }

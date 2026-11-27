@@ -236,6 +236,29 @@ bool DepthTestPasses(GLenum func, float incoming, float stored) {
   }
 }
 
+bool DepthTestPasses16(GLenum func, uint16_t incoming, uint16_t stored) {
+  switch (func) {
+    case GL_NEVER:
+      return false;
+    case GL_LESS:
+      return incoming < stored;
+    case GL_EQUAL:
+      return incoming == stored;
+    case GL_LEQUAL:
+      return incoming <= stored;
+    case GL_GREATER:
+      return incoming > stored;
+    case GL_NOTEQUAL:
+      return incoming != stored;
+    case GL_GEQUAL:
+      return incoming >= stored;
+    case GL_ALWAYS:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool StencilTestPasses(GLenum func, uint8_t reference, uint8_t stored) {
   switch (func) {
     case GL_NEVER:
@@ -548,6 +571,10 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
   int stride_ = kFloatPerPosition;
   int varying_floats_ = 0;
   bool empty_clip_ = false;
+  int active_attribute_count_ = 0;
+  GLuint active_attributes_[kMaxVertexAttribs] = {};
+  float default_attribute_floats_[kMaxVertexAttribs * 4] = {};
+  uint32_t default_attribute_ints_[kMaxVertexAttribs * 4] = {};
 
   std::vector<float> cache_;
   std::vector<CachedVertex> cache_vertices_;
@@ -583,7 +610,7 @@ void Pipeline::Run(GLenum mode,
                    GLsizei instance_count) {
   if (!Prepare())
     return;
-  if (getenv("GLANCEASY_DEBUG_ERROR"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr,
             "[draw] %dx%d vp=%d,%d,%d,%d scissor=%d empty=%d count=%d "
             "instances=%d prog=%u vf=%d\n",
@@ -870,7 +897,7 @@ bool Pipeline::Prepare() {
     size_t available = buffer->data.size() - binding.offset;
     if (binding.size < available)
       available = binding.size;
-    if (getenv("GLANCEASY_DEBUG_UBO")) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_UBO")) {
       fprintf(stderr, "DRAW block=%s bp=%d id=%u off=%zu size=%zu bytes=%zu\n",
               program_->uniform_blocks()[i].name.c_str(), binding_point,
               binding.buffer, static_cast<size_t>(binding.offset),
@@ -892,6 +919,16 @@ bool Pipeline::Prepare() {
           {info.offset, info.offset + info.components});
   }
   stride_ = kFloatPerPosition + varying_floats_;
+  active_attribute_count_ = 0;
+  for (int i = 0; i < kMaxVertexAttribs; ++i) {
+    if (vertex_array_->attributes[i].enabled)
+      active_attributes_[active_attribute_count_++] = static_cast<GLuint>(i);
+    for (int c = 0; c < 4; ++c) {
+      default_attribute_floats_[i * 4 + c] = state.current_attribute[i][c];
+      default_attribute_ints_[i * 4 + c] = static_cast<uint32_t>(
+          state.current_attribute_integer[i][c]);
+    }
+  }
   cache_.assign(static_cast<size_t>(kVertexCacheSize) * stride_, 0.0f);
   cache_vertices_.assign(kVertexCacheSize, CachedVertex());
   next_cache_slot_ = 0;
@@ -914,7 +951,7 @@ bool Pipeline::Prepare() {
     clip = clip.Intersect(scissor);
   }
   empty_clip_ = clip.IsEmpty();
-  if (getenv("GLANCEASY_DEBUG_VIEWPORT")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VIEWPORT")) {
     for (int i = 0; i < 2; ++i) {
       const VertexAttribute& a = vertex_array_->attributes[i];
       fprintf(stderr, "[attribstate] %d en=%d size=%d stride=%d ptr=%p buf=%u\n",
@@ -979,18 +1016,18 @@ void Pipeline::FetchAttributes(GLuint index,
                                int instance,
                                float* attributes,
                                uint32_t* attribute_int) const {
-  for (int i = 0; i < kMaxVertexAttribs; ++i) {
+  // Disabled attributes are constant for the whole draw, so copy the cached
+  // defaults once and then touch only the enabled slots.  A 16-way branch
+  // per vertex was ~7% of the phong scene on Cortex-A7.
+  memcpy(attributes, default_attribute_floats_,
+         sizeof(default_attribute_floats_));
+  memcpy(attribute_int, default_attribute_ints_,
+         sizeof(default_attribute_ints_));
+  for (int slot = 0; slot < active_attribute_count_; ++slot) {
+    const GLuint i = active_attributes_[slot];
     float* destination = attributes + i * 4;
     uint32_t* int_destination = attribute_int + i * 4;
     const VertexAttribute& attribute = vertex_array_->attributes[i];
-    if (!attribute.enabled) {
-      for (int c = 0; c < 4; ++c) {
-        destination[c] = context_->state.current_attribute[i][c];
-        int_destination[c] = static_cast<uint32_t>(
-            context_->state.current_attribute_integer[i][c]);
-      }
-      continue;
-    }
     destination[0] = 0.0f;
     destination[1] = 0.0f;
     destination[2] = 0.0f;
@@ -1201,7 +1238,7 @@ void Pipeline::EmitPoint(GLuint index, int instance) {
   current_front_ = true;
   polygon_ = false;
   depth_offset_ = 0.0f;
-  if (getenv("GLANCEASY_DEBUG_POINT"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_POINT"))
     fprintf(stderr, "[pt] center=%.2f,%.2f size=%.2f\n", screen.x, screen.y, size);
   rasterizer_.DrawPoint(screen, 0, size, this);
 }
@@ -1331,20 +1368,41 @@ void Pipeline::ProcessTriangle(const float* a, const float* b, const float* c) {
   }
   int count = 3;
   const float* polygon = clip_.data();
-  float* destination = scratch_.data();
-  for (int plane = 0; plane < 6 && count >= 3; ++plane) {
-    count = ClipPolygon(polygon, count, plane, destination);
-    polygon = destination;
-    destination =
-        destination == scratch_.data() ? clip_.data() : scratch_.data();
+  // Most triangles in a typical scene are completely inside the frustum.
+  // Testing three vertices against six planes is much cheaper than running
+  // the polygon clipper and duplicate removal for every triangle.
+  bool inside = true;
+  for (int i = 0; i < 3 && inside; ++i) {
+    const float* position = clip_.data() + static_cast<size_t>(i) * stride_;
+    if (!(position[3] > 0.0f)) {
+      inside = false;
+      break;
+    }
+    for (int plane = 0; plane < 6; ++plane) {
+      if (PlaneDistance(position, plane) < 0.0f) {
+        inside = false;
+        break;
+      }
+    }
   }
-  if (count < 3)
-    return;
-  if (polygon != clip_.data())
-    memcpy(clip_.data(), polygon, sizeof(float) * stride_ * count);
+  bool clipped = false;
+  if (!inside) {
+    float* destination = scratch_.data();
+    for (int plane = 0; plane < 6 && count >= 3; ++plane) {
+      count = ClipPolygon(polygon, count, plane, destination);
+      polygon = destination;
+      destination =
+          destination == scratch_.data() ? clip_.data() : scratch_.data();
+    }
+    if (count < 3)
+      return;
+    if (polygon != clip_.data())
+      memcpy(clip_.data(), polygon, sizeof(float) * stride_ * count);
+    clipped = true;
+  }
 
   int unique = 0;
-  for (int i = 0; i < count; ++i) {
+  for (int i = 0; clipped && i < count; ++i) {
     const float* candidate = clip_.data() + static_cast<size_t>(i) * stride_;
     bool duplicate = false;
     for (int j = 0; j < unique; ++j) {
@@ -1364,7 +1422,7 @@ void Pipeline::ProcessTriangle(const float* a, const float* b, const float* c) {
       ++unique;
     }
   }
-  count = unique;
+  count = clipped ? unique : count;
   if (count < 3)
     return;
 
@@ -1430,7 +1488,7 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
         return true;
     return false;
   };
-  if (getenv("GLANCEASY_DEBUG_DER")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DER")) {
     static int interp_dbg = 0;
     if (interp_dbg < 4) {
       fprintf(stderr, "[interp] bary=%.3f,%.3f,%.3f db=%.4f,%.4f v0=%.3f v1=%.3f v2=%.3f\n",
@@ -1439,14 +1497,14 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
       ++interp_dbg;
     }
   }
-  if (getenv("GLANCEASY_DEBUG_FLAT")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FLAT")) {
     fprintf(stderr, "interp prov=%d ranges=%zu bary=%.3f,%.3f,%.3f verts=%d,%d,%d flat0=%d val=%.2f provval=%.2f\n",
             provoking_index, flat_varying_ranges_.size(), bary0, bary1, bary2,
             fragment.vertex[0], fragment.vertex[1], fragment.vertex[2],
             flat_varying_ranges_.empty() ? -1 : is_flat(0),
             out[0], provoking[0]);
   }
-  if (getenv("GLANCEASY_DEBUG_CUBE") && varying_floats_ >= 3) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_CUBE") && varying_floats_ >= 3) {
     static int cdbg = 0;
     if (cdbg++ < 4)
       fprintf(stderr,
@@ -1480,7 +1538,7 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
                            vertex1[i] * (bary1 - b1dy) +
                            vertex2[i] * (1.0f - bary0 + b0dy - bary1 + b1dy);
     }
-    if (getenv("GLANCEASY_DEBUG_VAR")) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VAR")) {
       static int vdbg = 0;
       if (vdbg++ < 2) {
         fprintf(stderr, "[var] n=%d bary=(%.4f,%.4f,%.4f) db=(%.4f,%.4f)\n",
@@ -1491,7 +1549,7 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
                   varying_dx_values_[i], varying_dy_values_[i]);
       }
     }
-    if (getenv("GLANCEASY_DEBUG_DER")) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DER")) {
       static int adbg = 0;
       if (adbg < 3) {
         fprintf(stderr, "[interp-aff] out0=%.4f dx0=%.4f dy0=%.4f\n", out[0],
@@ -1587,10 +1645,10 @@ void Pipeline::Shade(const Fragment& fragment) {
 
   const bool writes_depth = program_->uses_frag_depth();
   const bool has_depth = target_.depth != nullptr;
+  const uint16_t interpolated_depth16 = ToDepth16(interpolated_depth);
   if (state.depth.test && has_depth && !writes_depth) {
-    const float stored = Unorm16ToFloat(target_.depth[pixel]);
-    const float incoming = Unorm16ToFloat(ToDepth16(interpolated_depth));
-    if (!DepthTestPasses(state.depth.func, incoming, stored)) {
+    if (!DepthTestPasses16(state.depth.func, interpolated_depth16,
+                           target_.depth[pixel])) {
       if (state.stencil.test && has_stencil)
         ApplyStencilOp(face->op_depth_fail, pixel, reference, static_cast<uint8_t>(face->write_mask));
       return;
@@ -1598,7 +1656,7 @@ void Pipeline::Shade(const Fragment& fragment) {
   }
 
   Interpolate(fragment, varying_values_.data());
-  if (getenv("GLANCEASY_DEBUG_VIEWPORT") && varying_floats_ >= 2) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VIEWPORT") && varying_floats_ >= 2) {
     static int fv_debug[8] = {};
     const unsigned program = static_cast<unsigned>(context_->state.program);
     if (program < 8 && fv_debug[program] < 3) {
@@ -1667,13 +1725,12 @@ void Pipeline::Shade(const Fragment& fragment) {
       return;
   }
 
-  float depth = interpolated_depth;
+  uint16_t depth16 = interpolated_depth16;
   if (output.writes_depth) {
-    depth = Clamp01(output.depth);
+    depth16 = ToDepth16(Clamp01(output.depth));
     if (state.depth.test && has_depth &&
-        !DepthTestPasses(state.depth.func,
-                         Unorm16ToFloat(ToDepth16(depth)),
-                         Unorm16ToFloat(target_.depth[pixel]))) {
+        !DepthTestPasses16(state.depth.func, depth16,
+                           target_.depth[pixel])) {
       if (state.stencil.test && has_stencil)
         ApplyStencilOp(face->op_depth_fail, pixel, reference, static_cast<uint8_t>(face->write_mask));
       return;
@@ -1684,7 +1741,7 @@ void Pipeline::Shade(const Fragment& fragment) {
     ApplyStencilOp(face->op_pass, pixel, reference, static_cast<uint8_t>(face->write_mask));
 
   if (state.depth.test && has_depth && state.depth.mask)
-    target_.depth[pixel] = ToDepth16(depth);
+    target_.depth[pixel] = depth16;
 
   bool wrote_color = false;
   for (int location = 0; location < glsl::kMaxFragmentOutputs; ++location) {
@@ -1752,7 +1809,7 @@ void Pipeline::StoreFragmentColor(size_t pixel,
   uint8_t* const destination = target_.colors[attachment];
   if (!destination)
     return;
-  if (getenv("GLANCEASY_DEBUG_INT") && !target_.color_is_integer[attachment]) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INT") && !target_.color_is_integer[attachment]) {
     static int fb_debug = 0;
     if (fb_debug < 12 && (fb_debug < 3 || pixel % 4096 == 0)) {
       fprintf(stderr, "[fbstore] pix=%zu base=%d color=%.4f %.4f %.4f %.4f dst=%p\n",
@@ -1784,7 +1841,7 @@ void Pipeline::StoreFragmentColor(size_t pixel,
     }
     uint32_t* const integer_destination =
         target_.integer_colors[attachment];
-    if (getenv("GLANCEASY_DEBUG_INT") && integer_destination) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INT") && integer_destination) {
       static int int_debug = 0;
       if (int_debug < 6) {
         fprintf(stderr, "[intstore] pix=%zu base=%d ints=%u,%u,%u,%u dst=%p\n",
@@ -1806,7 +1863,7 @@ void Pipeline::StoreFragmentColor(size_t pixel,
     memcpy(integer_destination + pixel * 4, values, sizeof(values));
     return;
   }
-  if (getenv("GLANCEASY_DEBUG_RAST")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_RAST")) {
     static int bdbg = 0;
     if (bdbg < 4) {
       fprintf(stderr, "[blend] enabled=%d src=%x dst=%x\n",
@@ -1865,7 +1922,7 @@ void Pipeline::StoreFragmentColor(size_t pixel,
   }
   uint8_t bytes[4];
   const bool srgb = target_.color_is_srgb[attachment];
-  if (getenv("GLANCEASY_DEBUG_SRGB")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_SRGB")) {
     static int dbg = 0;
     if (dbg++ < 4)
       fprintf(stderr, "[store] attach=%d srgb=%d color=%.4f %.4f %.4f\n",
@@ -2030,7 +2087,7 @@ void Pipeline::Fetch2DArray(int unit,
   const int level = ClampInt(lod, 0, 30);
   const TextureImage* image =
       texture->image(level + std::max(0, texture->base_level), 0);
-  if (getenv("GLANCEASY_DEBUG_TEX"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_TEX"))
     fprintf(stderr,
             "[fetch2da] unit=%d x=%d y=%d layer=%d lod=%d depth=%d levels=%d "
             "img=%dx%dx%d base=%d\n",
@@ -2054,7 +2111,7 @@ void Pipeline::Fetch2DArray(int unit,
 namespace {
 
 void MaskSampledAlpha(GLenum internal_format, float out[4]) {
-  if (getenv("GLANCEASY_DEBUG_ALPHA"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ALPHA"))
     fprintf(stderr, "[alpha] %x %d %g %g %g %g", internal_format, FormatColorChannels(internal_format), out[0], out[1], out[2], out[3]);
   // Legacy single-channel formats keep their non-color channels explicit.
   if (internal_format == GL_ALPHA) {
@@ -2106,7 +2163,7 @@ void Pipeline::Sample2D(int unit,
     wrap_s = sampler->wrap_s;
     wrap_t = sampler->wrap_t;
   }
-  if (getenv("GLANCEASY_DEBUG_VIEWPORT") &&
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VIEWPORT") &&
       (unit != 0 || (u < 0.01f && v > 0.97f))) {
     static int sd = 0;
     if (sd < 200) {
@@ -2156,7 +2213,7 @@ float CompareDepth(float reference, float depth, GLenum func) {
       pass = true;
       break;
   }
-  if (getenv("GLANCEASY_CMP_INVERT"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_CMP_INVERT"))
     pass = !pass;
   return pass ? 1.0f : 0.0f;
 }
@@ -2274,12 +2331,12 @@ void Pipeline::Sample2DArrayShadow(int unit,
   }
   float depth[4];
   float layer_arg = layer;
-  if (const char* off = getenv("GLANCEASY_LAYER_OFF"))
+  if (const char* off = GLANCEASY_DEBUG_FLAG("GLANCEASY_LAYER_OFF"))
     layer_arg += static_cast<float>(atof(off));
-  const bool swap_uv = getenv("GLANCEASY_SHADOW_SWAP") != nullptr;
-  const float su = getenv("GLANCEASY_SHADOW_FLIP_S") ? 1.0f - (swap_uv ? v : u)
+  const bool swap_uv = GLANCEASY_DEBUG_FLAG("GLANCEASY_SHADOW_SWAP") != nullptr;
+  const float su = GLANCEASY_DEBUG_FLAG("GLANCEASY_SHADOW_FLIP_S") ? 1.0f - (swap_uv ? v : u)
                                                : (swap_uv ? v : u);
-  const float sv = getenv("GLANCEASY_SHADOW_FLIP_T") ? 1.0f - (swap_uv ? u : v)
+  const float sv = GLANCEASY_DEBUG_FLAG("GLANCEASY_SHADOW_FLIP_T") ? 1.0f - (swap_uv ? u : v)
                                                : (swap_uv ? u : v);
   const GLenum active_filter =
       lod_bias <= 0.0f ? mag_filter : min_filter;
@@ -2320,7 +2377,7 @@ void Pipeline::Sample2DArrayShadow(int unit,
     out[0] = CompareDepth(ref, depth[0], compare_func);
   }
 
-  if (getenv("GLANCEASY_DEBUG_TEXARR")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_TEXARR")) {
     static int cdbg = 0;
     if (cdbg++ < 5)
       fprintf(stderr, "[cmp] func=%x ref=%.4f depth=%.4f out=%.1f\n",

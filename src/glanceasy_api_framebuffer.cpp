@@ -478,7 +478,7 @@ void ClearColourBuffer(Context* context, GLint drawbuffer, uint32_t packed) {
     return;
   }
   const GLenum buffer = target.draw_buffers[drawbuffer];
-  if (getenv("GLANCEASY_DEBUG_BLIT"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_BLIT"))
     fprintf(stderr, "[clearbuf] fb=%u db=%d->%x\n", context->state.framebuffer,
             drawbuffer, static_cast<unsigned>(buffer));
   if (buffer == GL_NONE)
@@ -548,7 +548,7 @@ void ClearIntegerColourBuffer(Context* context,
     return;
   }
   const GLenum buffer = target.draw_buffers[drawbuffer];
-  if (getenv("GLANCEASY_DEBUG_BLIT"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_BLIT"))
     fprintf(stderr, "[clearbuf] fb=%u db=%d->%x\n", context->state.framebuffer,
             drawbuffer, static_cast<unsigned>(buffer));
   if (buffer == GL_NONE)
@@ -668,7 +668,7 @@ void glGenFramebuffers(GLsizei n, GLuint* framebuffers) {
     return;
   for (GLsizei i = 0; i < n; ++i) {
     framebuffers[i] = context->framebuffers.Generate();
-    if (getenv("GLANCEASY_DEBUG_FBO2"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FBO2"))
       fprintf(stderr, "[fb2] gen=%u surface=%u cand=%u ctx=%p\n",
               framebuffers[i], context->state.surface_framebuffer,
               context->state.candidate_surface_framebuffer,
@@ -681,7 +681,7 @@ void glGenFramebuffers(GLsizei n, GLuint* framebuffers) {
     // FBO names 1..N belong to test cases.  Promotion would steal name 1
     // from tests that hard-code it (fbo.render et al).
     if (context->state.surface_framebuffer == 0 && i == 0 &&
-        getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") == nullptr)
+        GLANCEASY_DEBUG_FLAG("GLANCEASY_FBO_SURFACE_AS_ZERO") == nullptr)
       context->state.candidate_surface_framebuffer = framebuffers[i];
   }
 }
@@ -698,7 +698,7 @@ void glDeleteFramebuffers(GLsizei n, const GLuint* framebuffers) {
     return;
   for (GLsizei i = 0; i < n; ++i) {
     context->framebuffers.Delete(framebuffers[i]);
-    if (getenv("GLANCEASY_DEBUG_FBO2"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FBO2"))
       fprintf(stderr, "[fb2] del=%u surface=%u ctx=%p\n", framebuffers[i],
               context->state.surface_framebuffer, static_cast<void*>(context));
     if (context->state.surface_framebuffer == framebuffers[i])
@@ -720,7 +720,7 @@ GLboolean glIsFramebuffer(GLuint framebuffer) {
 }
 
 void glBindFramebuffer(GLenum target, GLuint framebuffer) {
-  if (getenv("GLANCEASY_DEBUG_ERROR"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr, "[glbindfb] target=0x%x fb=%u\n",
             static_cast<unsigned>(target), framebuffer);
   glanceasy::Context* context = glanceasy::ApiContext();
@@ -753,7 +753,7 @@ void glFramebufferTexture2D(GLenum target,
   const GLuint bound_framebuffer =
       target == GL_READ_FRAMEBUFFER ? context->state.read_framebuffer
                                     : context->state.framebuffer;
-  if (getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
     // The zero default framebuffer never accepts attachment changes, even
     // detaching object 0 (GLES negative API cases check this).
     context->SetError(GL_INVALID_OPERATION);
@@ -855,7 +855,7 @@ void glFramebufferTextureLayer(GLenum target,
   const GLuint bound_framebuffer =
       target == GL_READ_FRAMEBUFFER ? context->state.read_framebuffer
                                     : context->state.framebuffer;
-  if (getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
     // The zero default framebuffer never accepts attachment changes, even
     // detaching object 0 (GLES negative API cases check this).
     context->SetError(GL_INVALID_OPERATION);
@@ -940,9 +940,9 @@ void glFramebufferRenderbuffer(GLenum target,
   const GLuint bound_framebuffer =
       target == GL_READ_FRAMEBUFFER ? context->state.read_framebuffer
                                     : context->state.framebuffer;
-  if (getenv("GLANCEASY_DEBUG_FBO2") && bound_framebuffer == 1)
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FBO2") && bound_framebuffer == 1)
     fprintf(stderr, "[fb2] attachrb bound=1 rb=%u\n", renderbuffer);
-  if (getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
     // The zero default framebuffer never accepts attachment changes, even
     // detaching object 0 (GLES negative API cases check this).
     context->SetError(GL_INVALID_OPERATION);
@@ -1010,7 +1010,7 @@ GLenum glCheckFramebufferStatus(GLenum target) {
   if (!framebuffer)
     return GL_FRAMEBUFFER_COMPLETE;
   const GLenum status = glanceasy::CheckCompleteness(context, *framebuffer);
-  if (getenv("GLANCEASY_DEBUG_FBO2"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FBO2"))
     fprintf(stderr, "[fb2] status=%x bound=%u cand=%u surf=%u\n",
             static_cast<unsigned>(status), context->state.framebuffer,
             context->state.candidate_surface_framebuffer,
@@ -1023,7 +1023,7 @@ GLenum glCheckFramebufferStatus(GLenum target) {
     context->state.surface_framebuffer =
         context->state.candidate_surface_framebuffer;
     context->state.candidate_surface_framebuffer = 0;
-    if (getenv("GLANCEASY_DEBUG_FBO2"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FBO2"))
       fprintf(stderr, "[fb2] promoted=%u\n",
               context->state.surface_framebuffer);
   }
@@ -1375,7 +1375,7 @@ void glDrawBuffers(GLsizei n, const GLenum* buffers) {
   }
   if (context->state.framebuffer == 0 ||
       glanceasy::IsPlatformFramebuffer(context, context->state.framebuffer)) {
-    if (getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr &&
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr &&
         context->state.framebuffer == 0) {
       // With an implicit zero default framebuffer only GL_BACK / GL_NONE
       // are legal; attachment enums are an INVALID_OPERATION.
@@ -1542,7 +1542,7 @@ void glDeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
     const GLuint name = renderbuffers[i];
     if (name == 0)
       continue;
-    if (getenv("GLANCEASY_DEBUG_FBO2"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FBO2"))
       fprintf(stderr, "[fb2] delrb=%u surface=%u\n", name,
               context->state.surface_framebuffer);
     if (glanceasy::Renderbuffer* object = context->renderbuffers.Get(name))
@@ -1914,7 +1914,7 @@ void glReadPixels(GLint x,
                   GLenum type,
                   void* pixels) {
   glanceasy::Context* context = glanceasy::ApiContext();
-  if (getenv("GLANCEASY_DEBUG_ERROR"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr,
             "[glreadpixels-entry] pixels=%p pbo=%u fmt=0x%x type=0x%x %dx%d\n",
             pixels, context ? context->state.pixel_pack_buffer : 0,
@@ -2023,7 +2023,7 @@ void glReadPixels(GLint x,
     return;
   }
   const glanceasy::RenderTarget target = context->GetReadTarget();
-  if (getenv("GLANCEASY_DEBUG_ERROR")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ERROR")) {
     const unsigned* words = reinterpret_cast<const unsigned*>(target.color);
     fprintf(stderr,
             "[glreadpixels] readfb=%u %dx%d int=%d fmt=0x%x cb=%d rc=%d hasA=%d w0=%u w1=%u\n",
@@ -2185,7 +2185,7 @@ void glBlitFramebuffer(GLint src_x0,
   }
   glanceasy::RenderTarget source = context->GetReadTarget();
   glanceasy::RenderTarget destination = context->GetDrawTarget();
-  if (getenv("GLANCEASY_DEBUG_BLIT"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_BLIT"))
     fprintf(stderr,
             "[blit] readfb=%u drawfb=%u src=%p dst=%p srcsz=%dx%d dstsz=%dx%d "
             "rect=%d,%d..%d,%d -> %d,%d..%d,%d mask=%x filter=%x\n",
@@ -2563,7 +2563,7 @@ void glBlitFramebuffer(GLint src_x0,
       }
     }
   }
-  if (getenv("GLANCEASY_DEBUG_BLIT") && (mask & GL_COLOR_BUFFER_BIT) &&
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_BLIT") && (mask & GL_COLOR_BUFFER_BIT) &&
       destination.color) {
     auto pixel = [&](int x, int y) {
       uint32_t value = 0;

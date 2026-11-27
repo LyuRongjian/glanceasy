@@ -854,7 +854,7 @@ void glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
     return;
   }
   context->state.viewport = glanceasy::Rect{x, y, width, height};
-  if (getenv("GLANCEASY_DEBUG_VIEWPORT"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VIEWPORT"))
     fprintf(stderr, "[vp] %d %d %d %d\n", x, y, width, height);
 }
 
@@ -934,7 +934,7 @@ void glClearStencil(GLint value) {
 }
 
 void glClear(GLbitfield mask) {
-  if (getenv("GLANCEASY_DEBUG_ERROR"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr, "[glclear] mask=0x%x\n", static_cast<unsigned>(mask));
   glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)

@@ -467,7 +467,7 @@ void UploadSlice(TextureImage* destination,
              source.depth16.data() + static_cast<size_t>(y) * source_stride,
              sizeof(uint16_t) * source_stride);
     }
-    if (getenv("GLANCEASY_DEBUG_TEXARR")) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_TEXARR")) {
       fprintf(stderr,
               "[upl] z=%d off=%zu d16size=%zu first=%u srcfirst=%u\n",
               zoffset, destination_offset, destination->depth16.size(),
@@ -881,7 +881,7 @@ bool ResolveUnpackPixels(Context* context,
                row_bytes * static_cast<size_t>(image_rows);
   if (offset > buffer->data.size() ||
       required > buffer->data.size() - offset) {
-    if (getenv("GLANCEASY_DEBUG_PBO"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_PBO"))
       fprintf(stderr,
               "[pbo] reject off=%zu req=%zu size=%zu bytes=%zu align=%d\n",
               offset, required, buffer->data.size(), bytes, alignment);
@@ -1052,7 +1052,7 @@ void SetTextureImage(GLenum target,
     // base and the new one stay undefined until they are specified.
     texture->Resize(level + 1, texture->faces());
   }
-  if (getenv("GLANCEASY_DEBUG_TEX"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_TEX"))
     fprintf(stderr, "[tex] image2d level=%d %dx%d ifmt=%x ptr=%p cur_levels=%d\n",
             level, width, height, internal_format, pixels, texture->levels);
   const int faces = texture->faces();

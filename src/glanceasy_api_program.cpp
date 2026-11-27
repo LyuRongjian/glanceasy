@@ -520,7 +520,7 @@ void glLinkProgram(GLuint program) {
       vertex, fragment, object->bindings, object->frag_data_bindings,
       object->transform_feedback_varyings,
       object->transform_feedback_mode == GL_SEPARATE_ATTRIBS, &object->log);
-  if (getenv("GLANCEASY_DEBUG_ERROR") && !object->linked)
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ERROR") && !object->linked)
     fprintf(stderr, "[linkfail] %s\n", object->log.c_str());
 }
 
@@ -1342,7 +1342,7 @@ void glGetUniformiv(GLuint program, GLint location, GLint* params) {
   const glanceasy::glsl::Type& scalar_type =
       stored_type->is_array() ? stored_type->array_element() : *stored_type;
   const int components = scalar_type.components();
-  if (getenv("GLANCEASY_DEBUG_UNI"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_UNI"))
     fprintf(stderr, "[getiv] loc=%d off=%d comps=%d agg=%zu type=%s\n", location,
             component_offset, components, value->aggregate.size(),
             scalar_type.Name().c_str());

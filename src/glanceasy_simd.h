@@ -15,6 +15,9 @@ namespace simd {
 // vec2/vec3 and for matrices whose component count is not a multiple of four.
 float Dot(const float* a, const float* b, int count);
 void Scale(const float* input, float scale, float* output, int count);
+void Add(const float* a, const float* b, float* output, int count);
+void Sub(const float* a, const float* b, float* output, int count);
+void Mul(const float* a, const float* b, float* output, int count);
 
 // Bulk fills for the fixed-function clear and blit paths.  |value| for
 // FillRgba is the native 0xAABBGGRR packing used by the colour buffers.

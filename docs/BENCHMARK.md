@@ -93,6 +93,57 @@ Selected per-scene numbers at 320x240 (x86_64 / ARM32 qemu-user):
 | `function`, low | 3 | 1 | 8.16 s |
 | `terrain` | 1 | 1 | 387 s |
 
+## RV1106G3 (native Cortex-A7) results
+
+Measured on 2026-11-27 with the Luckfox RV1106G3 board: Cortex-A7 at 1.2 GHz,
+`MemTotal` 185564 kB (256 MB part, ~181 MB visible after reserves), Linux
+5.10.160 armv7l. glmark2 2023.01 `null-glesv2` was run off-screen with
+`--off-screen=3`; the only variable between the "before" and "after" columns is
+the `libglanceasy.so.0.1.0` binary in `LD_LIBRARY_PATH`.
+
+Selected scenes at 320x240, `duration=2`:
+
+| Scene | Before | After | Speed-up |
+| --- | ---: | ---: | ---: |
+| `build` | 903.3 ms/frame | 448.7 ms/frame | 2.01x |
+| `texture`, nearest | 529.7 ms/frame | 250.7 ms/frame | 2.11x |
+| `texture`, linear | 577.8 ms/frame | 275.1 ms/frame | 2.10x |
+| `shading`, phong | 11716.9 ms/frame | 5293.7 ms/frame | 2.21x |
+| `pulsar` | 525.5 ms/frame | 239.4 ms/frame | 2.19x |
+
+At 800x600, `build` alone (`duration=2`): **1569.4 -> 804.5 ms/frame**
+(1.95x). The full default list without `terrain` runs at score 1 after the
+optimisation (`duration=1`); before it rounded down to 0.
+
+The main wins on this board were not new approximate maths, but removing work
+from the per-fragment path:
+
+- `Value` inline storage was reduced from 64 to 16 floats. A scalar temporary
+  was 600+ bytes and was copied for nearly every GLSL operation; a mat4 fits in
+  the new 16-float inline block, while arrays and structures use the existing
+  aggregate storage.
+- `Type::components()` is now inline in the header instead of an out-of-line
+  call made once per component loop.
+- All `GLANCEASY_DEBUG_*` switches are cached at their call sites; previously
+  `getenv()` was executed in per-pixel branches (8.5% of the phong callgrind
+  profile).
+- Disabled vertex attributes are copied from a per-draw default block, and only
+  enabled attributes are fetched per vertex.
+- Triangles wholly inside the frustum skip polygon clipping and duplicate
+  removal.
+- The rasteriser shades eight-pixel horizontal runs without per-pixel edge
+  tests when both run endpoints are strictly interior.
+- RGBA8 nearest/linear sampling has a direct path that skips the generic
+  format/mip-level dispatcher.
+- Depth compare, when a depth buffer and no `gl_FragDepth` are present, compares
+  the incoming and stored 16-bit values directly.
+- Four-lane add/sub use NEON on ARMv7 (`vaddq_f32`/`vsubq_f32`); four-lane
+  sin/cos, reciprocal square root and the polynomial `exp2`/`log2`/`pow`
+  approximations were already present.
+
+These are smoke measurements, not a tuned benchmark: one board, two-second
+scenes, and thermal state can move the numbers by a few percent.
+
 ## Interpretation and caveats
 
 - qemu-user interprets every ARM instruction; it is useful for functional

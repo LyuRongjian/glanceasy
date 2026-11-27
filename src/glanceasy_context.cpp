@@ -303,14 +303,14 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
       target.color_is_unsigned[i] = IsUnsignedIntegerFormat(format);
       target.color_has_alpha[i] = FormatHasAlpha(format);
       target.color_is_srgb[i] = format == GL_SRGB8_ALPHA8;
-      if (getenv("GLANCEASY_DEBUG_SRGB"))
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_SRGB"))
         fprintf(stderr, "[rt] attach=%d format=0x%x srgb=%d\n", i, format,
                 (int)target.color_is_srgb[i]);
       target.color_format[i] = format;
       target.color_channels[i] = FormatColorChannels(format);
       target.color_integer_bits[i] = FormatIntegerBits(format, 0);
       target.color_bytes[i] = integer ? 16 : 4;
-      if (getenv("GLANCEASY_DEBUG_INT")) {
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INT")) {
         static int rt_debug = 0;
         if (rt_debug < 12) {
           fprintf(stderr, "[rtint] i=%d fmt=0x%x int=%d sz=%zu rgba=%zu\n", i,

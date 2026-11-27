@@ -49,7 +49,7 @@ void SetUniformFloats(GLint location,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (getenv("GLANCEASY_DEBUG_UNI") && location >= 0 &&
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_UNI") && location >= 0 &&
       location < static_cast<int>(object->program->uniforms().size())) {
     static int uni_debug = 0;
     if (uni_debug < 60) {
@@ -66,7 +66,7 @@ void SetUniformFloats(GLint location,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (getenv("GLANCEASY_DEBUG_UNI")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_UNI")) {
     fprintf(stderr,
             "[uniset] loc=%d type=%s array=%d size=%d comps=%d count=%d\n",
             location, uniform_type->Name().c_str(),

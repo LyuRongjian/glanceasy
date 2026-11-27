@@ -75,7 +75,7 @@ const void* ElementPointer(Context* context, const void* indices) {
 extern "C" {
 
 void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
-  if (getenv("GLANCEASY_DEBUG_ERROR"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr, "[gldrawarrays] first=%d count=%d\n", first, count);
   if (first < 0 || count < 0) {
     glanceasy::Context* context = glanceasy::ApiContext();

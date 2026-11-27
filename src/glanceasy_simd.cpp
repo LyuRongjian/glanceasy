@@ -45,6 +45,42 @@ void Scale(const float* input, float scale, float* output, int count) {
     output[i] = input[i] * scale;
 }
 
+void Add(const float* a, const float* b, float* output, int count) {
+  if (count <= 0)
+    return;
+  int i = 0;
+#if defined(__ARM_NEON)
+  for (; i + 4 <= count; i += 4)
+    vst1q_f32(output + i, vaddq_f32(vld1q_f32(a + i), vld1q_f32(b + i)));
+#endif
+  for (; i < count; ++i)
+    output[i] = a[i] + b[i];
+}
+
+void Sub(const float* a, const float* b, float* output, int count) {
+  if (count <= 0)
+    return;
+  int i = 0;
+#if defined(__ARM_NEON)
+  for (; i + 4 <= count; i += 4)
+    vst1q_f32(output + i, vsubq_f32(vld1q_f32(a + i), vld1q_f32(b + i)));
+#endif
+  for (; i < count; ++i)
+    output[i] = a[i] - b[i];
+}
+
+void Mul(const float* a, const float* b, float* output, int count) {
+  if (count <= 0)
+    return;
+  int i = 0;
+#if defined(__ARM_NEON)
+  for (; i + 4 <= count; i += 4)
+    vst1q_f32(output + i, vmulq_f32(vld1q_f32(a + i), vld1q_f32(b + i)));
+#endif
+  for (; i < count; ++i)
+    output[i] = a[i] * b[i];
+}
+
 void FillRgba(uint8_t* destination, size_t pixels, uint32_t value) {
   if (!destination || pixels == 0)
     return;

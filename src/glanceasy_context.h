@@ -652,7 +652,7 @@ class Context {
   void SetError(GLenum error) {
     if (error == GL_NO_ERROR)
       return;
-    if (getenv("GLANCEASY_DEBUG_ERROR"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ERROR"))
       fprintf(stderr, "[glerr] 0x%x\n", static_cast<unsigned>(error));
     if (error_ == GL_NO_ERROR)
       error_ = error;

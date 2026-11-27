@@ -2917,7 +2917,7 @@ ExprPtr Parser::ParseVariable(const std::string& name, int line) {
     expr->builtin = BuiltinId::kDepthRange;
     expr->index = EnsureBuiltin(BuiltinId::kDepthRange);
     expr->type = Type::Vec(3);
-    if (getenv("GLANCEASY_DEBUG_DR"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DR"))
       fprintf(stderr, "[dr] parse depth range slot=%d\n", expr->index);
     if (ast_)
       ast_->uses_depth_range = true;
@@ -3057,7 +3057,7 @@ int Parser::EnsureBuiltin(BuiltinId id) {
   for (const BuiltinVarEntry& entry : kBuiltinVars) {
     if (entry.id != id)
       continue;
-    if (id == BuiltinId::kDepthRange && getenv("GLANCEASY_DEBUG_DR"))
+    if (id == BuiltinId::kDepthRange && GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DR"))
       fprintf(stderr, "[dr] ensure idx=%d size=%d entry=%s\n", id_index,
               (int)ast_->builtin_slots.size(), entry.name);
     Variable variable;

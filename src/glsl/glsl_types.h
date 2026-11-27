@@ -160,6 +160,14 @@ struct StructInfo {
   int byte_size = 0;
 };
 
+inline int Type::components() const {
+  if (kind_ == TypeKind::kBasic)
+    return columns_ > 1 ? rows_ * columns_ : rows_;
+  if (kind_ == TypeKind::kArray)
+    return array_size_ * array_element().components();
+  return struct_ ? struct_->components : 0;
+}
+
 // A runtime value.  Basic values stay in the fixed-size |data| array so the
 // common path allocates nothing.  Arrays and structures live in |aggregate|,
 // which is sized from the type's flattened component count.

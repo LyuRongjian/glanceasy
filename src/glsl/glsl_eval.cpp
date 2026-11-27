@@ -351,7 +351,7 @@ class Evaluator {
     depth_range_[0] = near_value;
     depth_range_[1] = far_value;
     depth_range_[2] = far_value - near_value;
-    if (getenv("GLANCEASY_DEBUG_DR"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DR"))
       fprintf(stderr, "[dr] set near=%.2f far=%.2f diff=%.2f\n", near_value,
               far_value, depth_range_[2]);
   }
@@ -506,7 +506,7 @@ void Evaluator::PrepareBuiltins() {
     coord.data[i] = fragment_coord_[i];
   StoreBuiltin(BuiltinId::kFragCoord, coord);
   StoreBuiltin(BuiltinId::kFrontFacing, MakeBool(front_facing_));
-  if (getenv("GLANCEASY_DEBUG_DR"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DR"))
     fprintf(stderr, "[dr] prepare stage=%d slot=%d slots=%d/%d value=%.2f %.2f %.2f\n",
             (int)ast_.stage, BuiltinSlot(BuiltinId::kDepthRange),
             (int)ast_.builtin_slots.size(), (int)BuiltinId::kDepthRange,
@@ -578,35 +578,35 @@ bool Evaluator::CallFunction(const Function& function,
   ExecBody(function.body);
 
   const Value returned_value = return_value_;
-  if (getenv("GLANCEASY_DEBUG_INOUT") && function.name == "test") {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT") && function.name == "test") {
     for (size_t i = 0; i < function.parameters.size(); ++i)
       fprintf(stderr, "[inout] test-p%zu = %.1f %.1f %.1f %.1f\n", i,
               locals_[base + i].Data()[0], locals_[base + i].Data()[1],
               locals_[base + i].Data()[2], locals_[base + i].Data()[3]);
   }
-  if (getenv("GLANCEASY_DEBUG_INOUT") && function.name == "test") {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT") && function.name == "test") {
     fprintf(stderr, "[inout] test-ret=%.1f type=%s\n", returned_value.Data()[0],
             returned_value.type.Name().c_str());
   }
-  if (getenv("GLANCEASY_DEBUG_INOUT") && function.name == "get") {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT") && function.name == "get") {
     fprintf(stderr, "[inout] get-ret=%.1f %.1f %.1f %.1f\n",
             returned_value.Data()[0], returned_value.Data()[1],
             returned_value.Data()[2], returned_value.Data()[3]);
   }
-  if (getenv("GLANCEASY_DEBUG_INOUT") && function.name == "set") {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT") && function.name == "set") {
     for (size_t i = 0; i < function.parameters.size(); ++i)
       fprintf(stderr, "[inout] set-p%zu type=%s vals=%.1f %.1f %.1f %.1f\n", i,
               function.parameters[i].type.Name().c_str(),
               locals_[base + i].Data()[0], locals_[base + i].Data()[1],
               locals_[base + i].Data()[2], locals_[base + i].Data()[3]);
   }
-  if (getenv("GLANCEASY_DEBUG_INOUT") && function.name == "func") {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT") && function.name == "func") {
     for (size_t i = 0; i < args.size(); ++i)
       fprintf(stderr, "[inout] arg%zu = %.1f %.1f %.1f %.1f\n", i,
               args[i].Data()[0], args[i].Data()[1], args[i].Data()[2],
               args[i].Data()[3]);
   }
-  if (getenv("GLANCEASY_DEBUG_INOUT") && (function.name == "func" ||
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT") && (function.name == "func" ||
                                      function.name == "isEqual")) {
     for (size_t i = 0; i < function.parameters.size(); ++i)
       fprintf(stderr, "[inout] %s p%zu q=%d vals=%.1f %.1f %.1f %.1f\n",
@@ -615,10 +615,10 @@ bool Evaluator::CallFunction(const Function& function,
               locals_[base + i].Data()[0], locals_[base + i].Data()[1],
               locals_[base + i].Data()[2], locals_[base + i].Data()[3]);
   }
-  if (getenv("GLANCEASY_DEBUG_INOUT"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT"))
     fprintf(stderr, "[inout] fn=%s ret=%.2f type=%s\n", function.name.c_str(),
             returned_value.Data()[0], returned_value.type.Name().c_str());
-  if (getenv("GLANCEASY_DEBUG_INOUT"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT"))
     fprintf(stderr, "[inout] fn=%s args=%zu out=%d first=%.2f\n",
             function.name.c_str(), args.size(), out_values ? 1 : 0,
             args.empty() ? 0.0f : args[0].Data()[0]);
@@ -626,7 +626,7 @@ bool Evaluator::CallFunction(const Function& function,
     out_values->clear();
     for (size_t i = 0; i < function.parameters.size(); ++i) {
       out_values->push_back(locals_[base + i]);
-      if (getenv("GLANCEASY_DEBUG_INOUT"))
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT"))
         fprintf(stderr, "[inout]   p%zu q=%d val0=%.2f\n", i,
                 function.parameters[i].parameter_qualifier,
                 locals_[base + i].Data()[0]);
@@ -858,7 +858,7 @@ Value Evaluator::ReadVariable(const Expr& expr) {
     case Storage::kGlobal:
       if (globals_ && expr.index >= 0 &&
           expr.index < static_cast<int>(globals_->size())) {
-        if (getenv("GLANCEASY_DEBUG_IDX") && expr.text == "sideEffectCounter")
+        if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_IDX") && expr.text == "sideEffectCounter")
           fprintf(stderr, "[idx] read global counter=%d int=%u\n",
                   (int)(*globals_)[expr.index].Data()[0],
                   (*globals_)[expr.index].IntData()[0]);
@@ -866,7 +866,7 @@ Value Evaluator::ReadVariable(const Expr& expr) {
       }
       return Value(expr.type);
     case Storage::kUniform: {
-      if (getenv("GLANCEASY_DEBUG_UNIFORM")) {
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_UNIFORM")) {
         const Value uv = uniforms_ && expr.index >= 0
                              ? uniforms_[expr.index]
                              : Value(expr.type);
@@ -908,7 +908,7 @@ Value Evaluator::ReadVariable(const Expr& expr) {
           expr.index >= 0 && expr.index < static_cast<int>(ast_.varyings.size())
               ? ast_.varyings[expr.index].varying_offset
               : -1;
-      if (getenv("GLANCEASY_DEBUG_VIEWPORT")) {
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VIEWPORT")) {
         static int vd = 0;
         if (vd < 8) {
           fprintf(stderr, "[vineval] %s idx=%d size=%zu off=%d ptr=%p v0=%f\n",
@@ -967,7 +967,7 @@ void Evaluator::WriteVariable(const Expr& expr, const Value& value) {
     case Storage::kLocal:
       if (expr.index >= 0 && expr.index < static_cast<int>(locals_.size())) {
         const int slot = local_base_ + expr.index;
-        if (getenv("GLANCEASY_DEBUG_IDX") && expr.text == "sideEffectCounter")
+        if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_IDX") && expr.text == "sideEffectCounter")
           fprintf(stderr, "[idx] write local counter=%d int=%u\n",
                   (int)converted.Data()[0], converted.IntData()[0]);
         locals_[slot] = converted;
@@ -1011,7 +1011,7 @@ void Evaluator::WriteVariable(const Expr& expr, const Value& value) {
 void Evaluator::Assign(const Expr& target, const Value& value) {
   if (target.kind == Expr::Kind::kVariable) {
     WriteVariable(target, value);
-    if (getenv("GLANCEASY_DEBUG_INOUT") && target.text == "arr")
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT") && target.text == "arr")
       fprintf(stderr, "[inout] assign arr idx=%d base=%d now=%.1f %.1f %.1f %.1f\n",
               target.index, local_base_, locals_[local_base_ + target.index].Data()[0],
               locals_[local_base_ + target.index].Data()[1],
@@ -1030,7 +1030,7 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
       return;
     }
     const int length = static_cast<int>(target.text.size());
-    if (getenv("GLANCEASY_DEBUG_ASSIGN"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ASSIGN"))
       fprintf(stderr, "[assignfield] text=%s len=%d base=%s b0=%.2f b1=%.2f b2=%.2f v0=%.2f v1=%.2f\n",
               target.text.c_str(), length, base.type.Name().c_str(), base.data[0],
               base.data[1], base.data[2], value.data[0], value.data[1]);
@@ -1057,16 +1057,16 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
                                           ? value.IntData()[0]
                                           : value.IntData()[i];
         }
-        if (getenv("GLANCEASY_DEBUG_ASSIGN"))
+        if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ASSIGN"))
           fprintf(stderr, "[assignw] i=%d comp=%d src=%.2f now=%.2f %.2f %.2f\n",
                   i, component, source, base.data[0], base.data[1], base.data[2]);
       }
     }
-    if (getenv("GLANCEASY_DEBUG_ASSIGN"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ASSIGN"))
       fprintf(stderr, "[assignend] b0=%.2f b1=%.2f b2=%.2f\n", base.data[0],
               base.data[1], base.data[2]);
     Assign(*target.base, base);
-    if (getenv("GLANCEASY_DEBUG_ASSIGN") && target.base->text == "color")
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_ASSIGN") && target.base->text == "color")
       fprintf(stderr, "[assignpost] color now=%.2f %.2f %.2f %.2f\n",
               Eval(*target.base).data[0], Eval(*target.base).data[1],
               Eval(*target.base).data[2], Eval(*target.base).data[3]);
@@ -1083,7 +1083,7 @@ void Evaluator::Assign(const Expr& target, const Value& value) {
       const int count = element_type.components();
       const Value converted = Convert(value, element_type);
       WriteSlice(&base, index * count, converted, count);
-      if (getenv("GLANCEASY_DEBUG_VARY"))
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VARY"))
         fprintf(stderr, "[vary] idx=%d elem=%d base0=%.2f val0=%.2f\n", index,
                 count, base.Data()[0], converted.Data()[0]);
       Assign(*target.base, base);
@@ -1213,7 +1213,7 @@ Value Evaluator::EvalConstructor(const Expr& expr) {
   if (expr.type.is_matrix()) {
     for (const ExprPtr& argument : expr.args) {
       const Value source = Eval(*argument);
-      if (getenv("GLANCEASY_DEBUG_MAT"))
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_MAT"))
         fprintf(stderr, "[mat] dst=%dx%d src=%dx%d srcmat=%d\n",
                 expr.type.columns(), expr.type.rows(), source.type.columns(),
                 source.type.rows(), (int)source.type.is_matrix());
@@ -1244,7 +1244,7 @@ Value Evaluator::EvalConstructor(const Expr& expr) {
       return;
     const BaseType source = value.type.base();
     const float raw = value.Data()[component];
-    if (getenv("GLANCEASY_DEBUG_RES") && expr.type.Name() == "vec2" && count < 2)
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_RES") && expr.type.Name() == "vec2" && count < 2)
       fprintf(stderr, "[vec2raw] cnt=%d src=%s raw=%.1f int=%u\n", count,
               value.type.Name().c_str(), raw, value.IntData()[component]);
     components[count] = ConvertComponent(source, destination, raw);
@@ -1297,7 +1297,7 @@ Value Evaluator::EvalConstructor(const Expr& expr) {
     }
     return out;
   }
-  if (getenv("GLANCEASY_DEBUG_CTOR"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_CTOR"))
     fprintf(stderr, "[ctor] type=%s count=%d c0=%.2f c1=%.2f\n",
             expr.type.Name().c_str(), count, components[0],
             count > 1 ? components[1] : 0.0f);
@@ -1386,7 +1386,7 @@ Value Evaluator::Eval(const Expr& expr) {
       for (size_t i = 0; i < out_values.size() &&
                       i < expr.args.size() && i < callee.parameters.size();
            ++i) {
-      if (getenv("GLANCEASY_DEBUG_INOUT") && expr.text == "func")
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT") && expr.text == "func")
         fprintf(stderr, "[inout] out%zu target=%s type=%s val=%.1f %.1f %.1f %.1f\n",
                 i, expr.args[i]->text.c_str(), expr.args[i]->type.Name().c_str(),
                 out_values[i].Data()[0], out_values[i].Data()[1],
@@ -1432,7 +1432,7 @@ Value Evaluator::CallUserFunction(int function_index,
     Fail("invalid function index");
     return Value();
   }
-  if (getenv("GLANCEASY_DEBUG_INOUT") && ast_.functions[function_index].name == "test")
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_INOUT") && ast_.functions[function_index].name == "test")
     for (size_t i = 0; i < args.size(); ++i)
       fprintf(stderr, "[inout] test-arg%zu = %.1f %.1f %.1f %.1f\n", i,
               args[i].Data()[0], args[i].Data()[1], args[i].Data()[2],
@@ -1451,7 +1451,7 @@ Value Evaluator::EvalUnary(const Expr& expr) {
       Value base = Eval(*target.base);
       const Value index_value = Eval(*target.args[0]);
       const int index = static_cast<int>(ComponentAt(index_value, 0));
-      if (getenv("GLANCEASY_DEBUG_IDX"))
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_IDX"))
         fprintf(stderr, "[idx] ++ target=%s base=%s index=%d\n",
                 target.base->text.c_str(), target.base->type.Name().c_str(),
                 index);
@@ -1611,11 +1611,19 @@ Value Evaluator::BinaryOp(Op op,
                           const Type& result_type) {
   const bool is_uint = result_type.base() == BaseType::kUInt;
   const bool is_int = result_type.is_integer();
+  const bool neon4 =
+      !is_int && !result_type.is_aggregate() &&
+      result_type.components() == 4 && left.size() == 4 && right.size() == 4;
   switch (op) {
     case Op::kAdd:
       if (is_int) {
         return MapIntPairs(left, right, result_type,
                            [](uint32_t a, uint32_t b, bool) { return a + b; });
+      }
+      if (neon4) {
+        Value out(result_type);
+        simd::Add(left.Data(), right.Data(), out.Data(), 4);
+        return out;
       }
       return MapPairs(left, right, result_type,
                       [](float a, float b) { return a + b; });
@@ -1623,6 +1631,11 @@ Value Evaluator::BinaryOp(Op op,
       if (is_int) {
         return MapIntPairs(left, right, result_type,
                            [](uint32_t a, uint32_t b, bool) { return a - b; });
+      }
+      if (neon4) {
+        Value out(result_type);
+        simd::Sub(left.Data(), right.Data(), out.Data(), 4);
+        return out;
       }
       return MapPairs(left, right, result_type,
                       [](float a, float b) { return a - b; });
@@ -1668,7 +1681,7 @@ Value Evaluator::BinaryOp(Op op,
                       });
     case Op::kShiftLeft:
     case Op::kShiftRight:
-      if (getenv("GLANCEASY_DEBUG_SHIFT")) {
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_SHIFT")) {
         fprintf(stderr, "[shift] op=%d lt=%s rt=%s a=%.1f %.1f b=%.1f %.1f isu=%d\n",
                 (int)op, left.type.Name().c_str(), right.type.Name().c_str(),
                 left.data[0], left.data[1], right.data[0], right.data[1],
@@ -1703,7 +1716,7 @@ Value Evaluator::BinaryOp(Op op,
           default:
             break;
         }
-        if (getenv("GLANCEASY_DEBUG_SHIFT"))
+        if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_SHIFT"))
           fprintf(stderr, "[shiftout] x=%u y=%u v=%u isu=%d f=%.1f\n", x, y,
                   value, (int)is_uint,
                   is_uint ? static_cast<float>(value)
@@ -1796,11 +1809,11 @@ Value Evaluator::EvalAssignment(const Expr& expr) {
     value = BinaryOp(op, Eval(target), value, target.type);
   }
   const Value converted = Convert(value, target.type);
-  if (getenv("GLANCEASY_DEBUG_RES") && target.text == "res")
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_RES") && target.text == "res")
     fprintf(stderr, "[resassign] data=%.1f %.1f ints=%u %u\n", converted.data[0],
             converted.data[1], converted.IntData()[0], converted.IntData()[1]);
   Assign(target, converted);
-  if (getenv("GLANCEASY_DEBUG_RES") && target.text == "res")
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_RES") && target.text == "res")
     fprintf(stderr, "[respost] data=%.1f %.1f ints=%u %u\n", Eval(target).data[0],
             Eval(target).data[1], Eval(target).IntData()[0], Eval(target).IntData()[1]);
   return converted;
@@ -2028,7 +2041,7 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
       lod = args[index].data[0];
   }
 
-  if (getenv("GLANCEASY_DEBUG_LOD"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_LOD"))
     fprintf(stderr, "[lod2] explicit=%d dx=%p kind=%d args=%zu\n", (int)explicit_lod,
             (const void*)varyings_dx_, (int)expr.args[1]->kind, expr.args.size());
   if (!explicit_lod && !has_grad && varyings_dx_ && varyings_dy_) {
@@ -2124,7 +2137,7 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
         const float rho =
             std::max(std::sqrt(dudx * dudx + dvdx * dvdx),
                      std::sqrt(dudy * dudy + dvdy * dvdy));
-        if (getenv("GLANCEASY_DEBUG_CUBE_LOD") && rho > 0.0f) {
+        if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_CUBE_LOD") && rho > 0.0f) {
           static int cld = 0;
           if (cld++ < 3)
             fprintf(stderr,
@@ -2145,7 +2158,7 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
               (project(varyings_dx_[offset + i], w_dx) - current_coord) * scale;
           const float dy =
               (project(varyings_dy_[offset + i], w_dy) - current_coord) * scale;
-          if (getenv("GLANCEASY_DEBUG_DERIV")) {
+          if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DERIV")) {
             static int ddbg = 0;
             if (ddbg++ < 16)
               fprintf(stderr,
@@ -2161,9 +2174,9 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
         if (rho > 0.0f)
           lod += std::log2(rho);
       }
-      if (getenv("GLANCEASY_NO_LOD"))
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_NO_LOD"))
         lod = 0.0f;
-      if (getenv("GLANCEASY_DEBUG_LOD"))
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_LOD"))
         fprintf(stderr,
                 "[lod] var=%d off=%d dims=%d dx=%.6f,%.6f dy=%.6f,%.6f "
                 "in=%.6f,%.6f cur=%.6f,%.6f lod=%.4f\n",
@@ -2176,14 +2189,14 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
   }
 
   // Debug override: force the computed LOD before the bias is applied.
-  if (const char* forced = getenv("GLANCEASY_LOD_FORCE"))
+  if (const char* forced = GLANCEASY_DEBUG_FLAG("GLANCEASY_LOD_FORCE"))
     lod = static_cast<float>(atof(forced));
 
   // Implicit-LOD bias, applied to the level chosen by the derivative path.
-  if (getenv("GLANCEASY_NO_BIAS"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_NO_BIAS"))
     bias = 0.0f;
   lod += bias;
-  if (getenv("GLANCEASY_DEBUG_LOD"))
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_LOD"))
     fprintf(stderr, "[bias] bias=%.4f final=%.4f\n", bias, lod);
 
   // Texel offsets were specified in base-level texels but the reference
@@ -2201,12 +2214,12 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
         level = std::max(0, level);
       }
       sampler_->SizeLod(unit, level, level_size);
-      if (getenv("GLANCEASY_DEBUG_LOD"))
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_LOD"))
         fprintf(stderr, "[offlod] lod=%.3f level=%d size=%d,%d,%d\n", lod,
                 level, level_size[0], level_size[1], level_size[2]);
       for (int i = 0; i < offset_axes; ++i) {
         float shift = static_cast<float>(texel_offset[i]);
-        if (i == 1 && getenv("GLANCEASY_OFF_FLIP_Y"))
+        if (i == 1 && GLANCEASY_DEBUG_FLAG("GLANCEASY_OFF_FLIP_Y"))
           shift = -shift;
         if (shift != 0.0f && level_size[i] > 0)
           coords[i] += shift / static_cast<float>(level_size[i]);
@@ -2236,7 +2249,7 @@ Value Evaluator::BuiltinTexture(const Expr& expr) {
                             rgba);
   } else {
     sampler_->Sample2D(unit, coords[0], coords[1], lod, rgba);
-    if (getenv("GLANCEASY_DEBUG_TEXOUT")) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_TEXOUT")) {
       static int od = 0;
       if (od++ < 3)
         fprintf(stderr, "[texout] unit=%d %.4f %.4f %.4f %.4f type=%s\n", unit,
@@ -2586,7 +2599,7 @@ Value Evaluator::EvalBuiltin(const Expr& expr) {
     const Value adjacent = Eval(*expr.args[0]);
     neighbor_mode_ = saved_mode;
     varyings_in_ = saved;
-    if (getenv("GLANCEASY_DEBUG_DER")) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DER")) {
       static int dbg = 0;
       if (dbg < 12) {
         fprintf(stderr, "[der] %s cur=%.4f adj=%.4f\n",
@@ -2665,7 +2678,7 @@ Value Evaluator::EvalBuiltin(const Expr& expr) {
         level = static_cast<int32_t>(args[1].IntData()[0]);
       if (sampler_)
         sampler_->SizeLod(unit, level, size);
-      if (getenv("GLANCEASY_DEBUG_TEX")) {
+      if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_TEX")) {
         static int ts_dbg = 0;
         if (ts_dbg++ < 40)
           fprintf(stderr, "[tsize] unit=%d lod=%d out=%d,%d,%d comps=%d\n",
@@ -2847,7 +2860,7 @@ void Program::RunVertex(const VertexInput& input,
   if (!linked_ || !vertex_)
     return;
   vertex_globals_ = vertex_global_initials_;
-  if (getenv("GLANCEASY_DEBUG_DR")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DR")) {
     fprintf(stderr, "[dr] run globals=%d slots=%d b17=%d\n",
             (int)vertex_->globals.size(), (int)vertex_->builtin_slots.size(),
             (int)vertex_->builtin_slots[17]);
@@ -2945,7 +2958,7 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
     }
   }
 
-  if (getenv("GLANCEASY_DEBUG_VIEWPORT")) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VIEWPORT")) {
     static size_t last_uniform_count = 0;
     if (fragment_->uniforms.size() != last_uniform_count) {
       last_uniform_count = fragment_->uniforms.size();
@@ -2990,7 +3003,7 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
     jit_inputs.globals = fragment_globals_.data();
     bool discarded = false;
     used_jit = fragment_jit_->Run(jit_inputs, &discarded);
-    if (getenv("GLANCEASY_DEBUG_VIEWPORT")) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VIEWPORT")) {
       static int ed = 0;
       if (ed++ < 6) fprintf(stderr, "[exec] jit=%d\n", used_jit ? 1 : 0);
     }
@@ -3028,17 +3041,17 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
       output->color_int[fragment_output.location][i] =
           i < components ? int_data[i] : (i == 3 ? 1u : 0u);
     }
-    if (getenv("GLANCEASY_DEBUG_FRAGOUT"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FRAGOUT"))
       fprintf(stderr, "[fragout] loc=%d comp=%d data=%.3f %.3f %.3f %.3f\n",
               fragment_output.location, components, data[0], data[1], data[2],
               data[3]);
-    if (getenv("GLANCEASY_DEBUG_FRAGOUT"))
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FRAGOUT"))
       fprintf(stderr, "[fragout] loc=%d base=%d data=%.3f %.3f %.3f %.3f\n",
               fragment_output.location, (int)fragment_output.base, data[0],
               data[1], data[2], data[3]);
     output->color_base[fragment_output.location] = fragment_output.base;
     output->written[fragment_output.location] = true;
-    if (getenv("GLANCEASY_DEBUG_FRAGOUT") && fragment_output.base != BaseType::kFloat) {
+    if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_FRAGOUT") && fragment_output.base != BaseType::kFloat) {
       fprintf(stderr, "fragout loc=%d comps=%d ints=%u,%u,%u,%u floats=%.1f,%.1f,%.1f,%.1f\n",
               fragment_output.location, components, output->color_int[fragment_output.location][0],
               output->color_int[fragment_output.location][1], output->color_int[fragment_output.location][2],

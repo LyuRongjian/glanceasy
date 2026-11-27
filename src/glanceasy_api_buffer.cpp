@@ -123,7 +123,7 @@ void SetAttributePointer(GLuint index,
     return;
   }
   VertexAttribute& attribute = array->attributes[index];
-  if (getenv("GLANCEASY_DEBUG_VIEWPORT") && index == 1 && pointer) {
+  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_VIEWPORT") && index == 1 && pointer) {
     const float* values = static_cast<const float*>(pointer);
     fprintf(stderr, "[attribptr] %u %.3f %.3f %.3f %.3f %.3f %.3f\n", index,
             values[0], values[1], values[2], values[3], values[4], values[5]);
