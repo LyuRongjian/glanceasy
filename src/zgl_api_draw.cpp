@@ -17,12 +17,49 @@ bool ValidIndexType(GLenum type) {
          type == GL_UNSIGNED_INT;
 }
 
+bool ValidPrimitiveMode(GLenum mode) {
+  switch (mode) {
+    case GL_POINTS:
+    case GL_LINES:
+    case GL_LINE_STRIP:
+    case GL_LINE_LOOP:
+    case GL_TRIANGLES:
+    case GL_TRIANGLE_STRIP:
+    case GL_TRIANGLE_FAN:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool CheckDrawPreamble(Context* context, GLenum mode) {
+  if (!ValidPrimitiveMode(mode)) {
+    context->SetError(GL_INVALID_ENUM);
+    return false;
+  }
+  if (!context->GetDrawTarget().valid()) {
+    context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
+    return false;
+  }
+  return true;
+}
+
+GLuint MaxIndexValue(GLenum type) {
+  return type == GL_UNSIGNED_BYTE
+             ? 0xffu
+             : (type == GL_UNSIGNED_SHORT ? 0xffffu : 0xffffffffu);
+}
+
 // Resolves the element pointer.  A bound element buffer makes |indices| a byte
 // offset into the buffer (null means offset zero); otherwise the caller
 // supplied client memory is used directly.
 const void* ElementPointer(Context* context, const void* indices) {
-  if (context->state.element_buffer == 0)
+  if (context->state.element_buffer == 0) {
+    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+    if (feedback && feedback->active && !feedback->paused)
+      return nullptr;
     return indices;
+  }
   const Buffer* buffer = context->buffers.Get(context->state.element_buffer);
   if (!buffer)
     return nullptr;
@@ -38,6 +75,8 @@ const void* ElementPointer(Context* context, const void* indices) {
 extern "C" {
 
 void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
+  if (getenv("ZGL_DEBUG_ERROR"))
+    fprintf(stderr, "[gldrawarrays] first=%d count=%d\n", first, count);
   if (first < 0 || count < 0) {
     zgl::Context* context = zgl::ApiContext();
     if (context)
@@ -53,6 +92,8 @@ void glDrawElements(GLenum mode,
                     const void* indices) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
+    return;
+  if (!zgl::CheckDrawPreamble(context, mode))
     return;
   if (count < 0) {
     context->SetError(GL_INVALID_VALUE);
@@ -91,6 +132,8 @@ void glDrawElementsInstanced(GLenum mode,
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  if (!zgl::CheckDrawPreamble(context, mode))
+    return;
   if (count < 0 || instance_count < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
@@ -113,8 +156,13 @@ void glDrawRangeElements(GLenum mode,
                          GLsizei count,
                          GLenum type,
                          const void* indices) {
-  (void)start;
-  (void)end;
+  zgl::Context* context = zgl::ApiContext();
+  if (context) {
+    if (start > end || end > zgl::MaxIndexValue(type)) {
+      context->SetError(GL_INVALID_VALUE);
+      return;
+    }
+  }
   glDrawElements(mode, count, type, indices);
 }
 

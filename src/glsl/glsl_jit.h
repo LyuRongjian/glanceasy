@@ -23,6 +23,8 @@ struct JitRunInputs {
   const int* uniform_map = nullptr;
   const float* attributes = nullptr;
   const float* varyings_in = nullptr;
+  const float* varyings_dx = nullptr;
+  const float* varyings_dy = nullptr;
   float* varyings_out = nullptr;
   TextureSampler* sampler = nullptr;
   Value* globals = nullptr;

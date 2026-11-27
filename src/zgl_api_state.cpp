@@ -14,7 +14,25 @@
 #include "src/zgl_simd.h"
 
 namespace zgl {
-namespace {
+
+GLint RoundToInteger(float value) {
+  return static_cast<GLint>(value >= 0.0f ? value + 0.5f : value - 0.5f);
+}
+
+GLint ExpandFloatToInteger(float value) {
+  const double scaled = static_cast<double>(value) * 2147483647.0;
+  if (scaled >= 2147483647.0)
+    return 2147483647;
+  if (scaled <= -2147483648.0)
+    return -2147483648;
+  return static_cast<GLint>(scaled);
+}
+
+int FloatBits(float value) {
+  int32_t bits = 0;
+  memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
 
 bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
   const State& state = context->state;
@@ -54,8 +72,10 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = 16384;
       return true;
     case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS:
-    case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS:
       *first = kMaxTransformFeedbackBuffers;
+      return true;
+    case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS:
+      *first = 64;
       return true;
     case GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS:
       *first = 64;
@@ -63,6 +83,16 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
       *first = static_cast<GLint>(state.transform_feedback_buffer);
       return true;
+    case GL_TRANSFORM_FEEDBACK_ACTIVE: {
+      const TransformFeedback* tf = CurrentTransformFeedback(context);
+      *first = tf && tf->active ? 1 : 0;
+      return true;
+    }
+    case GL_TRANSFORM_FEEDBACK_PAUSED: {
+      const TransformFeedback* tf = CurrentTransformFeedback(context);
+      *first = tf && tf->paused ? 1 : 0;
+      return true;
+    }
     case GL_MAX_VERTEX_UNIFORM_BLOCKS:
     case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:
       *first = kMaxUniformBufferBindings;
@@ -91,11 +121,23 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_MAX_SAMPLES:
       *first = kMaxSamples;
       return true;
-    case GL_SAMPLES:
-    case GL_SAMPLE_BUFFERS:
     case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
       *first = 10;
       return true;
+    case GL_COMPRESSED_TEXTURE_FORMATS:
+      *first = GL_COMPRESSED_RGB8_ETC2;
+      *count = 10;
+      return true;
+    case GL_SAMPLES: {
+      const RenderTarget target = context->GetReadTarget();
+      *first = target.multisampled() ? target.samples : 0;
+      return true;
+    }
+    case GL_SAMPLE_BUFFERS: {
+      const RenderTarget target = context->GetReadTarget();
+      *first = target.multisampled() ? 1 : 0;
+      return true;
+    }
     case GL_NUM_SHADER_BINARY_FORMATS:
     case GL_NUM_EXTENSIONS:
       *first = 0;
@@ -142,10 +184,15 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = static_cast<GLint>(state.element_buffer);
       return true;
     case GL_FRAMEBUFFER_BINDING:
-      *first = static_cast<GLint>(state.framebuffer);
+      *first = static_cast<GLint>(
+          state.framebuffer == state.surface_framebuffer ? 0
+                                                         : state.framebuffer);
       return true;
     case GL_READ_FRAMEBUFFER_BINDING:
-      *first = static_cast<GLint>(state.read_framebuffer);
+      *first = static_cast<GLint>(
+          state.read_framebuffer == state.surface_framebuffer
+              ? 0
+              : state.read_framebuffer);
       return true;
     case GL_RENDERBUFFER_BINDING:
       *first = static_cast<GLint>(state.renderbuffer);
@@ -157,10 +204,18 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
     case GL_TEXTURE_BINDING_CUBE_MAP:
     case GL_TEXTURE_BINDING_3D:
     case GL_TEXTURE_BINDING_2D_ARRAY: {
-      const int unit = static_cast<int>(state.active_texture) -
-                       static_cast<int>(GL_TEXTURE0);
-      *first = static_cast<GLint>(
-          state.textures[ClampInt(unit, 0, kMaxCombinedTextureUnits - 1)]);
+      const int unit =
+          ClampInt(static_cast<int>(state.active_texture) -
+                       static_cast<int>(GL_TEXTURE0),
+                   0, kMaxCombinedTextureUnits - 1);
+      GLuint binding = state.textures_2d[unit];
+      if (pname == GL_TEXTURE_BINDING_CUBE_MAP)
+        binding = state.textures_cube[unit];
+      else if (pname == GL_TEXTURE_BINDING_3D)
+        binding = state.textures_3d[unit];
+      else if (pname == GL_TEXTURE_BINDING_2D_ARRAY)
+        binding = state.textures_2d_array[unit];
+      *first = static_cast<GLint>(binding);
       return true;
     }
     case GL_SAMPLER_BINDING: {
@@ -170,17 +225,137 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
           state.samplers[ClampInt(unit, 0, kMaxCombinedTextureUnits - 1)]);
       return true;
     }
+    case GL_CULL_FACE:
+      *first = state.cull.enabled ? 1 : 0;
+      return true;
+    case GL_DEPTH_TEST:
+      *first = state.depth.test ? 1 : 0;
+      return true;
+    case GL_DITHER:
+      *first = state.dither ? 1 : 0;
+      return true;
+    case GL_POLYGON_OFFSET_FILL:
+      *first = state.polygon_offset_fill ? 1 : 0;
+      return true;
+    case GL_PRIMITIVE_RESTART_FIXED_INDEX:
+      *first = state.primitive_restart_fixed_index ? 1 : 0;
+      return true;
+    case GL_SAMPLE_ALPHA_TO_COVERAGE:
+      *first = state.sample_alpha_to_coverage ? 1 : 0;
+      return true;
+    case GL_SAMPLE_COVERAGE:
+      *first = state.sample_coverage ? 1 : 0;
+      return true;
+    case GL_SCISSOR_TEST:
+      *first = state.scissor_test ? 1 : 0;
+      return true;
+    case GL_STENCIL_TEST:
+      *first = state.stencil.test ? 1 : 0;
+      return true;
+    case GL_SHADER_COMPILER:
+      *first = 1;
+      return true;
+    case GL_IMPLEMENTATION_COLOR_READ_FORMAT:
+      *first = GL_RGBA;
+      return true;
+    case GL_IMPLEMENTATION_COLOR_READ_TYPE:
+      *first = GL_UNSIGNED_BYTE;
+      return true;
+    case GL_MAX_ELEMENTS_INDICES:
+    case GL_MAX_ELEMENTS_VERTICES:
+      *first = 1 << 20;
+      return true;
+    case GL_MAX_ELEMENT_INDEX:
+      *first = 0x7FFFFFFF;
+      return true;
+    case GL_MAX_VERTEX_UNIFORM_COMPONENTS:
+    case GL_MAX_FRAGMENT_UNIFORM_COMPONENTS:
+      *first = 4096;
+      return true;
+    case GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:
+    case GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:
+      *first = 102400;
+      return true;
+    case GL_MAX_VARYING_COMPONENTS:
+    case GL_MAX_VERTEX_OUTPUT_COMPONENTS:
+    case GL_MAX_FRAGMENT_INPUT_COMPONENTS:
+      *first = 256;
+      return true;
+    case GL_MAX_PROGRAM_TEXEL_OFFSET:
+      *first = 7;
+      return true;
+    case GL_MIN_PROGRAM_TEXEL_OFFSET:
+      *first = -8;
+      return true;
+    case GL_MAX_SERVER_WAIT_TIMEOUT:
+      *first = 0;
+      return true;
+    case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT:
+      *first = 4;
+      return true;
+    case GL_TRANSFORM_FEEDBACK_BINDING:
+      *first = static_cast<GLint>(state.transform_feedback);
+      return true;
+    case GL_GENERATE_MIPMAP_HINT:
+      *first = static_cast<GLint>(state.generate_mipmap_hint);
+      return true;
+    case GL_FRAGMENT_SHADER_DERIVATIVE_HINT:
+      *first = static_cast<GLint>(state.fragment_shader_derivative_hint);
+      return true;
+    case GL_UNPACK_IMAGE_HEIGHT:
+      *first = state.pixel_store.unpack_image_height;
+      return true;
+    case GL_UNPACK_SKIP_IMAGES:
+      *first = state.pixel_store.unpack_skip_images;
+      return true;
+    case GL_PIXEL_PACK_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.pixel_pack_buffer);
+      return true;
+    case GL_PIXEL_UNPACK_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.pixel_unpack_buffer);
+      return true;
+    case GL_COPY_READ_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.copy_read_buffer);
+      return true;
+    case GL_COPY_WRITE_BUFFER_BINDING:
+      *first = static_cast<GLint>(state.copy_write_buffer);
+      return true;
+    case GL_READ_BUFFER: {
+      if (state.read_framebuffer == state.surface_framebuffer) {
+        *first = static_cast<GLint>(state.default_read_buffer);
+        return true;
+      }
+      const Framebuffer* framebuffer = context->framebuffers.Get(state.read_framebuffer);
+      *first = framebuffer ? static_cast<GLint>(framebuffer->read_buffer)
+                           : static_cast<GLint>(state.default_read_buffer);
+      return true;
+    }
+    case GL_DRAW_BUFFER0:
+    case GL_DRAW_BUFFER1:
+    case GL_DRAW_BUFFER2:
+    case GL_DRAW_BUFFER3: {
+      const int index = pname - GL_DRAW_BUFFER0;
+      const Framebuffer* framebuffer = context->framebuffers.Get(state.framebuffer);
+      *first = framebuffer ? static_cast<GLint>(framebuffer->draw_buffers[index])
+                           : (index == 0 ? static_cast<GLint>(state.default_draw_buffer)
+                                         : static_cast<GLint>(GL_NONE));
+      return true;
+    }
+    case GL_PROGRAM_BINARY_FORMATS:
+    case GL_NUM_PROGRAM_BINARY_FORMATS:
+      *first = 0;
+      return true;
     case GL_DEPTH_FUNC:
       *first = static_cast<GLint>(state.depth.func);
       return true;
     case GL_DEPTH_CLEAR_VALUE:
-      *first = static_cast<GLint>(state.clear_depth > 0.0f ? 1 : 0);
+      *first = ExpandFloatToInteger(state.clear_depth);
       return true;
     case GL_STENCIL_CLEAR_VALUE:
       *first = state.clear_stencil;
       return true;
     case GL_COLOR_CLEAR_VALUE:
-      *first = static_cast<GLint>(state.clear_color[0] > 0.5f ? 1 : 0);
+      *first = ExpandFloatToInteger(state.clear_color[0]);
       *count = 4;
       return true;
     case GL_COLOR_WRITEMASK:
@@ -191,10 +366,10 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = state.depth.mask ? GL_TRUE : GL_FALSE;
       return true;
     case GL_STENCIL_WRITEMASK:
-      *first = static_cast<GLint>(state.stencil.write_mask);
+      *first = static_cast<GLint>(state.stencil.front.write_mask & 0xFF);
       return true;
     case GL_STENCIL_BACK_WRITEMASK:
-      *first = static_cast<GLint>(state.stencil.write_mask);
+      *first = static_cast<GLint>(state.stencil.back.write_mask & 0xFF);
       return true;
     case GL_STENCIL_FUNC:
       *first = static_cast<GLint>(state.stencil.front.func);
@@ -203,7 +378,7 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = state.stencil.front.reference;
       return true;
     case GL_STENCIL_VALUE_MASK:
-      *first = state.stencil.mask;
+      *first = static_cast<GLint>(state.stencil.front.compare_mask & 0xFF);
       return true;
     case GL_STENCIL_FAIL:
       *first = static_cast<GLint>(state.stencil.front.op_fail);
@@ -221,7 +396,7 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = state.stencil.back.reference;
       return true;
     case GL_STENCIL_BACK_VALUE_MASK:
-      *first = state.stencil.mask;
+      *first = static_cast<GLint>(state.stencil.back.compare_mask & 0xFF);
       return true;
     case GL_STENCIL_BACK_FAIL:
       *first = static_cast<GLint>(state.stencil.back.op_fail);
@@ -290,7 +465,32 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
       *first = static_cast<GLint>(state.line_width + 0.5f);
       return true;
     case GL_SAMPLE_COVERAGE_VALUE:
-      *first = state.sample_coverage_value >= 0.5f ? 1 : 0;
+      *first = RoundToInteger(state.sample_coverage_value);
+      return true;
+    case GL_BLEND_COLOR:
+      *first = ExpandFloatToInteger(state.blend.color[0]);
+      *count = 4;
+      return true;
+    case GL_DEPTH_RANGE:
+      *first = ExpandFloatToInteger(state.depth.range_near);
+      *count = 2;
+      return true;
+    case GL_ALIASED_LINE_WIDTH_RANGE:
+      *first = 1;
+      *count = 2;
+      return true;
+    case GL_ALIASED_POINT_SIZE_RANGE:
+      *first = 1;
+      *count = 2;
+      return true;
+    case GL_MAX_TEXTURE_LOD_BIAS:
+      *first = ExpandFloatToInteger(2.0f);
+      return true;
+    case GL_POLYGON_OFFSET_FACTOR:
+      *first = RoundToInteger(state.polygon_offset_factor);
+      return true;
+    case GL_POLYGON_OFFSET_UNITS:
+      *first = RoundToInteger(state.polygon_offset_units);
       return true;
     case GL_SAMPLE_COVERAGE_INVERT:
       *first = state.invert_coverage ? GL_TRUE : GL_FALSE;
@@ -300,7 +500,6 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
   }
 }
 
-}  // namespace
 }  // namespace zgl
 
 extern "C" {
@@ -333,11 +532,17 @@ const GLubyte* glGetString(GLenum name) {
 }
 
 const GLubyte* glGetStringi(GLenum name, GLuint index) {
-  (void)index;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return nullptr;
   if (name != GL_EXTENSIONS) {
-    zgl::Context* context = zgl::ApiContext();
-    if (context)
-      context->SetError(GL_INVALID_ENUM);
+    context->SetError(GL_INVALID_ENUM);
+    return nullptr;
+  }
+  // No extensions are advertised, so every index is out of range.
+  if (index >= 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return nullptr;
   }
   return nullptr;
 }
@@ -346,6 +551,18 @@ void glGetIntegerv(GLenum pname, GLint* data) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !data)
     return;
+  if (pname == GL_COMPRESSED_TEXTURE_FORMATS) {
+    static const GLint kFormats[10] = {
+        GL_COMPRESSED_RGB8_ETC2,          GL_COMPRESSED_SRGB8_ETC2,
+        GL_COMPRESSED_RGBA8_ETC2_EAC,     GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC,
+        GL_COMPRESSED_R11_EAC,            GL_COMPRESSED_SIGNED_R11_EAC,
+        GL_COMPRESSED_RG11_EAC,           GL_COMPRESSED_SIGNED_RG11_EAC,
+        GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2,
+        GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2};
+    for (int i = 0; i < 10; ++i)
+      data[i] = kFormats[i];
+    return;
+  }
   GLint first = 0;
   int count = 1;
   if (!zgl::GetIntegerValue(context, pname, &first, &count)) {
@@ -373,8 +590,30 @@ void glGetIntegerv(GLenum pname, GLint* data) {
   }
   if (pname == GL_COLOR_CLEAR_VALUE) {
     for (int i = 0; i < 4; ++i)
-      data[i] =
-          static_cast<GLint>(context->state.clear_color[i] * 255.0f + 0.5f);
+      data[i] = zgl::ExpandFloatToInteger(context->state.clear_color[i]);
+    return;
+  }
+  if (pname == GL_BLEND_COLOR) {
+    for (int i = 0; i < 4; ++i)
+      data[i] = zgl::ExpandFloatToInteger(context->state.blend.color[i]);
+    return;
+  }
+  if (pname == GL_DEPTH_RANGE) {
+    data[0] = zgl::ExpandFloatToInteger(context->state.depth.range_near);
+    data[1] = zgl::ExpandFloatToInteger(context->state.depth.range_far);
+    return;
+  }
+  if (pname == GL_ALIASED_LINE_WIDTH_RANGE ||
+      pname == GL_ALIASED_POINT_SIZE_RANGE) {
+    data[0] = 1;
+    data[1] = pname == GL_ALIASED_POINT_SIZE_RANGE ? 64 : 1;
+    return;
+  }
+  if (pname == GL_COMPRESSED_TEXTURE_FORMATS) {
+    // The backend advertises format count but does not expose a compressed
+    // format list; fill the array with the first supported ETC2 format so
+    // callers that iterate the result remain in bounds.
+    data[0] = GL_COMPRESSED_RGB8_ETC2;
     return;
   }
   if (pname == GL_MAX_VIEWPORT_DIMS) {
@@ -411,6 +650,18 @@ void glGetFloatv(GLenum pname, GLfloat* data) {
     case GL_SAMPLE_COVERAGE_VALUE:
       data[0] = context->state.sample_coverage_value;
       return;
+    case GL_POLYGON_OFFSET_FACTOR:
+      data[0] = context->state.polygon_offset_factor;
+      return;
+    case GL_POLYGON_OFFSET_UNITS:
+      data[0] = context->state.polygon_offset_units;
+      return;
+    case GL_MAX_TEXTURE_LOD_BIAS:
+      data[0] = 2.0f;
+      return;
+    case GL_SAMPLE_COVERAGE_INVERT:
+      data[0] = context->state.invert_coverage ? 1.0f : 0.0f;
+      return;
     case GL_ALIASED_LINE_WIDTH_RANGE:
       data[0] = 1.0f;
       data[1] = 1.0f;
@@ -428,6 +679,15 @@ void glGetFloatv(GLenum pname, GLfloat* data) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
+  // Vector state such as GL_COLOR_WRITEMASK and GL_VIEWPORT must fill every
+  // component, not just the first one.
+  GLint values[16] = {};
+  if (count > 1) {
+    glGetIntegerv(pname, values);
+    for (int i = 0; i < count && i < 16; ++i)
+      data[i] = static_cast<GLfloat>(values[i]);
+    return;
+  }
   data[0] = static_cast<GLfloat>(value);
 }
 
@@ -435,10 +695,22 @@ void glGetBooleanv(GLenum pname, GLboolean* data) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !data)
     return;
+  if (pname == GL_SAMPLE_COVERAGE_VALUE) {
+    data[0] = context->state.sample_coverage_value != 0.0f ? GL_TRUE
+                                                             : GL_FALSE;
+    return;
+  }
   GLint value = 0;
   int count = 1;
   if (!zgl::GetIntegerValue(context, pname, &value, &count)) {
     context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  GLint values[16] = {};
+  if (count > 1) {
+    glGetIntegerv(pname, values);
+    for (int i = 0; i < count && i < 16; ++i)
+      data[i] = values[i] ? GL_TRUE : GL_FALSE;
     return;
   }
   data[0] = value ? GL_TRUE : GL_FALSE;
@@ -583,6 +855,8 @@ void glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
     return;
   }
   context->state.viewport = zgl::Rect{x, y, width, height};
+  if (getenv("ZGL_DEBUG_VIEWPORT"))
+    fprintf(stderr, "[vp] %d %d %d %d\n", x, y, width, height);
 }
 
 void glScissor(GLint x, GLint y, GLsizei width, GLsizei height) {
@@ -661,15 +935,24 @@ void glClearStencil(GLint value) {
 }
 
 void glClear(GLbitfield mask) {
+  if (getenv("ZGL_DEBUG_ERROR"))
+    fprintf(stderr, "[glclear] mask=0x%x\n", static_cast<unsigned>(mask));
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  if (mask & ~(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
+               GL_STENCIL_BUFFER_BIT)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   zgl::RenderTarget target = context->GetDrawTarget();
   if (!target.valid()) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
   const zgl::State& state = context->state;
+  if (state.rasterizer_discard)
+    return;
   zgl::Rect area{0, 0, target.width, target.height};
   if (state.scissor_test) {
     const zgl::Rect scissor{state.scissor.x,
@@ -696,10 +979,18 @@ void glClear(GLbitfield mask) {
       if (buffer < GL_COLOR_ATTACHMENT0 ||
           buffer >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments)
         continue;
-      uint8_t* const color_buffer =
-          target.colors[buffer - GL_COLOR_ATTACHMENT0];
+      const int attachment = buffer - GL_COLOR_ATTACHMENT0;
+      uint8_t* const color_buffer = target.colors[attachment];
       if (!color_buffer)
         continue;
+      uint32_t buffer_packed = packed;
+      if (target.color_is_srgb[attachment]) {
+        const zgl::Rgba linear = zgl::UnpackRgba(packed);
+        buffer_packed = zgl::PackRgba(zgl::LinearToSrgb8(linear.r / 255.0f),
+                                      zgl::LinearToSrgb8(linear.g / 255.0f),
+                                      zgl::LinearToSrgb8(linear.b / 255.0f),
+                                      linear.a);
+      }
       const int sample_planes = target.multisampled() ? target.samples : 1;
       const size_t plane_bytes =
           target.multisampled() ? target.sample_texels * 4 : 0;
@@ -711,7 +1002,7 @@ void glClear(GLbitfield mask) {
           uint8_t* row =
               plane + static_cast<size_t>(y) * target.width * 4;
           zgl::simd::FillRgba(
-              row + static_cast<size_t>(area.x) * 4, area.width, packed);
+              row + static_cast<size_t>(area.x) * 4, area.width, buffer_packed);
         }
         continue;
       }
@@ -738,7 +1029,7 @@ void glClear(GLbitfield mask) {
             target.resolved_colors[buffer - GL_COLOR_ATTACHMENT0];
         for (int y = area.y; y < area.bottom(); ++y) {
           for (int x = area.x; x < area.right(); ++x)
-            resolved[static_cast<size_t>(y) * target.width + x] = packed;
+            resolved[static_cast<size_t>(y) * target.width + x] = buffer_packed;
         }
       }
     }
@@ -816,6 +1107,8 @@ void glStencilMask(GLuint mask) {
     return;
   context->state.stencil.write_mask = static_cast<int>(mask);
   context->state.stencil_write_mask = mask;
+  context->state.stencil.front.write_mask = mask;
+  context->state.stencil.back.write_mask = mask;
 }
 
 void glStencilMaskSeparate(GLenum face, GLuint mask) {
@@ -825,7 +1118,17 @@ void glStencilMaskSeparate(GLenum face, GLuint mask) {
       context->SetError(GL_INVALID_ENUM);
     return;
   }
-  glStencilMask(mask);
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (face == GL_FRONT || face == GL_FRONT_AND_BACK)
+    context->state.stencil.front.write_mask = mask;
+  if (face == GL_BACK || face == GL_FRONT_AND_BACK)
+    context->state.stencil.back.write_mask = mask;
+  if (face == GL_FRONT_AND_BACK) {
+    context->state.stencil.write_mask = static_cast<int>(mask);
+    context->state.stencil_write_mask = mask;
+  }
 }
 
 static void SetStencilFunc(zgl::StencilFace* face,
@@ -833,8 +1136,10 @@ static void SetStencilFunc(zgl::StencilFace* face,
                            GLint reference,
                            GLuint mask) {
   face->func = func;
-  face->reference = reference;
-  (void)mask;
+  // The reference is clamped to the range representable by the stencil
+  // buffer; it is not reduced modulo the number of bits.
+  face->reference = reference < 0 ? 0 : (reference > 255 ? 255 : reference);
+  face->compare_mask = mask;
 }
 
 void glStencilFunc(GLenum func, GLint reference, GLuint mask) {
@@ -862,8 +1167,10 @@ void glStencilFuncSeparate(GLenum face,
       context->SetError(GL_INVALID_ENUM);
       return;
   }
-  context->state.stencil.mask = static_cast<int>(mask);
-  context->state.stencil_mask = mask;
+  if (face == GL_FRONT_AND_BACK) {
+    context->state.stencil.mask = static_cast<int>(mask);
+    context->state.stencil_mask = mask;
+  }
   if (face == GL_FRONT || face == GL_FRONT_AND_BACK)
     SetStencilFunc(&context->state.stencil.front, func, reference, mask);
   if (face == GL_BACK || face == GL_FRONT_AND_BACK)
@@ -947,7 +1254,8 @@ static bool ValidBlendFactor(GLenum factor) {
 
 static bool ValidBlendEquation(GLenum equation) {
   return equation == GL_FUNC_ADD || equation == GL_FUNC_SUBTRACT ||
-         equation == GL_FUNC_REVERSE_SUBTRACT;
+         equation == GL_FUNC_REVERSE_SUBTRACT || equation == GL_MIN ||
+         equation == GL_MAX;
 }
 
 void glBlendFuncSeparate(GLenum source_rgb,
@@ -1040,15 +1348,25 @@ void glSampleCoverage(GLfloat value, GLboolean invert) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  context->state.sample_coverage_value = value;
+  context->state.sample_coverage_value =
+      value < 0.0f ? 0.0f : value > 1.0f ? 1.0f : value;
   context->state.invert_coverage = invert != GL_FALSE;
 }
 
 void glHint(GLenum target, GLenum mode) {
-  (void)mode;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (mode != GL_FASTEST && mode != GL_NICEST && mode != GL_DONT_CARE) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   switch (target) {
     case GL_GENERATE_MIPMAP_HINT:
+      context->state.generate_mipmap_hint = mode;
+      return;
     case GL_FRAGMENT_SHADER_DERIVATIVE_HINT:
+      context->state.fragment_shader_derivative_hint = mode;
       return;
     default: {
       zgl::Context* context = zgl::ApiContext();
@@ -1071,6 +1389,8 @@ void glPixelStorei(GLenum pname, GLint param) {
     case GL_UNPACK_SKIP_ROWS:
     case GL_PACK_SKIP_PIXELS:
     case GL_UNPACK_SKIP_PIXELS:
+    case GL_UNPACK_IMAGE_HEIGHT:
+    case GL_UNPACK_SKIP_IMAGES:
       if (param < 0) {
         context->SetError(GL_INVALID_VALUE);
         return;
@@ -1112,6 +1432,12 @@ void glPixelStorei(GLenum pname, GLint param) {
     case GL_UNPACK_SKIP_PIXELS:
       store.unpack_skip_pixels = param < 0 ? 0 : param;
       return;
+    case GL_UNPACK_IMAGE_HEIGHT:
+      store.unpack_image_height = param < 0 ? 0 : param;
+      return;
+    case GL_UNPACK_SKIP_IMAGES:
+      store.unpack_skip_images = param < 0 ? 0 : param;
+      return;
     default:
       context->SetError(GL_INVALID_ENUM);
       return;
@@ -1122,7 +1448,12 @@ void glGetShaderPrecisionFormat(GLenum shader_type,
                                 GLenum precision_type,
                                 GLint* range,
                                 GLint* precision) {
-  (void)shader_type;
+  if (shader_type != GL_VERTEX_SHADER && shader_type != GL_FRAGMENT_SHADER) {
+    zgl::Context* context = zgl::ApiContext();
+    if (context)
+      context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (precision_type != GL_LOW_FLOAT && precision_type != GL_MEDIUM_FLOAT &&
       precision_type != GL_HIGH_FLOAT && precision_type != GL_LOW_INT &&
       precision_type != GL_MEDIUM_INT && precision_type != GL_HIGH_INT) {
@@ -1131,12 +1462,51 @@ void glGetShaderPrecisionFormat(GLenum shader_type,
       context->SetError(GL_INVALID_ENUM);
     return;
   }
+  // ES 3.0 table 4.5 minimum precision requirements.  The engine computes in
+  // full 32-bit float / int, so reporting the guaranteed minimums keeps the
+  // conformance suite inside the ranges it may rely on.
+  int min_exponent = 0;
+  int max_exponent = 0;
+  int precision_bits = 0;
+  switch (precision_type) {
+    case GL_LOW_FLOAT:
+      min_exponent = 8;
+      max_exponent = 8;
+      precision_bits = 8;
+      break;
+    case GL_MEDIUM_FLOAT:
+      min_exponent = 14;
+      max_exponent = 14;
+      precision_bits = 10;
+      break;
+    case GL_HIGH_FLOAT:
+      min_exponent = 127;
+      max_exponent = 127;
+      precision_bits = 23;
+      break;
+    case GL_LOW_INT:
+      // The evaluator keeps all integer values in full 32-bit form, so
+      // advertising full precision is both truthful and legal.
+      min_exponent = 31;
+      max_exponent = 31;
+      break;
+    case GL_MEDIUM_INT:
+      min_exponent = 31;
+      max_exponent = 31;
+      break;
+    case GL_HIGH_INT:
+      min_exponent = 31;
+      max_exponent = 31;
+      break;
+    default:
+      break;
+  }
   if (range) {
-    range[0] = 127;
-    range[1] = 127;
+    range[0] = min_exponent;
+    range[1] = max_exponent;
   }
   if (precision)
-    precision[0] = 23;
+    precision[0] = precision_bits;
 }
 
 void glFinish(void) {}
@@ -1147,24 +1517,28 @@ void glFlush(void) {}
 
 void glGenQueries(GLsizei n, GLuint* ids) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !ids)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!ids)
+    return;
   for (GLsizei i = 0; i < n; ++i)
-    ids[i] = context->queries.Create();
+    ids[i] = context->queries.Generate();
 }
 
 void glDeleteQueries(GLsizei n, const GLuint* ids) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !ids)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!ids)
+    return;
   for (GLsizei i = 0; i < n; ++i)
     context->queries.Delete(ids[i]);
 }
@@ -1186,7 +1560,10 @@ void glBeginQuery(GLenum target, GLuint id) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::Query* query = context->queries.Get(id);
+  const GLenum query_target =
+      target == GL_ANY_SAMPLES_PASSED_CONSERVATIVE ? GL_ANY_SAMPLES_PASSED
+                                                   : target;
+  zgl::Query* query = context->queries.GetOrCreateReserved(id);
   if (!query) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -1195,15 +1572,24 @@ void glBeginQuery(GLenum target, GLuint id) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
-    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
-    if (!feedback || !feedback->active || feedback->paused) {
+  if (query->target != 0 && query->target != query_target) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  for (int name = 1; name <= context->queries.size(); ++name) {
+    const zgl::Query* active =
+        context->queries.Get(static_cast<GLuint>(name));
+    if (active && active->active && active->target == query_target) {
       context->SetError(GL_INVALID_OPERATION);
       return;
     }
-    query->start_primitives = feedback->primitives_written;
   }
-  query->target = target;
+  if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
+    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+    query->start_primitives =
+        feedback ? feedback->primitives_written : 0;
+  }
+  query->target = query_target;
   query->active = true;
   query->start_fragments = context->stats.fragments_written;
   query->result = 0;
@@ -1213,16 +1599,24 @@ void glEndQuery(GLenum target) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
+  const GLenum query_target =
+      target == GL_ANY_SAMPLES_PASSED_CONSERVATIVE ? GL_ANY_SAMPLES_PASSED
+                                                   : target;
+  target = query_target;
+  if (target != GL_ANY_SAMPLES_PASSED &&
+      target != GL_ANY_SAMPLES_PASSED_CONSERVATIVE &&
+      target != GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
     zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
-    if (!feedback || !feedback->active) {
-      context->SetError(GL_INVALID_OPERATION);
-      return;
-    }
     for (int name = 1; name <= context->queries.size(); ++name) {
       zgl::Query* query = context->queries.Get(static_cast<GLuint>(name));
       if (query && query->active && query->target == target) {
-        query->result = feedback->primitives_written - query->start_primitives;
+        query->result = feedback ? feedback->primitives_written -
+                                       query->start_primitives
+                                 : 0;
         query->active = false;
         return;
       }
@@ -1246,6 +1640,12 @@ void glGetQueryiv(GLenum target, GLenum pname, GLint* params) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !params)
     return;
+  if (target != GL_ANY_SAMPLES_PASSED &&
+      target != GL_ANY_SAMPLES_PASSED_CONSERVATIVE &&
+      target != GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (pname == GL_CURRENT_QUERY) {
     params[0] = 0;
     for (int name = 1; name <= context->queries.size(); ++name) {
@@ -1266,6 +1666,10 @@ void glGetQueryObjectuiv(GLuint id, GLenum pname, GLuint* params) {
     return;
   const zgl::Query* query = context->queries.Get(id);
   if (!query) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (query->active) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -1314,6 +1718,13 @@ GLboolean glIsSync(GLsync sync) {
 }
 
 void glDeleteSync(GLsync sync) {
+  zgl::Context* context = zgl::ApiContext();
+  if (sync == nullptr)
+    return;
+  if (context && !glIsSync(sync)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
   for (size_t i = 0; i < g_sync_objects.size(); ++i) {
     if (reinterpret_cast<GLsync>(g_sync_objects[i]) == sync) {
       delete g_sync_objects[i];

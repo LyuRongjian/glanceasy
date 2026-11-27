@@ -30,9 +30,14 @@ struct Fragment {
   // Barycentric weights of the three vertices of the sub-triangle; weights
   // 1 and 2 are zero for lines and points.
   float bary[3] = {0.0f, 0.0f, 0.0f};
+  // Screen-space derivatives of the barycentric weights, used to estimate
+  // implicit texture LOD in the fragment shader.
+  float dbary[3][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f}};
   // Indices into the caller's vertex array, so that the sink can interpolate
   // the per-vertex varyings.
   int vertex[3] = {0, 0, 0};
+  // Vertex that supplies flat-shaded varyings (the provoking vertex).
+  int provoking = -1;
   // gl_PointCoord for point primitives.
   float point_coord[2] = {0.0f, 0.0f};
 };

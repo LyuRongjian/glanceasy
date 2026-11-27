@@ -16,6 +16,9 @@ namespace zgl {
 // is not a supported ETC2/EAC format.
 bool DecodeEtc2Block(GLenum format, const uint8_t* block, uint8_t* rgba);
 
+// Decodes one signed EAC R11/RG11 block into normalized float RGBA texels.
+bool DecodeSignedEacBlock(GLenum format, const uint8_t* block, float* rgba);
+
 // Returns the number of bytes occupied by a 4x4 block of |format|, or zero for
 // an unsupported format.
 int CompressedBlockBytes(GLenum format);

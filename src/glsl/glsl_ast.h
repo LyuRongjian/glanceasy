@@ -48,6 +48,7 @@ enum class BuiltinId {
   kFragOutput1,  // Second user-defined fragment output, vec4
   kFragOutput2,  // Third user-defined fragment output, vec4
   kFragOutput3,  // Fourth user-defined fragment output, vec4
+  kDepthRange,   // gl_DepthRange, vec3 (near, far, diff)
   kCount,
 };
 
@@ -58,6 +59,9 @@ struct FragmentOut {
   std::string name;
   int location = -1;
   int slot = -1;
+  int element = 0;
+  int components = 0;
+  BaseType base = BaseType::kFloat;
 };
 
 // Operator codes, indexed by precedence level in the parser.
@@ -114,8 +118,18 @@ enum class BuiltinFunc {
   kSin,
   kCos,
   kTan,
+  kSinh,
+  kCosh,
+  kTanh,
   kAsin,
   kAcos,
+  kAtanh,
+  kAsinh,
+  kAcosh,
+  kRound,
+  kRoundEven,
+  kTrunc,
+  kModf,
   kAtan,
   kPow,
   kExp,
@@ -145,6 +159,7 @@ enum class BuiltinFunc {
   kReflect,
   kRefract,
   kMatrixCompMult,
+  kOuterProduct,
   kTranspose,
   kDeterminant,
   kInverse,
@@ -162,10 +177,35 @@ enum class BuiltinFunc {
   kTextureCube,
   kTexture3D,
   kTexture,
+  kTextureProj,
+  kTextureProjLod,
   kTextureLod,
+  kTextureSize,
+  kTextureOffset,
+  kTextureLodOffset,
+  kTextureGrad,
+  kTextureGradOffset,
+  kTextureProjOffset,
+  kTextureProjLodOffset,
+  kTextureProjGrad,
+  kTextureProjGradOffset,
+  kTexelFetch,
+  kTexelFetchOffset,
   kDfdx,
   kDfdy,
   kFwidth,
+  kFloatBitsToUint,
+  kFloatBitsToInt,
+  kUIntBitsToFloat,
+  kIntBitsToFloat,
+  kIsInf,
+  kIsNan,
+  kPackUnorm2x16,
+  kPackSnorm2x16,
+  kPackHalf2x16,
+  kUnpackUnorm2x16,
+  kUnpackSnorm2x16,
+  kUnpackHalf2x16,
 };
 
 struct Variable {
@@ -175,22 +215,36 @@ struct Variable {
   int index = -1;           // Slot / attribute location / uniform index.
   int varying_offset = -1;  // Float offset inside the varying array.
   int ubo_block = -1;       // Uniform block owning this uniform, or -1.
+  int ubo_instance = 0;     // Instance index when the block is an array.
   int ubo_offset = 0;       // Byte offset inside the std140 block.
+  bool explicit_location = false;  // layout(location) was declared.
+  bool flat = false;               // Flat interpolation qualifier.
+  bool used = false;               // Referenced by a shader expression.
   BuiltinId builtin = BuiltinId::kNone;
   bool read_only = false;
+  bool is_const = false;
+  // Function parameter direction: 0 = in, 1 = out, 2 = inout.
+  int parameter_qualifier = 0;
 };
 
 struct UniformBlockMember {
   std::string name;
   Type type;
-  int offset = 0;         // Byte offset inside the std140 block.
+  int offset = 0;          // Byte offset inside the std140 block.
+  int matrix_layout = 0;   // 0 = column_major, 1 = row_major.
   int uniform_index = -1;  // Index into ShaderAst::uniforms.
+  std::vector<int> instance_uniform_indices;  // One slot per block instance.
 };
 
 struct UniformBlock {
   std::string name;
   std::string instance_name;  // Empty for unnamed blocks.
   int size = 0;               // std140 block size, rounded up to 16.
+  int matrix_layout = 0;      // 0 = column_major/default, 1 = row_major.
+  bool std140 = false;        // True for a std140 block layout.
+  bool packed = false;        // True for a packed block layout.
+  bool instance_array = false;  // True when declared with an array suffix.
+  int instance_array_size = 1;
   std::vector<UniformBlockMember> members;
 };
 
@@ -215,15 +269,20 @@ struct Expr {
   int line = 0;
   Type type;
   float literal = 0.0f;
+  // Exact value of an integer literal; |literal| loses precision above 2^24.
+  uint64_t integer_literal = 0;
 
   // kVariable: |text| is the source name, |storage| and |index| tell the
   // interpreter where to read from.
   Storage storage = Storage::kLocal;
   int index = -1;
+  bool is_const = false;
+  bool is_parameter = false;
   BuiltinId builtin = BuiltinId::kNone;
   // Set when this variable is a uniform block instance; field access resolves
   // the member to its uniform slot.
   int ubo_block = -1;
+  int ubo_instance = 0;
   // kField: flattened component offset of a structure member.
   int field_offset = 0;
 
@@ -259,6 +318,7 @@ struct Statement {
     kBreak,
     kContinue,
     kDiscard,
+    kSwitch,
   };
 
   Kind kind = Kind::kBlock;
@@ -270,6 +330,11 @@ struct Statement {
   StmtPtr then_branch;              // If / loop body.
   StmtPtr else_branch;
   ExprPtr expression;  // Expression statement / return value.
+  struct SwitchCase {
+    ExprPtr label;  // Null for default.
+    std::vector<StmtPtr> statements;
+  };
+  std::vector<SwitchCase> cases;  // kSwitch entries.
 
   // kDeclaration entries.
   struct Declarator {
@@ -319,9 +384,12 @@ struct ShaderAst {
   std::vector<int> builtin_slots;
 
   bool uses_discard = false;
+  bool uses_out_params = false;
+  bool uses_switch = false;
   bool uses_frag_depth = false;
   bool uses_point_size = false;
   bool uses_frag_coord = false;
+  bool uses_depth_range = false;
   bool uses_front_facing = false;
   bool uses_point_coord = false;
   bool uses_frag_color = false;

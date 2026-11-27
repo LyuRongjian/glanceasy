@@ -30,9 +30,10 @@ constexpr int kMaxTransformFeedbackBuffers = 4;
 constexpr int kMaxColorAttachments = 4;
 constexpr int kMaxSamples = 4;
 
-// Number of floats reserved for a single uniform / varying slot.  A mat4 is
-// the widest value the interpreter can produce, so sixteen floats cover it.
-constexpr int kValueFloats = 16;
+// Number of floats reserved for a single uniform / varying slot.  Transform
+// feedback can capture a whole mat4 array, whose flattened value spans more
+// than the sixteen floats of one matrix.
+constexpr int kValueFloats = 64;
 
 struct Rect {
   int x = 0;
@@ -90,6 +91,23 @@ inline Rgba UnpackRgba(uint32_t p) {
 
 // Float form of the packing above, used by the fixed function blend unit.
 inline void UnpackRgba(uint32_t p, float out[4]);
+
+inline float SrgbToLinear(uint8_t value) {
+  const float s = static_cast<float>(value) / 255.0f;
+  return s <= 0.04045f ? s / 12.92f
+                       : std::pow((s + 0.055f) / 1.055f, 2.4f);
+}
+
+inline uint8_t LinearToSrgb8(float v) {
+  if (!(v > 0.0f))  // Also catches NaN.
+    return 0;
+  if (v >= 1.0f)
+    return 255;
+  const float encoded = v <= 0.0031308f
+                            ? 12.92f * v
+                            : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
+  return static_cast<uint8_t>(encoded * 255.0f + 0.5f);
+}
 
 inline uint8_t FloatToUnorm8(float v) {
   if (!(v > 0.0f))  // Also catches NaN.

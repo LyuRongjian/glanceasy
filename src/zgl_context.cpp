@@ -8,6 +8,8 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 
@@ -21,14 +23,238 @@ thread_local Context* g_current_context = nullptr;
 std::unique_ptr<Context> g_default_context;
 int g_live_contexts = 0;
 
+GLenum AttachmentFormat(const Context& context,
+                        const FramebufferAttachment& attachment) {
+  if (attachment.retained_texture)
+    return attachment.retained_texture->internal_format;
+  if (attachment.texture) {
+    const Texture* texture = context.textures.Get(attachment.texture);
+    return texture ? texture->internal_format : 0;
+  }
+  if (attachment.retained_renderbuffer)
+    return attachment.retained_renderbuffer->format;
+  if (attachment.renderbuffer) {
+    const Renderbuffer* renderbuffer =
+        context.renderbuffers.Get(attachment.renderbuffer);
+    return renderbuffer ? renderbuffer->format : 0;
+  }
+  return 0;
+}
+
+bool IsIntegerFormat(GLenum format) {
+  switch (format) {
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_RGB10_A2UI:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Formats whose RGB channels are stored without an alpha channel.  Reads
+// back as RGBA must return one for alpha, not the zero in unused storage.
+bool FormatHasAlpha(GLenum format) {
+  switch (format) {
+    case GL_RGBA:
+    case GL_LUMINANCE_ALPHA:
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGBA8:
+    case GL_RGBA8_SNORM:
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGB10_A2:
+    case GL_RGB10_A2UI:
+      return true;
+    default:
+      return false;
+  }
+}
+
+}  // namespace
+
+int FormatIntegerBits(GLenum format, int channel) {
+  if (format == GL_RGB10_A2UI || format == GL_RGB10_A2)
+    return channel < 3 ? 10 : 2;
+  switch (format) {
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+      return 8;
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+      return 16;
+    default:
+      return 32;
+  }
+}
+
+int FormatColorChannels(GLenum format) {
+  switch (format) {
+    case GL_RGBA:
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGBA8:
+    case GL_RGBA8_SNORM:
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGB10_A2:
+    case GL_RGB10_A2UI:
+    case GL_COMPRESSED_RGBA8_ETC2_EAC:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC:
+    case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+    case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+      return 4;
+    case GL_RGB:
+    case GL_RGB8:
+    case GL_RGB8_SNORM:
+    case GL_SRGB8:
+    case GL_RGB565:
+    case GL_RGB16F:
+    case GL_RGB32F:
+    case GL_R11F_G11F_B10F:
+    case GL_RGB9_E5:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+    case GL_COMPRESSED_RGB8_ETC2:
+    case GL_COMPRESSED_SRGB8_ETC2:
+      return 3;
+    case GL_RG:
+    case GL_LUMINANCE_ALPHA:
+    case GL_RG8:
+    case GL_RG8_SNORM:
+    case GL_RG16F:
+    case GL_RG32F:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_COMPRESSED_RG11_EAC:
+    case GL_COMPRESSED_SIGNED_RG11_EAC:
+      return 2;
+    case GL_COMPRESSED_R11_EAC:
+    case GL_COMPRESSED_SIGNED_R11_EAC:
+    default:
+      return 1;
+  }
+}
+
+namespace {
+
+bool IsUnsignedIntegerFormat(GLenum format) {
+  switch (format) {
+    case GL_R8UI:
+    case GL_R16UI:
+    case GL_R32UI:
+    case GL_RG8UI:
+    case GL_RG16UI:
+    case GL_RG32UI:
+    case GL_RGB8UI:
+    case GL_RGB16UI:
+    case GL_RGB32UI:
+    case GL_RGBA8UI:
+    case GL_RGBA16UI:
+    case GL_RGBA32UI:
+    case GL_RGB10_A2UI:
+      return true;
+    default:
+      return false;
+  }
+}
+
+int CubeFaceIndex(GLenum face) {
+  switch (face) {
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+      return 0;
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+      return 1;
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+      return 2;
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+      return 3;
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+      return 4;
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+      return 5;
+    default:
+      return 0;
+  }
+}
+
 const TextureImage* AttachmentImage(const Context& context,
                                     const FramebufferAttachment& attachment) {
+  if (attachment.retained_texture) {
+    const Texture* texture = attachment.retained_texture.get();
+    const int face = texture->target == GL_TEXTURE_CUBE_MAP
+                         ? CubeFaceIndex(attachment.cube_face)
+                         : 0;
+    return texture->image(attachment.level, face);
+  }
   if (attachment.texture) {
     const Texture* texture = context.textures.Get(attachment.texture);
     if (!texture)
       return nullptr;
-    return texture->image(attachment.level, 0);
+    const int face = texture->target == GL_TEXTURE_CUBE_MAP
+                         ? CubeFaceIndex(attachment.cube_face)
+                         : 0;
+    return texture->image(attachment.level, face);
   }
+  if (attachment.retained_renderbuffer)
+    return &attachment.retained_renderbuffer->image;
   if (attachment.renderbuffer) {
     const Renderbuffer* renderbuffer =
         context.renderbuffers.Get(attachment.renderbuffer);
@@ -50,6 +276,13 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
     target.color = target.colors[0];
     target.depth = context->surface.depth16.data();
     target.stencil = context->surface.stencil8.data();
+    // The default framebuffer has one color attachment.  Initialize the
+    // draw-buffer table so glClearBuffer* and the rasterizer agree on it.
+    target.draw_buffers[0] = GL_COLOR_ATTACHMENT0;
+    for (int i = 1; i < kMaxColorAttachments; ++i)
+      target.draw_buffers[i] = GL_NONE;
+    target.draw_buffer_count = 1;
+    target.read_color_bytes = 4;
     return target;
   }
   const Framebuffer* framebuffer = context->framebuffers.Get(framebuffer_name);
@@ -64,23 +297,69 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
         color = image;
         samples = std::max(1, image->samples);
       }
-      if (image->samples > 1) {
+      const GLenum format = AttachmentFormat(*context, framebuffer->colors[i]);
+      const bool integer = IsIntegerFormat(format);
+      target.color_is_integer[i] = integer;
+      target.color_is_unsigned[i] = IsUnsignedIntegerFormat(format);
+      target.color_has_alpha[i] = FormatHasAlpha(format);
+      target.color_is_srgb[i] = format == GL_SRGB8_ALPHA8;
+      if (getenv("ZGL_DEBUG_SRGB"))
+        fprintf(stderr, "[rt] attach=%d format=0x%x srgb=%d\n", i, format,
+                (int)target.color_is_srgb[i]);
+      target.color_format[i] = format;
+      target.color_channels[i] = FormatColorChannels(format);
+      target.color_integer_bits[i] = FormatIntegerBits(format, 0);
+      target.color_bytes[i] = integer ? 16 : 4;
+      if (getenv("ZGL_DEBUG_INT")) {
+        static int rt_debug = 0;
+        if (rt_debug < 12) {
+          fprintf(stderr, "[rtint] i=%d fmt=0x%x int=%d sz=%zu rgba=%zu\n", i,
+                  static_cast<unsigned>(format), static_cast<int>(integer),
+                  image->integer_rgba.size(), image->rgba.size());
+          ++rt_debug;
+        }
+      }
+      const size_t layer_offset =
+          static_cast<size_t>(framebuffer->colors[i].layer) *
+          static_cast<size_t>(image->width) *
+          static_cast<size_t>(image->height);
+      if (integer) {
+        target.integer_colors[i] =
+            const_cast<uint32_t*>(
+                (image->samples > 1 ? image->sample_integer_rgba
+                                    : image->integer_rgba)
+                    .data()) +
+            layer_offset * 4;
+        target.colors[i] =
+            reinterpret_cast<uint8_t*>(target.integer_colors[i]);
+        if (image->samples > 1) {
+          target.resolved_integer_colors[i] =
+              const_cast<uint32_t*>(image->integer_rgba.data()) +
+              layer_offset * 4;
+        }
+      } else if (image->samples > 1) {
         target.colors[i] = reinterpret_cast<uint8_t*>(
-            const_cast<uint32_t*>(image->sample_rgba.data()));
+            const_cast<uint32_t*>(image->sample_rgba.data()) +
+            layer_offset * static_cast<size_t>(image->samples));
         target.resolved_colors[i] =
-            const_cast<uint32_t*>(image->rgba.data());
+            const_cast<uint32_t*>(image->rgba.data()) + layer_offset;
       } else {
         target.colors[i] = reinterpret_cast<uint8_t*>(
-            const_cast<uint32_t*>(image->rgba.data()));
+            const_cast<uint32_t*>(image->rgba.data()) + layer_offset);
       }
     }
   }
   const TextureImage* depth = AttachmentImage(*context, framebuffer->depth);
   const TextureImage* stencil = AttachmentImage(*context, framebuffer->stencil);
-  if (!color || !color->width || !color->height)
+  const TextureImage* extent_image = color;
+  if (!extent_image || !extent_image->width || !extent_image->height)
+    extent_image = depth;
+  if (!extent_image || !extent_image->width || !extent_image->height)
+    extent_image = stencil;
+  if (!extent_image || !extent_image->width || !extent_image->height)
     return target;
-  target.width = color->width;
-  target.height = color->height;
+  target.width = extent_image->width;
+  target.height = extent_image->height;
   target.samples = samples;
   target.sample_texels =
       static_cast<size_t>(target.width) * static_cast<size_t>(target.height);
@@ -98,20 +377,41 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
       break;
     }
   }
-  if (first >= 0 && target.colors[first])
+  if (first >= 0 && target.colors[first]) {
     target.color = target.colors[first];
+    target.read_integer = target.color_is_integer[first];
+    target.read_unsigned = target.color_is_unsigned[first];
+    target.read_has_alpha = target.color_has_alpha[first];
+    target.read_channels = target.color_channels[first];
+    target.read_format = AttachmentFormat(*context, framebuffer->colors[first]);
+    target.read_color_bytes = target.color_bytes[first];
+  }
+  const size_t depth_layer_offset =
+      static_cast<size_t>(framebuffer->depth.layer) *
+      static_cast<size_t>(depth ? depth->width : 0) *
+      static_cast<size_t>(depth ? depth->height : 0);
+  const size_t stencil_layer_offset =
+      static_cast<size_t>(framebuffer->stencil.layer) *
+      static_cast<size_t>(stencil ? stencil->width : 0) *
+      static_cast<size_t>(stencil ? stencil->height : 0);
   if (depth && depth->width == target.width && depth->height == target.height) {
-    target.depth = const_cast<uint16_t*>(depth->depth16.data());
+    target.depth = const_cast<uint16_t*>(depth->depth16.data()) +
+                   depth_layer_offset;
     if (depth->samples > 1) {
-      target.depth = const_cast<uint16_t*>(depth->sample_depth16.data());
-      target.resolved_depth = const_cast<uint16_t*>(depth->depth16.data());
+      target.depth = const_cast<uint16_t*>(depth->sample_depth16.data()) +
+                     depth_layer_offset * static_cast<size_t>(depth->samples);
+      target.resolved_depth = const_cast<uint16_t*>(depth->depth16.data()) +
+                              depth_layer_offset;
     }
   }
   if (stencil && stencil->width == target.width &&
       stencil->height == target.height) {
-    target.stencil = const_cast<uint8_t*>(stencil->stencil8.data());
+    target.stencil = const_cast<uint8_t*>(stencil->stencil8.data()) +
+                     stencil_layer_offset;
     if (stencil->samples > 1) {
-      target.stencil = const_cast<uint8_t*>(stencil->sample_stencil8.data());
+      target.stencil = const_cast<uint8_t*>(stencil->sample_stencil8.data()) +
+                       stencil_layer_offset *
+                           static_cast<size_t>(stencil->samples);
       target.resolved_stencil = const_cast<uint8_t*>(stencil->stencil8.data());
     }
   }
@@ -204,8 +504,10 @@ Context::Context(int width, int height) {
   surface.AllocateStencil(width, height);
   state.viewport = Rect{0, 0, width, height};
   state.scissor = Rect{0, 0, width, height};
-  for (int i = 0; i < kMaxVertexAttribs; ++i)
+  for (int i = 0; i < kMaxVertexAttribs; ++i) {
     state.current_attribute[i][3] = 1.0f;
+    state.current_attribute_integer[i][3] = 1;
+  }
   diagnostics = "ZCat-GLES 0.1.0 RGBA8/16-bit depth/8-bit stencil";
   ++g_live_contexts;
 }
@@ -244,9 +546,21 @@ RenderTarget Context::GetReadTarget() {
       const int index =
           static_cast<int>(framebuffer->read_buffer - GL_COLOR_ATTACHMENT0);
       target.color = target.colors[index];
-      if (target.multisampled() && target.resolved_colors[index])
+      target.read_integer = target.color_is_integer[index];
+      target.read_unsigned = target.color_is_unsigned[index];
+      target.read_has_alpha = target.color_has_alpha[index];
+      target.read_channels = target.color_channels[index];
+      target.read_format =
+          AttachmentFormat(*this, framebuffer->colors[index]);
+      target.read_color_bytes = target.color_bytes[index];
+      if (target.multisampled() &&
+          target.resolved_integer_colors[index]) {
+        target.color = reinterpret_cast<uint8_t*>(
+            target.resolved_integer_colors[index]);
+      } else if (target.multisampled() && target.resolved_colors[index]) {
         target.color =
             reinterpret_cast<uint8_t*>(target.resolved_colors[index]);
+      }
     }
   }
   return target;

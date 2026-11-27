@@ -8,9 +8,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <utility>
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include "GLES3/gl32.h"
@@ -19,6 +24,10 @@
 #include "zgl/zgl.h"
 
 namespace zgl {
+
+// Returns the number of color channels carried by an internal format.
+int FormatColorChannels(GLenum format);
+int FormatIntegerBits(GLenum format, int channel);
 
 // A rectangular block of pixels used by textures, renderbuffers and the
 // default framebuffer.  Colour is always stored as RGBA8; depth and stencil
@@ -50,6 +59,19 @@ struct RenderTarget {
   int height = 0;
   // Storage for every colour attachment of the current framebuffer.
   uint8_t* colors[kMaxColorAttachments] = {};
+  // Integer colour attachments store four 32-bit words per texel.  The
+  // |colors| entry points at the same storage for compatibility with generic
+  // code paths, while |integer_colors| and the flags below describe its type.
+  uint32_t* integer_colors[kMaxColorAttachments] = {};
+  uint32_t* resolved_integer_colors[kMaxColorAttachments] = {};
+  bool color_is_integer[kMaxColorAttachments] = {};
+  bool color_is_unsigned[kMaxColorAttachments] = {};
+  bool color_has_alpha[kMaxColorAttachments] = {true, true, true, true};
+  bool color_is_srgb[kMaxColorAttachments] = {};
+  GLenum color_format[kMaxColorAttachments] = {};
+  int color_channels[kMaxColorAttachments] = {4, 4, 4, 4};
+  int color_integer_bits[kMaxColorAttachments] = {32, 32, 32, 32};
+  int color_bytes[kMaxColorAttachments] = {4, 4, 4, 4};
   // draw_buffers[i] selects the attachment that fragment output i writes.
   GLenum draw_buffers[kMaxColorAttachments] = {
       GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2,
@@ -57,6 +79,13 @@ struct RenderTarget {
   int draw_buffer_count = 1;
   // The colour buffer selected for reads, or draw buffer 0 for draws.
   uint8_t* color = nullptr;
+  // Type of the currently selected read colour buffer.
+  bool read_integer = false;
+  bool read_unsigned = false;
+  bool read_has_alpha = true;
+  int read_channels = 4;
+  GLenum read_format = 0;
+  int read_color_bytes = 4;
   uint16_t* depth = nullptr;
   uint8_t* stencil = nullptr;
 
@@ -71,7 +100,10 @@ struct RenderTarget {
   uint16_t* resolved_depth = nullptr;
   uint8_t* resolved_stencil = nullptr;
 
-  bool valid() const { return color != nullptr && width > 0 && height > 0; }
+  bool valid() const {
+    return width > 0 && height > 0 &&
+           (color != nullptr || depth != nullptr || stencil != nullptr);
+  }
   bool multisampled() const { return samples > 1; }
 };
 
@@ -85,8 +117,10 @@ class Buffer {
   GLenum usage = GL_STATIC_DRAW;
   GLenum target = 0;
   bool mapped = false;
+  GLenum access_flags = 0;
   size_t map_offset = 0;
   size_t map_length = 0;
+  bool delete_status = false;
 };
 
 struct VertexAttribute {
@@ -112,6 +146,8 @@ struct TextureImage {
   int height = 0;
   int depth = 1;
   int samples = 1;
+  bool integer_signed = false;
+  bool srgb = false;
   // 0xAABBGGRR per texel, one 32-bit word per pixel.  A multisample image
   // keeps the resolved plane here and the sample planes in |sample_rgba|.
   std::vector<uint32_t> rgba;
@@ -123,10 +159,15 @@ struct TextureImage {
   // Floating point colour storage (RGBA, four floats per texel).  Non-empty
   // only for float internal formats.
   std::vector<float> float_rgba;
+  // Integer colour storage, four 32-bit words per texel.
+  std::vector<uint32_t> integer_rgba;
+  std::vector<uint32_t> sample_integer_rgba;
 };
 
 class Texture {
  public:
+  bool generated_only = false;
+  bool delete_status = false;
   // Zero until the texture is first bound: a name may be bound to any target
   // only while its target is still unspecified.
   GLenum target = 0;
@@ -137,6 +178,14 @@ class Texture {
   GLenum wrap_s = GL_REPEAT;
   GLenum wrap_t = GL_REPEAT;
   GLenum wrap_r = GL_REPEAT;
+  GLenum compare_mode = GL_NONE;
+  GLenum compare_func = GL_LEQUAL;
+  float min_lod = -1000.0f;
+  float max_lod = 1000.0f;
+  GLenum swizzle_r = GL_RED;
+  GLenum swizzle_g = GL_GREEN;
+  GLenum swizzle_b = GL_BLUE;
+  GLenum swizzle_a = GL_ALPHA;
   GLenum internal_format = GL_RGBA;
   int width = 0;
   int height = 0;
@@ -145,6 +194,10 @@ class Texture {
   int samples = 0;  // Zero for ordinary textures, otherwise the sample count.
   bool fixed_sample_locations = true;
   bool immutable = false;
+  // Rendering into a texture stores rows top-down, while GL texture
+  // coordinates address the first uploaded row as v = 0.  Attachments flip
+  // the sampled coordinate until new image data is uploaded.
+  bool render_target_flip_y = false;
   std::vector<TextureImage> images;  // level * faces + face
 
   int faces() const { return target == GL_TEXTURE_CUBE_MAP ? 6 : 1; }
@@ -157,19 +210,31 @@ class Texture {
 
 class Renderbuffer {
  public:
+  bool generated_only = false;
+  bool delete_status = false;
   int width = 0;
   int height = 0;
   int samples = 0;
-  GLenum format = GL_RGBA8;
+  GLenum format = GL_RGBA4;
   TextureImage image;
 };
 
 struct FramebufferAttachment {
   GLuint texture = 0;
   GLint level = 0;
+  GLint layer = 0;
+  GLenum cube_face = 0;
   GLuint renderbuffer = 0;
+  // When the named object is deleted, a framebuffer that was not current at
+  // deletion time keeps using the old storage.  These snapshots give the
+  // attachment an identity separate from the (reusable) object name.
+  std::shared_ptr<const Texture> retained_texture;
+  std::shared_ptr<const Renderbuffer> retained_renderbuffer;
 
-  bool bound() const { return texture != 0 || renderbuffer != 0; }
+  bool bound() const {
+    return texture != 0 || renderbuffer != 0 || retained_texture ||
+           retained_renderbuffer;
+  }
 };
 
 class Framebuffer {
@@ -191,6 +256,7 @@ class ShaderObject {
   std::string source;
   std::unique_ptr<glsl::ShaderAst> ast;
   bool compiled = false;
+  bool delete_status = false;
   std::string log;
 };
 
@@ -199,11 +265,13 @@ class ProgramObject {
   std::vector<GLuint> shaders;
   std::unique_ptr<glsl::Program> program;
   bool linked = false;
+  bool delete_status = false;
   std::string log;
   std::vector<std::pair<std::string, int>> bindings;
   std::vector<std::pair<std::string, int>> frag_data_bindings;
   std::vector<std::string> transform_feedback_varyings;
   GLenum transform_feedback_mode = GL_INTERLEAVED_ATTRIBS;
+  bool program_binary_retrievable_hint = false;
 };
 
 class Query {
@@ -226,6 +294,10 @@ class Sampler {
   GLenum compare_func = GL_LEQUAL;
   float min_lod = -1000.0f;
   float max_lod = 1000.0f;
+  GLenum swizzle_r = GL_RED;
+  GLenum swizzle_g = GL_GREEN;
+  GLenum swizzle_b = GL_BLUE;
+  GLenum swizzle_a = GL_ALPHA;
 };
 
 class SyncObject {
@@ -237,7 +309,11 @@ class SyncObject {
 template <typename T>
 class ObjectTable {
  public:
-  ObjectTable() { objects_.emplace_back(nullptr); }
+  explicit ObjectTable(int reserved_names = 0) {
+    objects_.emplace_back(nullptr);
+    for (int i = 0; i < reserved_names; ++i)
+      objects_.emplace_back(nullptr);
+  }
 
   GLuint Create() {
     if (!free_.empty()) {
@@ -250,14 +326,114 @@ class ObjectTable {
     return static_cast<GLuint>(objects_.size() - 1);
   }
 
+  // Reserves a name without creating the object.  glGen* has this
+  // behaviour; the object is materialised by the first bind or use.
+  GLuint Generate() {
+    GLuint name = 0;
+    if (!free_.empty()) {
+      name = free_.back();
+      free_.pop_back();
+    } else {
+      objects_.emplace_back();
+      name = static_cast<GLuint>(objects_.size() - 1);
+    }
+    reserved_.insert(name);
+    return name;
+  }
+
+  T* CreateAt(GLuint name) {
+    if (name == 0)
+      return nullptr;
+    if (name >= kDenseNameLimit) {
+      auto& object = sparse_[name];
+      object.reset(new T());
+      reserved_.erase(name);
+      return object.get();
+    }
+    if (name >= objects_.size())
+      objects_.resize(static_cast<size_t>(name) + 1);
+    objects_[name].reset(new T());
+    reserved_.erase(name);
+    return objects_[name].get();
+  }
+
   T* Get(GLuint name) {
-    return name < objects_.size() ? objects_[name].get() : nullptr;
+    if (name < objects_.size())
+      return objects_[name].get();
+    auto it = sparse_.find(name);
+    return it == sparse_.end() ? nullptr : it->second.get();
+  }
+
+  bool IsReserved(GLuint name) const { return reserved_.count(name) != 0; }
+
+  // Creates an object only for a name previously returned by Generate().
+  // Container objects (queries, transform feedbacks and vertex arrays) must
+  // reject names that were never generated.
+  T* GetOrCreateReserved(GLuint name) {
+    if (name == 0)
+      return nullptr;
+    if (T* object = Get(name))
+      return object;
+    if (!reserved_.count(name))
+      return nullptr;
+    return GetOrCreate(name);
+  }
+
+  // Binding a name that was never generated creates the object, as required
+  // for the glBind* entry points.
+  T* GetOrCreate(GLuint name) {
+    if (name == 0)
+      return nullptr;
+    // Bind* calls may legally create objects with arbitrary, very large
+    // names.  Keeping those out of the dense name-indexed vector avoids
+    // allocating gigabytes for a single random identifier.
+    if (name >= kDenseNameLimit) {
+      auto& object = sparse_[name];
+      if (!object)
+        object.reset(new T());
+      return object.get();
+    }
+    if (name >= objects_.size())
+      objects_.resize(static_cast<size_t>(name) + 1);
+    if (!objects_[name]) {
+      auto it = std::find(free_.begin(), free_.end(), name);
+      if (it != free_.end())
+        free_.erase(it);
+      reserved_.erase(name);
+      objects_[name].reset(new T());
+    }
+    return objects_[name].get();
   }
   const T* Get(GLuint name) const {
     return name < objects_.size() ? objects_[name].get() : nullptr;
   }
 
+  template <typename Function>
+  void ForEach(Function function) {
+    for (auto& object : objects_) {
+      if (object)
+        function(*object);
+    }
+    for (auto& entry : sparse_) {
+      if (entry.second)
+        function(*entry.second);
+    }
+  }
+
   bool Delete(GLuint name) {
+    if (name == 0)
+      return false;
+    if (reserved_.erase(name)) {
+      free_.push_back(name);
+      return true;
+    }
+    if (name >= kDenseNameLimit) {
+      auto it = sparse_.find(name);
+      if (it == sparse_.end() || !it->second)
+        return false;
+      sparse_.erase(it);
+      return true;
+    }
     if (name == 0 || name >= objects_.size() || !objects_[name])
       return false;
     objects_[name].reset();
@@ -269,6 +445,14 @@ class ObjectTable {
   // shaders that stay alive because a program still references their AST;
   // the caller must eventually call Reclaim() with the same name.
   std::unique_ptr<T> Release(GLuint name) {
+    if (name >= kDenseNameLimit) {
+      auto it = sparse_.find(name);
+      if (it == sparse_.end())
+        return nullptr;
+      std::unique_ptr<T> object = std::move(it->second);
+      sparse_.erase(it);
+      return object;
+    }
     if (name == 0 || name >= objects_.size() || !objects_[name])
       return nullptr;
     return std::move(objects_[name]);
@@ -282,14 +466,18 @@ class ObjectTable {
   void Clear() {
     objects_.clear();
     objects_.emplace_back(nullptr);
+    sparse_.clear();
     free_.clear();
   }
 
   int size() const { return static_cast<int>(objects_.size()) - 1; }
 
  private:
+  static constexpr GLuint kDenseNameLimit = 65536;
   std::vector<std::unique_ptr<T>> objects_;
+  std::map<GLuint, std::unique_ptr<T>> sparse_;
   std::vector<GLuint> free_;
+  std::set<GLuint> reserved_;
 };
 
 // ---------------------------------------------------------------------------
@@ -317,6 +505,8 @@ struct BlendState {
 struct StencilFace {
   GLenum func = GL_ALWAYS;
   int reference = 0;
+  GLuint compare_mask = 0xFFu;
+  GLuint write_mask = 0xFFu;
   GLenum op_fail = GL_KEEP;
   GLenum op_depth_fail = GL_KEEP;
   GLenum op_pass = GL_KEEP;
@@ -345,12 +535,16 @@ struct PixelStoreState {
   int unpack_skip_rows = 0;
   int pack_skip_pixels = 0;
   int unpack_skip_pixels = 0;
+  int unpack_image_height = 0;
+  int unpack_skip_images = 0;
 };
 
 struct IndexedBufferBinding {
   GLuint buffer = 0;
   size_t offset = 0;
   size_t size = 0;
+  bool whole_buffer = false;
+  bool attachment_deleted = false;
 };
 
 class TransformFeedback {
@@ -398,18 +592,28 @@ struct State {
   float polygon_offset_factor = 0.0f;
   float polygon_offset_units = 0.0f;
   bool rasterizer_discard = false;
-  bool primitive_restart = false;
-  bool primitive_restart_fixed_index = false;
+  GLenum generate_mipmap_hint = GL_DONT_CARE;
+  GLenum fragment_shader_derivative_hint = GL_DONT_CARE;
+  // GLES 3.0 enables fixed-index primitive restart by default.
+  bool primitive_restart = true;
+  bool primitive_restart_fixed_index = true;
   GLuint primitive_restart_index = 0;
 
   GLenum active_texture = GL_TEXTURE0;
   GLuint textures[kMaxCombinedTextureUnits] = {};
+  GLuint textures_2d[kMaxCombinedTextureUnits] = {};
+  GLuint textures_3d[kMaxCombinedTextureUnits] = {};
+  GLuint textures_cube[kMaxCombinedTextureUnits] = {};
+  GLuint textures_2d_array[kMaxCombinedTextureUnits] = {};
   GLuint samplers[kMaxCombinedTextureUnits] = {};
   float current_attribute[kMaxVertexAttribs][4] = {};
+  GLint current_attribute_integer[kMaxVertexAttribs][4] = {};
   GLuint array_buffer = 0;
   GLuint element_buffer = 0;
   GLuint copy_read_buffer = 0;
   GLuint copy_write_buffer = 0;
+  GLuint pixel_pack_buffer = 0;
+  GLuint pixel_unpack_buffer = 0;
   GLuint uniform_buffer = 0;
   IndexedBufferBinding uniform_buffers[kMaxUniformBufferBindings];
   GLuint transform_feedback = 0;
@@ -418,6 +622,12 @@ struct State {
   GLuint program = 0;
   GLuint framebuffer = 0;
   GLuint read_framebuffer = 0;
+  // Framebuffer created by the platform/window-system layer to emulate the
+  // default framebuffer.  It is reported as framebuffer zero through the API.
+  GLuint surface_framebuffer = 0;
+  GLuint candidate_surface_framebuffer = 0;
+  GLenum default_draw_buffer = GL_BACK;
+  GLenum default_read_buffer = GL_BACK;
   GLuint renderbuffer = 0;
 
   PixelStoreState pixel_store;
@@ -442,6 +652,8 @@ class Context {
   void SetError(GLenum error) {
     if (error == GL_NO_ERROR)
       return;
+    if (getenv("ZGL_DEBUG_ERROR"))
+      fprintf(stderr, "[glerr] 0x%x\n", static_cast<unsigned>(error));
     if (error_ == GL_NO_ERROR)
       error_ = error;
   }
@@ -459,10 +671,14 @@ class Context {
   ObjectTable<Buffer> buffers;
   ObjectTable<VertexArray> vertex_arrays;
   ObjectTable<Texture> textures;
+  // GL ES texture name 0 is a real default texture object.  Keep one per
+  // texture family so state setup calls on name 0 have a destination.
+  Texture default_textures[4];
   ObjectTable<Renderbuffer> renderbuffers;
   ObjectTable<Framebuffer> framebuffers;
   ObjectTable<ShaderObject> shaders;
   ObjectTable<ProgramObject> programs;
+  GLuint next_shader_program_name = 1;
   ObjectTable<Query> queries;
   ObjectTable<TransformFeedback> transform_feedbacks;
   TransformFeedback default_transform_feedback;

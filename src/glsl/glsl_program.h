@@ -35,20 +35,47 @@ struct UniformInfo {
   int block_offset = 0;
 };
 
+struct ActiveUniformInfo {
+  std::string name;
+  Type type;  // Element type; arrays are collapsed to a size + element.
+  int size = 1;
+  int uniform_index = -1;  // Parent entry in Program::uniforms().
+  int block_index = -1;
+  int block_offset = -1;
+  int array_stride = 0;
+};
+
+struct UniformFieldInfo {
+  std::string name;
+  Type type;
+  int parent = -1;         // Index into Program::uniforms().
+  int component_offset = 0;
+  int location = -1;       // Location returned by glGetUniformLocation().
+};
+
 struct UniformBlockMemberInfo {
   std::string name;
   Type type;
   int offset = 0;
+  int matrix_layout = 0;
   int uniform_index = -1;  // Index into Program::uniforms().
 };
 
 struct UniformBlockInfo {
   std::string name;
   int size = 0;
+  int matrix_layout = 0;  // 0 = column_major/default, 1 = row_major.
+  bool std140 = false;
+  bool packed = false;
+  bool instance_array = false;
+  std::string instance_name;
   int binding = 0;
   bool vertex_stage = false;
   bool fragment_stage = false;
+  bool used = false;
+  bool has_instance = false;
   std::vector<UniformBlockMemberInfo> members;
+  std::vector<int> active_uniform_indices;
 };
 
 struct VaryingInfo {
@@ -56,6 +83,7 @@ struct VaryingInfo {
   Type type;
   int offset = 0;  // Float offset inside the varying arrays.
   int components = 0;
+  bool flat = false;
 };
 
 struct TransformFeedbackVaryingInfo {
@@ -84,13 +112,61 @@ class TextureSampler {
                         const float position[3],
                         float lod_bias,
                         float out[4]) = 0;
+  virtual void Sample2DArray(int unit,
+                             float u,
+                             float v,
+                             float layer,
+                             float lod_bias,
+                             float out[4]) = 0;
+  virtual void Sample2DShadow(int unit,
+                              float u,
+                              float v,
+                              float ref,
+                              float lod_bias,
+                              float out[4]) = 0;
+  virtual void Sample2DArrayShadow(int unit,
+                                   float u,
+                                   float v,
+                                   float layer,
+                                   float ref,
+                                   float lod_bias,
+                                   float out[4]) = 0;
+  virtual void SampleCubeShadow(int unit,
+                                const float direction[3],
+                                float ref,
+                                float lod_bias,
+                                float out[4]) = 0;
+  virtual void Size(int unit, int out[3]) = 0;
+  // Active minification filter (sampler object overrides texture state).
+  virtual uint32_t MinFilter(int unit) {
+    (void)unit;
+    return 0x2600u;  // GL_NEAREST
+  }
+  // Dimensions of mip level |lod| (clamped inside the implementation).
+  // Falls back to the base level when the backend has only one level.
+  virtual void SizeLod(int unit, int lod, int out[3]) {
+    (void)lod;
+    Size(unit, out);
+  }
+  // Unfiltered single-texel fetch backing texelFetch()/texelFetchOffset().
+  virtual void Fetch2D(int unit, int x, int y, int lod, float out[4]) = 0;
+  virtual void Fetch3D(int unit, int x, int y, int z, int lod, float out[4]) = 0;
+  virtual void Fetch2DArray(int unit,
+                            int x,
+                            int y,
+                            int layer,
+                            int lod,
+                            float out[4]) = 0;
 };
 
 struct VertexInput {
-  // 4 floats per attribute slot, indexed by attribute location.
+  // 4 floats per attribute slot, indexed by attribute location.  Integer
+  // attributes also carry their exact bit patterns in |attribute_int|.
   const float* attributes = nullptr;
+  const uint32_t* attribute_int = nullptr;
   int vertex_id = 0;
   int instance_id = 0;
+  float depth_range[3] = {0.0f, 1.0f, 1.0f};
   const Value* uniforms = nullptr;
   const int* uniform_map = nullptr;  // Stage uniform index -> program index.
   TextureSampler* sampler = nullptr;
@@ -98,7 +174,10 @@ struct VertexInput {
 
 struct FragmentInput {
   const float* varyings = nullptr;  // Interpolated fragment-stage varyings.
+  const float* varyings_dx = nullptr;  // d(varying)/dx in framebuffer pixels.
+  const float* varyings_dy = nullptr;  // d(varying)/dy in framebuffer pixels.
   float frag_coord[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  float depth_range[3] = {0.0f, 1.0f, 1.0f};
   bool front_facing = true;
   float point_coord[2] = {0.0f, 0.0f};
   int sample_id = 0;
@@ -112,12 +191,19 @@ struct FragmentOutputInfo {
   std::string name;
   int location = -1;
   int slot = -1;
+  int element = 0;
+  int components = 0;
+  BaseType base = BaseType::kFloat;
 };
 
 struct FragmentOutput {
   // Indexed by fragment output location.  |color[i]| is only meaningful when
   // |written[i]| is true; outputs the shader does not declare stay untouched.
   float color[kMaxFragmentOutputs][4] = {};
+  uint32_t color_int[kMaxFragmentOutputs][4] = {};
+  BaseType color_base[kMaxFragmentOutputs] = {BaseType::kFloat, BaseType::kFloat,
+                                             BaseType::kFloat,
+                                             BaseType::kFloat};
   bool written[kMaxFragmentOutputs] = {};
   float depth = 0.0f;
   bool writes_depth = false;
@@ -142,6 +228,9 @@ class Program {
 
   const std::vector<AttributeInfo>& attributes() const { return attributes_; }
   const std::vector<UniformInfo>& uniforms() const { return uniforms_; }
+  const std::vector<ActiveUniformInfo>& active_uniforms() const {
+    return active_uniforms_;
+  }
   const std::vector<UniformBlockInfo>& uniform_blocks() const {
     return uniform_blocks_;
   }
@@ -189,6 +278,18 @@ class Program {
     return &uniform_values_[index];
   }
 
+  // Resolves a location returned by UniformLocation() to the owning storage
+  // value, the flattened component offset inside it, and the type of the
+  // selected uniform or struct field.  Plain uniforms return offset 0.
+  bool UniformStorage(int location,
+                      Value** value,
+                      int* component_offset,
+                      const Type** type);
+
+  const std::vector<UniformFieldInfo>& uniform_fields() const {
+    return uniform_fields_;
+  }
+
   void RunVertex(const VertexInput& input,
                  float out_position[4],
                  float* out_point_size,
@@ -205,6 +306,8 @@ class Program {
 
   std::vector<AttributeInfo> attributes_;
   std::vector<UniformInfo> uniforms_;
+  std::vector<ActiveUniformInfo> active_uniforms_;
+  std::vector<UniformFieldInfo> uniform_fields_;
   std::vector<UniformBlockInfo> uniform_blocks_;
   std::vector<VaryingInfo> varyings_;
   std::vector<FragmentOutputInfo> fragment_outputs_;
@@ -218,6 +321,11 @@ class Program {
   // Per-stage global variables, including built-ins.
   std::vector<Value> vertex_globals_;
   std::vector<Value> fragment_globals_;
+  // Values produced by the link-time global initialisers.  Every shader
+  // invocation starts from this snapshot: mutable globals are per-invocation
+  // state, not state shared by all vertices or fragments.
+  std::vector<Value> vertex_global_initials_;
+  std::vector<Value> fragment_global_initials_;
 
   bool uses_frag_depth_ = false;
   bool uses_discard_ = false;
@@ -230,6 +338,7 @@ class Program {
   std::unique_ptr<ShaderJit> fragment_jit_;
 
   std::string runtime_error_;
+  void BuildActiveUniforms();
   friend class Evaluator;
 };
 

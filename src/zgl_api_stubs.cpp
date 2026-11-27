@@ -22,23 +22,15 @@
 #include "src/zgl_draw.h"
 
 namespace zgl {
+
+GLenum GlslTypeToGlEnum(const glsl::Type& type);
+
 namespace {
 
 void Reject() {
   Context* context = ApiContext();
   if (context)
     context->SetError(GL_INVALID_OPERATION);
-}
-
-GLenum TypeToGlEnum(const glsl::Type& type) {
-  switch (type.base()) {
-    case glsl::BaseType::kInt:
-      return GL_INT;
-    case glsl::BaseType::kBool:
-      return GL_BOOL;
-    default:
-      return GL_FLOAT;
-  }
 }
 
 }  // namespace
@@ -50,24 +42,28 @@ extern "C" {
 
 void glGenTransformFeedbacks(GLsizei n, GLuint* ids) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !ids)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!ids)
+    return;
   for (GLsizei i = 0; i < n; ++i)
-    ids[i] = context->transform_feedbacks.Create();
+    ids[i] = context->transform_feedbacks.Generate();
 }
 
 void glDeleteTransformFeedbacks(GLsizei n, const GLuint* ids) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !ids)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!ids)
+    return;
   for (GLsizei i = 0; i < n; ++i) {
     if (ids[i] == 0)
       continue;
@@ -98,7 +94,7 @@ void glBindTransformFeedback(GLenum target, GLuint id) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (id != 0 && !context->transform_feedbacks.Get(id)) {
+  if (id != 0 && !context->transform_feedbacks.GetOrCreateReserved(id)) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -157,16 +153,9 @@ void glEndTransformFeedback(void) {
   if (!context)
     return;
   zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
-  if (!current || !current->active)
+  if (!current || !current->active) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
-  for (int name = 1; name <= context->queries.size(); ++name) {
-    const zgl::Query* query =
-        context->queries.Get(static_cast<GLuint>(name));
-    if (query && query->active &&
-        query->target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
-      context->SetError(GL_INVALID_OPERATION);
-      return;
-    }
   }
   current->active = false;
   current->paused = false;
@@ -245,7 +234,12 @@ void glGetTransformFeedbackVarying(GLuint program,
   if (!context)
     return;
   zgl::ProgramObject* object = context->programs.Get(program);
-  if (!object || !object->program || !object->linked) {
+  if (!object) {
+    context->SetError(context->FindShader(program) ? GL_INVALID_OPERATION
+                                                   : GL_INVALID_VALUE);
+    return;
+  }
+  if (!object->program || !object->linked) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -255,12 +249,19 @@ void glGetTransformFeedbackVarying(GLuint program,
     return;
   }
   const zgl::glsl::TransformFeedbackVaryingInfo& varying = varyings[index];
+  const int copy = buffer_size > 0
+                       ? std::min(static_cast<int>(varying.name.size()),
+                                  static_cast<int>(buffer_size) - 1)
+                       : 0;
   if (length)
-    *length = static_cast<GLsizei>(varying.name.size());
+    *length = copy;
+  const zgl::glsl::Type& declared = varying.type;
+  const zgl::glsl::Type& element =
+      declared.is_array() ? declared.array_element() : declared;
   if (size)
-    *size = 1;
+    *size = declared.is_array() ? declared.array_size() : 1;
   if (type)
-    *type = zgl::TypeToGlEnum(varying.type);
+    *type = zgl::GlslTypeToGlEnum(element);
   if (name && buffer_size > 0) {
     const int copy = std::min(static_cast<int>(varying.name.size()),
                               static_cast<int>(buffer_size) - 1);
@@ -327,18 +328,21 @@ void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
   }
   zgl::IndexedBufferBinding binding;
   if (buffer != 0) {
-    zgl::Buffer* object = context->buffers.Get(buffer);
+    zgl::Buffer* object = context->buffers.GetOrCreate(buffer);
     if (!object) {
       context->SetError(GL_INVALID_OPERATION);
       return;
     }
     binding.buffer = buffer;
     binding.size = object->data.size();
+    binding.whole_buffer = true;
   }
-  if (transform_feedback)
+  if (transform_feedback) {
     feedback->buffers[index] = binding;
-  else
+    context->state.transform_feedback_buffer = buffer;
+  } else {
     context->state.uniform_buffers[index] = binding;
+  }
 }
 
 void glBindBufferRange(GLenum target,
@@ -392,6 +396,10 @@ void glBindBufferRange(GLenum target,
       context->SetError(GL_INVALID_VALUE);
       return;
     }
+    if (!transform_feedback && (begin % 4) != 0) {
+      context->SetError(GL_INVALID_VALUE);
+      return;
+    }
     binding.buffer = buffer;
     binding.offset = begin;
     binding.size = length;
@@ -410,10 +418,24 @@ void glGetBufferParameteri64v(GLenum target, GLenum pname, GLint64* params) {
 }
 
 void glGetInteger64v(GLenum pname, GLint64* data) {
+  if (!data)
+    return;
   GLint value = 0;
-  glGetIntegerv(pname, &value);
-  if (data)
-    data[0] = value;
+  int count = 1;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context || !zgl::GetIntegerValue(context, pname, &value, &count)) {
+    if (context)
+      context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  GLint values[16] = {};
+  if (count > 1) {
+    glGetIntegerv(pname, values);
+    for (int i = 0; i < count && i < 16; ++i)
+      data[i] = values[i];
+    return;
+  }
+  data[0] = value;
 }
 
 void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
@@ -435,8 +457,11 @@ void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
         data[0] =
             static_cast<GLint>(context->state.uniform_buffers[index].offset);
       } else {
-        data[0] =
-            static_cast<GLint>(context->state.uniform_buffers[index].size);
+        const zgl::IndexedBufferBinding& binding =
+            context->state.uniform_buffers[index];
+        data[0] = binding.whole_buffer
+                      ? 0
+                      : static_cast<GLint>(binding.size);
       }
       return;
     case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
@@ -455,8 +480,12 @@ void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
         data[0] = static_cast<GLint>(feedback->buffers[index].buffer);
       else if (pname == GL_TRANSFORM_FEEDBACK_BUFFER_START)
         data[0] = static_cast<GLint>(feedback->buffers[index].offset);
-      else
-        data[0] = static_cast<GLint>(feedback->buffers[index].size);
+      else {
+        const zgl::IndexedBufferBinding& binding = feedback->buffers[index];
+        data[0] = binding.whole_buffer
+                      ? 0
+                      : static_cast<GLint>(binding.size);
+      }
       return;
     }
     default:
@@ -493,19 +522,6 @@ void glDisablei(GLenum target, GLuint index) {
 GLboolean glIsEnabledi(GLenum target, GLuint index) {
   (void)index;
   return glIsEnabled(target);
-}
-
-// ---- Integer vertex attributes -------------------------------------------
-
-void glGetVertexAttribIiv(GLuint index, GLenum pname, GLint* params) {
-  glGetVertexAttribiv(index, pname, params);
-}
-
-void glGetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params) {
-  GLint value = 0;
-  glGetVertexAttribiv(index, pname, &value);
-  if (params)
-    params[0] = static_cast<GLuint>(value);
 }
 
 // ---- Compute and indirect draws ------------------------------------------
@@ -677,10 +693,23 @@ void glProgramBinary(GLuint program,
 }
 
 void glProgramParameteri(GLuint program, GLenum pname, GLint value) {
-  (void)program;
-  (void)pname;
-  (void)value;
-  zgl::Reject();
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  zgl::ProgramObject* object = context->programs.Get(program);
+  if (!object) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (pname != GL_PROGRAM_BINARY_RETRIEVABLE_HINT) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (value != 0 && value != 1) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  object->program_binary_retrievable_hint = value != 0;
 }
 
 // ---- Multisampling --------------------------------------------------------
@@ -843,11 +872,69 @@ void glGetInternalformativ(GLenum target,
                            GLenum pname,
                            GLsizei buffer_size,
                            GLint* params) {
-  (void)target;
-  (void)internal_format;
-  (void)pname;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (buffer_size < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (target != GL_RENDERBUFFER) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (pname != GL_SAMPLES && pname != GL_NUM_SAMPLE_COUNTS) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  switch (internal_format) {
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGB565:
+    case GL_RGBA8:
+    case GL_RGB8:
+    case GL_R8:
+    case GL_RG8:
+    case GL_RGB10_A2:
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_RG8I:
+    case GL_RG8UI:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG32I:
+    case GL_RG32UI:
+    case GL_RGB8I:
+    case GL_RGB8UI:
+    case GL_RGB16I:
+    case GL_RGB16UI:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+    case GL_RGBA8I:
+    case GL_RGBA8UI:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA32I:
+    case GL_RGBA32UI:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGB10_A2UI:
+    case GL_DEPTH_COMPONENT16:
+    case GL_DEPTH_COMPONENT24:
+    case GL_DEPTH_COMPONENT32F:
+    case GL_STENCIL_INDEX8:
+    case GL_DEPTH24_STENCIL8:
+    case GL_DEPTH32F_STENCIL8:
+      break;
+    default:
+      context->SetError(GL_INVALID_ENUM);
+      return;
+  }
   if (params && buffer_size > 0)
-    params[0] = 0;
+    params[0] = pname == GL_SAMPLES ? 4 : 1;
 }
 
 // ---- Debug output --------------------------------------------------------

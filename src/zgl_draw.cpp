@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include "src/glsl/glsl_program.h"
@@ -52,9 +54,47 @@ int TypeSize(GLenum type) {
   }
 }
 
+bool IsPacked2101010(GLenum type) {
+  return type == GL_INT_2_10_10_10_REV ||
+         type == GL_UNSIGNED_INT_2_10_10_10_REV;
+}
+
+int Packed2101010Bits(int component) {
+  return component < 3 ? 10 : 2;
+}
+
+float ReadPacked2101010(const uint8_t* data, int component, GLenum type,
+                        bool normalized) {
+  uint32_t word;
+  memcpy(&word, data, sizeof(word));
+  const int bits = Packed2101010Bits(component);
+  int shift = 0;
+  for (int i = 0; i < component; ++i)
+    shift += Packed2101010Bits(i);
+  const uint32_t mask = (1u << bits) - 1u;
+  const int raw = static_cast<int>((word >> shift) & mask);
+  if (normalized) {
+    if (type == GL_INT_2_10_10_10_REV) {
+      const int sign_bit = 1 << (bits - 1);
+      const int signed_value =
+          (raw & sign_bit) ? raw - (1 << bits) : raw;
+      const float scale = 1.0f / static_cast<float>(sign_bit - 1);
+      return std::max(-1.0f, static_cast<float>(signed_value) * scale);
+    }
+    return static_cast<float>(raw) /
+           static_cast<float>((1u << bits) - 1u);
+  }
+  if (type == GL_INT_2_10_10_10_REV) {
+    const int sign_bit = 1 << (bits - 1);
+    return static_cast<float>((raw & sign_bit) ? raw - (1 << bits) : raw);
+  }
+  return static_cast<float>(raw);
+}
+
 bool IsIntegerType(GLenum type) {
   return type == GL_BYTE || type == GL_UNSIGNED_BYTE || type == GL_SHORT ||
-         type == GL_UNSIGNED_SHORT || type == GL_INT || type == GL_UNSIGNED_INT;
+         type == GL_UNSIGNED_SHORT || type == GL_INT ||
+         type == GL_UNSIGNED_INT || IsPacked2101010(type);
 }
 
 float NormalizeComponent(GLenum type, int raw) {
@@ -98,6 +138,8 @@ float ReadHalfFloat(const uint8_t* data) {
 // Reads one attribute component as a float.  |data| points at the first
 // component of the element.
 float ReadAttributeComponent(const uint8_t* data, int component, GLenum type) {
+  if (IsPacked2101010(type))
+    return ReadPacked2101010(data, component, type, false);
   switch (type) {
     case GL_FLOAT: {
       float value;
@@ -143,6 +185,8 @@ float ReadAttributeComponent(const uint8_t* data, int component, GLenum type) {
 }
 
 float ReadNormalizedComponent(const uint8_t* data, int component, GLenum type) {
+  if (IsPacked2101010(type))
+    return ReadPacked2101010(data, component, type, true);
   if (TypeSize(type) == 1) {
     const uint8_t raw = data[component];
     return NormalizeComponent(type, type == GL_BYTE ? static_cast<int8_t>(raw)
@@ -154,6 +198,11 @@ float ReadNormalizedComponent(const uint8_t* data, int component, GLenum type) {
     const int raw = type == GL_SHORT ? static_cast<int16_t>(raw16)
                                      : static_cast<int>(raw16);
     return NormalizeComponent(type, raw);
+  }
+  if (type == GL_UNSIGNED_INT) {
+    uint32_t raw32;
+    memcpy(&raw32, data + component * 4, sizeof(raw32));
+    return static_cast<float>(raw32) * (1.0f / 4294967295.0f);
   }
   int32_t raw32;
   memcpy(&raw32, data + component * 4, sizeof(raw32));
@@ -317,7 +366,7 @@ GLuint MaxIndexValue(GLenum type) {
 
 // Distance of a clip space vertex from a plane.  The polygon interior is
 // where the distance is non-negative.
-float PlaneDistance(const float* position, int plane) {
+double PlaneDistance(const float* position, int plane) {
   const float w = position[3];
   switch (plane) {
     case 0:
@@ -404,6 +453,41 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
                 const float position[3],
                 float lod_bias,
                 float out[4]) override;
+  void Sample2DArray(int unit,
+                     float u,
+                     float v,
+                     float layer,
+                     float lod_bias,
+                     float out[4]) override;
+  void Sample2DShadow(int unit,
+                      float u,
+                      float v,
+                      float ref,
+                      float lod_bias,
+                      float out[4]) override;
+  void Sample2DArrayShadow(int unit,
+                           float u,
+                           float v,
+                           float layer,
+                           float ref,
+                           float lod_bias,
+                           float out[4]) override;
+  void SampleCubeShadow(int unit,
+                        const float direction[3],
+                        float ref,
+                        float lod_bias,
+                        float out[4]) override;
+  void Size(int unit, int out[3]) override;
+  uint32_t MinFilter(int unit) override;
+  void SizeLod(int unit, int lod, int out[3]) override;
+  void Fetch2D(int unit, int x, int y, int lod, float out[4]) override;
+  void Fetch3D(int unit, int x, int y, int z, int lod, float out[4]) override;
+  void Fetch2DArray(int unit,
+                    int x,
+                    int y,
+                    int layer,
+                    int lod,
+                    float out[4]) override;
 
  private:
   struct TransformedVertex {
@@ -421,10 +505,15 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
 
   bool Prepare();
   const State& state() const;
-  void FetchAttributes(GLuint index, int instance, float* attributes) const;
+  void FetchAttributes(GLuint index,
+                       int instance,
+                       float* attributes,
+                       uint32_t* attribute_int) const;
   TransformedVertex AcquireVertex(GLuint index, int instance);
   void CaptureVertex(GLuint index, int instance);
-  void WriteTransformFeedback(const float* varyings);
+  void WriteTransformFeedback(const float* varyings,
+                              const float* position,
+                              float point_size);
   void EmitPoint(GLuint index, int instance);
   void EmitLine(GLuint index_a, GLuint index_b, int instance);
   void EmitTriangle(GLuint index_a,
@@ -438,8 +527,15 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
                   float* output) const;
   void ProjectVertices(const float* polygon, int count);
   void Interpolate(const Fragment& fragment, float* out) const;
-  void StoreFragmentColor(size_t pixel, int location, const float color[4]);
-  void ApplyStencilOp(GLenum op, size_t pixel, uint8_t reference);
+  void StoreFragmentColor(size_t pixel,
+                          int location,
+                          const float color[4],
+                          const uint32_t color_int[4],
+                          glsl::BaseType base);
+  void ApplyStencilOp(GLenum op,
+                      size_t pixel,
+                      uint8_t reference,
+                      uint8_t write_mask);
 
   Context* context_;
   Rasterizer rasterizer_;
@@ -467,6 +563,9 @@ class Pipeline : public FragmentSink, public glsl::TextureSampler {
   std::vector<float> scratch_;
   std::vector<RasterVertex> screen_;
   std::vector<float> varying_values_;
+  mutable std::vector<float> varying_dx_values_;
+  mutable std::vector<float> varying_dy_values_;
+  std::vector<std::pair<int, int>> flat_varying_ranges_;
   std::vector<float> tf_varyings_;
   float ndc_x_[kMaxClippedVertices] = {};
   float ndc_y_[kMaxClippedVertices] = {};
@@ -484,6 +583,15 @@ void Pipeline::Run(GLenum mode,
                    GLsizei instance_count) {
   if (!Prepare())
     return;
+  if (getenv("ZGL_DEBUG_ERROR"))
+    fprintf(stderr,
+            "[draw] %dx%d vp=%d,%d,%d,%d scissor=%d empty=%d count=%d "
+            "instances=%d prog=%u vf=%d\n",
+            target_.width, target_.height, state().viewport.x,
+            state().viewport.y, state().viewport.width,
+            state().viewport.height, state().scissor_test ? 1 : 0,
+            empty_clip_ ? 1 : 0, count, instance_count,
+            static_cast<unsigned>(state().program), varying_floats_);
   zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context_);
   const bool capture =
       feedback && feedback->active && !feedback->paused;
@@ -528,11 +636,35 @@ void Pipeline::Run(GLenum mode,
   };
 
   if (capture) {
+    // Transform feedback captures only vertices that belong to a complete
+    // primitive; an incomplete trailing line or triangle is not recorded.
+    size_t capture_count = static_cast<size_t>(count);
+    switch (mode) {
+      case GL_LINES:
+        capture_count -= capture_count % 2;
+        break;
+      case GL_LINE_STRIP:
+      case GL_LINE_LOOP:
+        capture_count = capture_count >= 2 ? capture_count : 0;
+        break;
+      case GL_TRIANGLES:
+        capture_count -= capture_count % 3;
+        break;
+      case GL_TRIANGLE_STRIP:
+      case GL_TRIANGLE_FAN:
+        capture_count = capture_count >= 3 ? capture_count : 0;
+        break;
+      default:
+        break;
+    }
     for (int instance = 0; instance < instance_count; ++instance) {
       cursor = 0;
       GLuint index;
-      while (next_index(&index) == IndexResult::kOk)
+      size_t captured = 0;
+      while (captured < capture_count && next_index(&index) == IndexResult::kOk) {
         CaptureVertex(index, instance);
+        ++captured;
+      }
     }
     feedback->primitives_written +=
         PrimitiveCount(mode, static_cast<size_t>(count)) *
@@ -547,17 +679,32 @@ void Pipeline::Run(GLenum mode,
     switch (mode) {
       case GL_POINTS: {
         GLuint index;
-        while (next_index(&index) == IndexResult::kOk)
-          EmitPoint(index, instance);
+        while (true) {
+          const IndexResult result = next_index(&index);
+          if (result == IndexResult::kEnd)
+            break;
+          if (result == IndexResult::kOk)
+            EmitPoint(index, instance);
+        }
         break;
       }
       case GL_LINES: {
-        GLuint a;
-        GLuint b;
-        while (next_index(&a) == IndexResult::kOk) {
-          if (next_index(&b) != IndexResult::kOk)
+        GLuint pending[2] = {0, 0};
+        int have = 0;
+        GLuint current;
+        while (true) {
+          const IndexResult result = next_index(&current);
+          if (result == IndexResult::kEnd)
             break;
-          EmitLine(a, b, instance);
+          if (result == IndexResult::kRestart) {
+            have = 0;
+            continue;
+          }
+          pending[have++] = current;
+          if (have == 2) {
+            EmitLine(pending[0], pending[1], instance);
+            have = 0;
+          }
         }
         break;
       }
@@ -601,15 +748,22 @@ void Pipeline::Run(GLenum mode,
         break;
       }
       case GL_TRIANGLES: {
-        GLuint a;
-        GLuint b;
-        GLuint c;
-        while (next_index(&a) == IndexResult::kOk) {
-          if (next_index(&b) != IndexResult::kOk)
+        GLuint pending[3] = {0, 0, 0};
+        int have = 0;
+        GLuint current;
+        while (true) {
+          const IndexResult result = next_index(&current);
+          if (result == IndexResult::kEnd)
             break;
-          if (next_index(&c) != IndexResult::kOk)
-            break;
-          EmitTriangle(a, b, c, instance);
+          if (result == IndexResult::kRestart) {
+            have = 0;
+            continue;
+          }
+          pending[have++] = current;
+          if (have == 3) {
+            EmitTriangle(pending[0], pending[1], pending[2], instance);
+            have = 0;
+          }
         }
         break;
       }
@@ -689,8 +843,7 @@ bool Pipeline::Prepare() {
     context_->SetError(GL_INVALID_OPERATION);
     return false;
   }
-  program_ = object->program.get();
-  target_ = context_->GetDrawTarget();
+  program_ = object->program.get();  target_ = context_->GetDrawTarget();
   if (!target_.valid()) {
     context_->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return false;
@@ -717,11 +870,27 @@ bool Pipeline::Prepare() {
     size_t available = buffer->data.size() - binding.offset;
     if (binding.size < available)
       available = binding.size;
+    if (getenv("ZGL_DEBUG_UBO")) {
+      fprintf(stderr, "DRAW block=%s bp=%d id=%u off=%zu size=%zu bytes=%zu\n",
+              program_->uniform_blocks()[i].name.c_str(), binding_point,
+              binding.buffer, static_cast<size_t>(binding.offset),
+              static_cast<size_t>(binding.size), buffer->data.size());
+      fprintf(stderr, "HEX");
+      for (size_t q = 0; q < 32 && q < buffer->data.size(); ++q)
+        fprintf(stderr, " %02x", buffer->data[q]);
+      fprintf(stderr, "\n");
+    }
     program_->UploadUniformBlock(static_cast<int>(i),
                                  buffer->data.data() + binding.offset,
                                  available);
   }
   varying_floats_ = program_->VaryingFloats();
+  flat_varying_ranges_.clear();
+  for (const glsl::VaryingInfo& info : program_->varyings()) {
+    if (info.flat)
+      flat_varying_ranges_.push_back(
+          {info.offset, info.offset + info.components});
+  }
   stride_ = kFloatPerPosition + varying_floats_;
   cache_.assign(static_cast<size_t>(kVertexCacheSize) * stride_, 0.0f);
   cache_vertices_.assign(kVertexCacheSize, CachedVertex());
@@ -732,6 +901,8 @@ bool Pipeline::Prepare() {
   scratch_.assign(static_cast<size_t>(kMaxClippedVertices + 1) * stride_, 0.0f);
   screen_.assign(kMaxClippedVertices, RasterVertex());
   varying_values_.assign(varying_floats_, 0.0f);
+  varying_dx_values_.assign(varying_floats_, 0.0f);
+  varying_dy_values_.assign(varying_floats_, 0.0f);
   tf_varyings_.assign(varying_floats_, 0.0f);
 
   Rect viewport = state.viewport;
@@ -743,6 +914,14 @@ bool Pipeline::Prepare() {
     clip = clip.Intersect(scissor);
   }
   empty_clip_ = clip.IsEmpty();
+  if (getenv("ZGL_DEBUG_VIEWPORT")) {
+    for (int i = 0; i < 2; ++i) {
+      const VertexAttribute& a = vertex_array_->attributes[i];
+      fprintf(stderr, "[attribstate] %d en=%d size=%d stride=%d ptr=%p buf=%u\n",
+              i, a.enabled ? 1 : 0, a.size, a.stride,
+              static_cast<const void*>(a.client_pointer), a.buffer);
+    }
+  }
   rasterizer_.SetClip(clip);
   static const float kSamplePositions4[4][2] = {
       {-0.375f, -0.125f}, {0.125f, -0.375f},
@@ -758,15 +937,58 @@ bool Pipeline::Prepare() {
   return true;
 }
 
+uint32_t ReadAttributeInteger(const uint8_t* data, int component,
+                            GLenum type) {
+  switch (type) {
+    case GL_BYTE:
+      return static_cast<uint32_t>(
+          static_cast<int32_t>(static_cast<int8_t>(data[component])));
+    case GL_UNSIGNED_BYTE:
+      return data[component];
+    case GL_SHORT: {
+      int16_t value;
+      memcpy(&value, data + component * 2, sizeof(value));
+      return static_cast<uint32_t>(static_cast<int32_t>(value));
+    }
+    case GL_UNSIGNED_SHORT: {
+      uint16_t value;
+      memcpy(&value, data + component * 2, sizeof(value));
+      return value;
+    }
+    case GL_INT: {
+      int32_t value;
+      memcpy(&value, data + component * 4, sizeof(value));
+      return static_cast<uint32_t>(value);
+    }
+    case GL_UNSIGNED_INT: {
+      uint32_t value;
+      memcpy(&value, data + component * 4, sizeof(value));
+      return value;
+    }
+    case GL_FLOAT: {
+      float value;
+      memcpy(&value, data + component * 4, sizeof(value));
+      return static_cast<uint32_t>(value);
+    }
+    default:
+      return 0;
+  }
+}
+
 void Pipeline::FetchAttributes(GLuint index,
                                int instance,
-                               float* attributes) const {
+                               float* attributes,
+                               uint32_t* attribute_int) const {
   for (int i = 0; i < kMaxVertexAttribs; ++i) {
     float* destination = attributes + i * 4;
+    uint32_t* int_destination = attribute_int + i * 4;
     const VertexAttribute& attribute = vertex_array_->attributes[i];
     if (!attribute.enabled) {
-      for (int c = 0; c < 4; ++c)
+      for (int c = 0; c < 4; ++c) {
         destination[c] = context_->state.current_attribute[i][c];
+        int_destination[c] = static_cast<uint32_t>(
+            context_->state.current_attribute_integer[i][c]);
+      }
       continue;
     }
     destination[0] = 0.0f;
@@ -777,7 +999,9 @@ void Pipeline::FetchAttributes(GLuint index,
     const size_t element =
         divisor > 0 ? static_cast<size_t>(instance) / divisor : index;
     const int components = ClampInt(attribute.size, 1, 4);
-    const int element_size = TypeSize(attribute.type) * components;
+    const int element_size = IsPacked2101010(attribute.type)
+                                 ? 4
+                                 : TypeSize(attribute.type) * components;
     if (element_size == 0)
       continue;
     const int stride = attribute.stride > 0 ? attribute.stride : element_size;
@@ -802,6 +1026,10 @@ void Pipeline::FetchAttributes(GLuint index,
           attribute.normalized && IsIntegerType(attribute.type)
               ? ReadNormalizedComponent(base, component, attribute.type)
               : ReadAttributeComponent(base, component, attribute.type);
+      int_destination[component] =
+          attribute.normalized && IsIntegerType(attribute.type)
+              ? static_cast<uint32_t>(destination[component])
+              : ReadAttributeInteger(base, component, attribute.type);
     }
   }
 }
@@ -821,12 +1049,18 @@ Pipeline::TransformedVertex Pipeline::AcquireVertex(GLuint index,
   next_cache_slot_ = (next_cache_slot_ + 1) % kVertexCacheSize;
   float* destination = cache_.data() + static_cast<size_t>(slot) * stride_;
   float attributes[kMaxVertexAttribs * 4];
-  FetchAttributes(index, instance, attributes);
+  uint32_t attribute_int[kMaxVertexAttribs * 4];
+  FetchAttributes(index, instance, attributes, attribute_int);
   glsl::VertexInput input;
   input.attributes = attributes;
+  input.attribute_int = attribute_int;
   input.vertex_id = static_cast<int>(index);
   input.instance_id = instance;
+  input.depth_range[0] = state().depth.range_near;
+  input.depth_range[1] = state().depth.range_far;
+  input.depth_range[2] = state().depth.range_far - state().depth.range_near;
   input.uniforms = uniforms_;
+  input.sampler = this;
   float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
   float point_size = 1.0f;
   program_->RunVertex(input, position, &point_size, destination + 4);
@@ -847,12 +1081,15 @@ Pipeline::TransformedVertex Pipeline::AcquireVertex(GLuint index,
 
 void Pipeline::CaptureVertex(GLuint index, int instance) {
   float attributes[kMaxVertexAttribs * 4];
-  FetchAttributes(index, instance, attributes);
+  uint32_t attribute_int[kMaxVertexAttribs * 4];
+  FetchAttributes(index, instance, attributes, attribute_int);
   glsl::VertexInput input;
   input.attributes = attributes;
+  input.attribute_int = attribute_int;
   input.vertex_id = static_cast<int>(index);
   input.instance_id = instance;
   input.uniforms = uniforms_;
+  input.sampler = this;
   float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
   float point_size = 1.0f;
   program_->RunVertex(input, position, &point_size, tf_varyings_.data());
@@ -861,10 +1098,12 @@ void Pipeline::CaptureVertex(GLuint index, int instance) {
     context_->diagnostics = program_->runtime_error();
     return;
   }
-  WriteTransformFeedback(tf_varyings_.data());
+  WriteTransformFeedback(tf_varyings_.data(), position, point_size);
 }
 
-void Pipeline::WriteTransformFeedback(const float* varyings) {
+void Pipeline::WriteTransformFeedback(const float* varyings,
+                                      const float* position,
+                                      float point_size) {
   zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context_);
   if (!feedback || !feedback->active || feedback->paused)
     return;
@@ -890,6 +1129,8 @@ void Pipeline::WriteTransformFeedback(const float* varyings) {
       continue;
     }
     const zgl::IndexedBufferBinding& binding = feedback->buffers[buffer_index];
+    if (binding.attachment_deleted)
+      continue;
     zgl::Buffer* buffer = context_->buffers.Get(binding.buffer);
     if (!buffer)
       continue;
@@ -899,8 +1140,20 @@ void Pipeline::WriteTransformFeedback(const float* varyings) {
     size_t end = buffer->data.size();
     if (binding.size > 0)
       end = std::min(end, binding.offset + binding.size);
-    if (start <= end && bytes <= end - start)
-      memcpy(buffer->data.data() + start, varyings + output.offset, bytes);
+    if (bytes > 0 && start <= end && bytes <= end - start &&
+        !buffer->data.empty()) {
+      const float* source = nullptr;
+      float point_value = point_size;
+      if (output.offset == -3)
+        source = position;
+      else if (output.offset == -2)
+        source = &point_value;
+      else if (varyings && output.offset >= 0 &&
+               output.offset + output.components <= varying_floats_)
+        source = varyings + output.offset;
+      if (source)
+        memcpy(buffer->data.data() + start, source, bytes);
+    }
   }
 
   if (separate) {
@@ -923,6 +1176,10 @@ void Pipeline::EmitPoint(GLuint index, int instance) {
   const float w = vertex.data[3];
   if (!(w > 0.0f))
     return;
+  for (int plane = 4; plane < 6; ++plane) {
+    if (PlaneDistance(vertex.data, plane) < 0.0f)
+      return;
+  }
   const State& current = state();
   const float ndc_x = vertex.data[0] / w;
   const float ndc_y = vertex.data[1] / w;
@@ -944,6 +1201,8 @@ void Pipeline::EmitPoint(GLuint index, int instance) {
   current_front_ = true;
   polygon_ = false;
   depth_offset_ = 0.0f;
+  if (getenv("ZGL_DEBUG_POINT"))
+    fprintf(stderr, "[pt] center=%.2f,%.2f size=%.2f\n", screen.x, screen.y, size);
   rasterizer_.DrawPoint(screen, 0, size, this);
 }
 
@@ -952,22 +1211,29 @@ void Pipeline::EmitLine(GLuint index_a, GLuint index_b, int instance) {
          sizeof(float) * stride_);
   memcpy(emit_[1].data(), AcquireVertex(index_b, instance).data,
          sizeof(float) * stride_);
-  const float wa = emit_[0][3];
-  const float wb = emit_[1][3];
-  if (!(wa > 0.0f) || !(wb > 0.0f))
+  memcpy(clip_.data(), emit_[0].data(), sizeof(float) * stride_);
+  memcpy(clip_.data() + stride_, emit_[1].data(), sizeof(float) * stride_);
+  int count = 2;
+  float* polygon = clip_.data();
+  float* destination = scratch_.data();
+  for (int plane = 0; plane < 6 && count >= 2; ++plane) {
+    count = ClipPolygon(polygon, count, plane, destination);
+    polygon = destination;
+    destination =
+        destination == scratch_.data() ? clip_.data() : scratch_.data();
+  }
+  if (count < 2)
     return;
   const State& current = state();
-  float* slot_a = clip_.data();
-  float* slot_b = clip_.data() + stride_;
-  memcpy(slot_a, emit_[0].data(), sizeof(float) * stride_);
-  memcpy(slot_b, emit_[1].data(), sizeof(float) * stride_);
   RasterVertex vertices[2];
-  const float* positions[2] = {emit_[0].data(), emit_[1].data()};
   for (int i = 0; i < 2; ++i) {
-    const float w = positions[i][3];
-    const float ndc_x = positions[i][0] / w;
-    const float ndc_y = positions[i][1] / w;
-    const float ndc_z = positions[i][2] / w;
+    const float* position = polygon + static_cast<size_t>(i) * stride_;
+    const float w = position[3];
+    if (!(w > 0.0f))
+      return;
+    const float ndc_x = position[0] / w;
+    const float ndc_y = position[1] / w;
+    const float ndc_z = position[2] / w;
     vertices[i].x =
         static_cast<float>(current.viewport.x) +
         (ndc_x * 0.5f + 0.5f) * static_cast<float>(current.viewport.width);
@@ -1006,18 +1272,21 @@ int Pipeline::ClipPolygon(const float* input,
   for (int i = 0; i < count; ++i) {
     const float* current = input + static_cast<size_t>(i) * stride_;
     const float* next = input + static_cast<size_t>((i + 1) % count) * stride_;
-    const float distance_current = PlaneDistance(current, plane);
-    const float distance_next = PlaneDistance(next, plane);
-    if (distance_current >= 0.0f) {
+    const double distance_current = PlaneDistance(current, plane);
+    const double distance_next = PlaneDistance(next, plane);
+    if (distance_current >= 0.0) {
       memcpy(output + static_cast<size_t>(out_count) * stride_, current,
              sizeof(float) * stride_);
       ++out_count;
     }
-    if ((distance_current >= 0.0f) != (distance_next >= 0.0f)) {
-      const float t = distance_current / (distance_current - distance_next);
+    if ((distance_current >= 0.0) != (distance_next >= 0.0)) {
+      const double t = distance_current / (distance_current - distance_next);
       float* destination = output + static_cast<size_t>(out_count) * stride_;
       for (int k = 0; k < stride_; ++k) {
-        destination[k] = current[k] + (next[k] - current[k]) * t;
+        destination[k] = static_cast<float>(static_cast<double>(current[k]) +
+                                            (static_cast<double>(next[k]) -
+                                             static_cast<double>(current[k])) *
+                                                t);
       }
       ++out_count;
     }
@@ -1074,8 +1343,32 @@ void Pipeline::ProcessTriangle(const float* a, const float* b, const float* c) {
   if (polygon != clip_.data())
     memcpy(clip_.data(), polygon, sizeof(float) * stride_ * count);
 
-  ProjectVertices(clip_.data(), count);
+  int unique = 0;
+  for (int i = 0; i < count; ++i) {
+    const float* candidate = clip_.data() + static_cast<size_t>(i) * stride_;
+    bool duplicate = false;
+    for (int j = 0; j < unique; ++j) {
+      const float* kept = clip_.data() + static_cast<size_t>(j) * stride_;
+      float difference = 0.0f;
+      for (int k = 0; k < stride_; ++k)
+        difference = std::max(difference, std::fabs(kept[k] - candidate[k]));
+      if (difference < 1e-5f) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) {
+      if (unique != i)
+        memcpy(clip_.data() + static_cast<size_t>(unique) * stride_,
+               candidate, sizeof(float) * stride_);
+      ++unique;
+    }
+  }
+  count = unique;
+  if (count < 3)
+    return;
 
+  ProjectVertices(clip_.data(), count);
   const float area = (ndc_x_[1] - ndc_x_[0]) * (ndc_y_[2] - ndc_y_[0]) -
                      (ndc_x_[2] - ndc_x_[0]) * (ndc_y_[1] - ndc_y_[0]);
   const State& current = state();
@@ -1127,11 +1420,84 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
   const float w0 = clip_[static_cast<size_t>(fragment.vertex[0]) * stride_ + 3];
   const float w1 = clip_[static_cast<size_t>(fragment.vertex[1]) * stride_ + 3];
   const float w2 = clip_[static_cast<size_t>(fragment.vertex[2]) * stride_ + 3];
+  const int provoking_index =
+      fragment.provoking >= 0 ? fragment.provoking : fragment.vertex[2];
+  const float* provoking =
+      clip_.data() + static_cast<size_t>(provoking_index) * stride_ + 4;
+  const auto is_flat = [&](int index) {
+    for (const auto& range : flat_varying_ranges_)
+      if (index >= range.first && index < range.second)
+        return true;
+    return false;
+  };
+  if (getenv("ZGL_DEBUG_DER")) {
+    static int interp_dbg = 0;
+    if (interp_dbg < 4) {
+      fprintf(stderr, "[interp] bary=%.3f,%.3f,%.3f db=%.4f,%.4f v0=%.3f v1=%.3f v2=%.3f\n",
+              bary0, bary1, bary2, fragment.dbary[0][0], fragment.dbary[0][1],
+              vertex0[0], vertex1[0], vertex2[0]);
+      ++interp_dbg;
+    }
+  }
+  if (getenv("ZGL_DEBUG_FLAT")) {
+    fprintf(stderr, "interp prov=%d ranges=%zu bary=%.3f,%.3f,%.3f verts=%d,%d,%d flat0=%d val=%.2f provval=%.2f\n",
+            provoking_index, flat_varying_ranges_.size(), bary0, bary1, bary2,
+            fragment.vertex[0], fragment.vertex[1], fragment.vertex[2],
+            flat_varying_ranges_.empty() ? -1 : is_flat(0),
+            out[0], provoking[0]);
+  }
+  if (getenv("ZGL_DEBUG_CUBE") && varying_floats_ >= 3) {
+    static int cdbg = 0;
+    if (cdbg++ < 4)
+      fprintf(stderr,
+              "[interp3] n=%d bary=%.3f,%.3f,%.3f dbary=%.4f,%.4f verts=%.3f/%.3f/%.3f out0=%.3f\n",
+              varying_floats_, bary0, bary1, bary2, fragment.dbary[0][0],
+              fragment.dbary[1][0], vertex0[0], vertex1[0], vertex2[0],
+              out[0]);
+  }
   const bool affine =
       (w0 == w1 && w1 == w2) || w0 == 0.0f || w1 == 0.0f || w2 == 0.0f;
   if (affine) {
+    const float b0dx = fragment.dbary[0][0];
+    const float b1dx = fragment.dbary[1][0];
+    const float b2dx = fragment.dbary[2][0];
+    const float b0dy = fragment.dbary[0][1];
+    const float b1dy = fragment.dbary[1][1];
+    const float b2dy = fragment.dbary[2][1];
     for (int i = 0; i < varying_floats_; ++i) {
-      out[i] = vertex0[i] * bary0 + vertex1[i] * bary1 + vertex2[i] * bary2;
+      out[i] = is_flat(i)
+                   ? provoking[i]
+                   : vertex0[i] * bary0 + vertex1[i] * bary1 +
+                         vertex2[i] * bary2;
+      varying_dx_values_[i] =
+          is_flat(i) ? provoking[i]
+                     : vertex0[i] * (bary0 + b0dx) +
+                           vertex1[i] * (bary1 + b1dx) +
+                           vertex2[i] * (1.0f - bary0 - b0dx - bary1 - b1dx);
+      varying_dy_values_[i] =
+          is_flat(i) ? provoking[i]
+                     : vertex0[i] * (bary0 - b0dy) +
+                           vertex1[i] * (bary1 - b1dy) +
+                           vertex2[i] * (1.0f - bary0 + b0dy - bary1 + b1dy);
+    }
+    if (getenv("ZGL_DEBUG_VAR")) {
+      static int vdbg = 0;
+      if (vdbg++ < 2) {
+        fprintf(stderr, "[var] n=%d bary=(%.4f,%.4f,%.4f) db=(%.4f,%.4f)\n",
+                varying_floats_, bary0, bary1, bary2, b0dx, b0dy);
+        for (int i = 0; i < varying_floats_ && i < 12; ++i)
+          fprintf(stderr, "[var] i=%d v0=%.4f v1=%.4f v2=%.4f cur=%.4f dx=%.4f dy=%.4f\n",
+                  i, vertex0[i], vertex1[i], vertex2[i], out[i],
+                  varying_dx_values_[i], varying_dy_values_[i]);
+      }
+    }
+    if (getenv("ZGL_DEBUG_DER")) {
+      static int adbg = 0;
+      if (adbg < 3) {
+        fprintf(stderr, "[interp-aff] out0=%.4f dx0=%.4f dy0=%.4f\n", out[0],
+                varying_dx_values_[0], varying_dy_values_[0]);
+        ++adbg;
+      }
     }
     return;
   }
@@ -1144,19 +1510,42 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
       out[i] = vertex0[i];
     return;
   }
+  const auto perspective = [&](float b0, float b1, float b2, int i) {
+    const float s0 = b0 / w0;
+    const float s1 = b1 / w1;
+    const float s2 = b2 / w2;
+    const float sum = s0 + s1 + s2;
+    if (sum == 0.0f)
+      return vertex0[i];
+    return (vertex0[i] * s0 + vertex1[i] * s1 + vertex2[i] * s2) / sum;
+  };
   for (int i = 0; i < varying_floats_; ++i) {
-    out[i] = (vertex0[i] * inverse0 + vertex1[i] * inverse1 +
-              vertex2[i] * inverse2) /
-             inverse_sum;
+    if (is_flat(i)) {
+      out[i] = provoking[i];
+      varying_dx_values_[i] = 0.0f;
+      varying_dy_values_[i] = 0.0f;
+      continue;
+    }
+    out[i] = perspective(bary0, bary1, bary2, i);
+    const float bx0 = bary0 + fragment.dbary[0][0];
+    const float bx1 = bary1 + fragment.dbary[1][0];
+    const float bx2 = 1.0f - bx0 - bx1;
+    const float by0 = bary0 - fragment.dbary[0][1];
+    const float by1 = bary1 - fragment.dbary[1][1];
+    const float by2 = 1.0f - by0 - by1;
+    varying_dx_values_[i] = perspective(bx0, bx1, bx2, i);
+    varying_dy_values_[i] = perspective(by0, by1, by2, i);
   }
 }
 
-void Pipeline::ApplyStencilOp(GLenum op, size_t pixel, uint8_t reference) {
-  const StencilState& stencil = state().stencil;
+void Pipeline::ApplyStencilOp(GLenum op,
+                              size_t pixel,
+                              uint8_t reference,
+                              uint8_t write_mask) {
   const uint8_t current = target_.stencil[pixel];
   const uint8_t updated = StencilOp(op, current, reference);
   target_.stencil[pixel] = static_cast<uint8_t>(
-      (updated & stencil.write_mask) | (current & ~stencil.write_mask));
+      (updated & write_mask) | (current & ~write_mask));
 }
 
 void Pipeline::Shade(const Fragment& fragment) {
@@ -1182,14 +1571,16 @@ void Pipeline::Shade(const Fragment& fragment) {
 
   const StencilFace* face =
       current_front_ ? &state.stencil.front : &state.stencil.back;
-  const uint8_t reference = static_cast<uint8_t>(face->reference) &
-                            static_cast<uint8_t>(state.stencil.mask);
+  const uint8_t reference = static_cast<uint8_t>(face->reference);
+  const uint8_t compare_reference =
+      reference & static_cast<uint8_t>(face->compare_mask);
   bool has_stencil = target_.stencil != nullptr;
   if (state.stencil.test && has_stencil) {
     const uint8_t stored =
-        static_cast<uint8_t>(target_.stencil[pixel] & state.stencil.mask);
-    if (!StencilTestPasses(face->func, reference, stored)) {
-      ApplyStencilOp(face->op_fail, pixel, reference);
+        static_cast<uint8_t>(target_.stencil[pixel] &
+                             face->compare_mask);
+    if (!StencilTestPasses(face->func, compare_reference, stored)) {
+      ApplyStencilOp(face->op_fail, pixel, reference, static_cast<uint8_t>(face->write_mask));
       return;
     }
   }
@@ -1198,22 +1589,51 @@ void Pipeline::Shade(const Fragment& fragment) {
   const bool has_depth = target_.depth != nullptr;
   if (state.depth.test && has_depth && !writes_depth) {
     const float stored = Unorm16ToFloat(target_.depth[pixel]);
-    if (!DepthTestPasses(state.depth.func, interpolated_depth, stored)) {
+    const float incoming = Unorm16ToFloat(ToDepth16(interpolated_depth));
+    if (!DepthTestPasses(state.depth.func, incoming, stored)) {
       if (state.stencil.test && has_stencil)
-        ApplyStencilOp(face->op_depth_fail, pixel, reference);
+        ApplyStencilOp(face->op_depth_fail, pixel, reference, static_cast<uint8_t>(face->write_mask));
       return;
     }
   }
 
   Interpolate(fragment, varying_values_.data());
+  if (getenv("ZGL_DEBUG_VIEWPORT") && varying_floats_ >= 2) {
+    static int fv_debug[8] = {};
+    const unsigned program = static_cast<unsigned>(context_->state.program);
+    if (program < 8 && fv_debug[program] < 3) {
+      fprintf(stderr, "[fragvary] prog=%u pix=%zu %.4f %.4f bary=%.3f,%.3f,%.3f\n",
+              program, pixel, varying_values_[0], varying_values_[1],
+              fragment.bary[0], fragment.bary[1], fragment.bary[2]);
+      ++fv_debug[program];
+    }
+  }
   glsl::FragmentInput input;
   input.varyings = varying_values_.data();
+  input.varyings_dx = varying_dx_values_.data();
+  input.varyings_dy = varying_dy_values_.data();
   input.frag_coord[0] =
       static_cast<float>(fragment.x) + 0.5f + fragment.sample_dx;
   input.frag_coord[1] =
       static_cast<float>(gl_y) + 0.5f + fragment.sample_dy;
   input.frag_coord[2] = interpolated_depth;
   input.frag_coord[3] = 1.0f;
+  {
+    const float* clip0 = clip_.data() +
+                         static_cast<size_t>(fragment.vertex[0]) * stride_ + 3;
+    const float* clip1 = clip_.data() +
+                         static_cast<size_t>(fragment.vertex[1]) * stride_ + 3;
+    const float* clip2 = clip_.data() +
+                         static_cast<size_t>(fragment.vertex[2]) * stride_ + 3;
+    if (*clip0 != 0.0f && *clip1 != 0.0f && *clip2 != 0.0f) {
+      input.frag_coord[3] = fragment.bary[0] / *clip0 +
+                            fragment.bary[1] / *clip1 +
+                            fragment.bary[2] / *clip2;
+    }
+  }
+  input.depth_range[0] = state.depth.range_near;
+  input.depth_range[1] = state.depth.range_far;
+  input.depth_range[2] = state.depth.range_far - state.depth.range_near;
   input.front_facing = current_front_;
   input.point_coord[0] = fragment.point_coord[0];
   input.point_coord[1] = fragment.point_coord[1];
@@ -1226,20 +1646,42 @@ void Pipeline::Shade(const Fragment& fragment) {
   if (output.discarded)
     return;
 
+  // Resolve the per-sample coverage mask.  Alpha-to-coverage and explicit
+  // sample coverage both map a scalar in [0, 1] to a subset of the samples.
+  if (target_.samples > 1) {
+    const int sample_count = target_.samples >= 4 ? 4 : target_.samples;
+    const float threshold =
+        (static_cast<float>(fragment.sample) + 0.5f) /
+        static_cast<float>(sample_count);
+    if (state.sample_coverage) {
+      // Inversion complements the same per-sample mask, so drawing with
+      // non-inverted and inverted coverage covers every sample exactly once.
+      bool covered = Clamp01(state.sample_coverage_value) > threshold;
+      if (state.invert_coverage)
+        covered = !covered;
+      if (!covered)
+        return;
+    }
+    if (state.sample_alpha_to_coverage &&
+        Clamp01(output.color[0][3]) <= threshold)
+      return;
+  }
+
   float depth = interpolated_depth;
   if (output.writes_depth) {
     depth = Clamp01(output.depth);
     if (state.depth.test && has_depth &&
-        !DepthTestPasses(state.depth.func, depth,
+        !DepthTestPasses(state.depth.func,
+                         Unorm16ToFloat(ToDepth16(depth)),
                          Unorm16ToFloat(target_.depth[pixel]))) {
       if (state.stencil.test && has_stencil)
-        ApplyStencilOp(face->op_depth_fail, pixel, reference);
+        ApplyStencilOp(face->op_depth_fail, pixel, reference, static_cast<uint8_t>(face->write_mask));
       return;
     }
   }
 
   if (state.stencil.test && has_stencil)
-    ApplyStencilOp(face->op_pass, pixel, reference);
+    ApplyStencilOp(face->op_pass, pixel, reference, static_cast<uint8_t>(face->write_mask));
 
   if (state.depth.test && has_depth && state.depth.mask)
     target_.depth[pixel] = ToDepth16(depth);
@@ -1248,7 +1690,9 @@ void Pipeline::Shade(const Fragment& fragment) {
   for (int location = 0; location < glsl::kMaxFragmentOutputs; ++location) {
     if (!output.written[location])
       continue;
-    StoreFragmentColor(pixel, location, output.color[location]);
+    StoreFragmentColor(pixel, location, output.color[location],
+                       output.color_int[location],
+                       output.color_base[location]);
     wrote_color = true;
   }
   if (wrote_color)
@@ -1295,23 +1739,94 @@ void Pipeline::Resolve() {
 
 void Pipeline::StoreFragmentColor(size_t pixel,
                                   int location,
-                                  const float color[4]) {
+                                  const float color[4],
+                                  const uint32_t color_int[4],
+                                  glsl::BaseType base) {
   if (location < 0 || location >= target_.draw_buffer_count)
     return;
   const GLenum buffer = target_.draw_buffers[location];
   if (buffer < GL_COLOR_ATTACHMENT0 ||
       buffer >= GL_COLOR_ATTACHMENT0 + kMaxColorAttachments)
     return;
-  uint8_t* const destination =
-      target_.colors[buffer - GL_COLOR_ATTACHMENT0];
+  const int attachment = buffer - GL_COLOR_ATTACHMENT0;
+  uint8_t* const destination = target_.colors[attachment];
   if (!destination)
     return;
+  if (getenv("ZGL_DEBUG_INT") && !target_.color_is_integer[attachment]) {
+    static int fb_debug = 0;
+    if (fb_debug < 12 && (fb_debug < 3 || pixel % 4096 == 0)) {
+      fprintf(stderr, "[fbstore] pix=%zu base=%d color=%.4f %.4f %.4f %.4f dst=%p\n",
+              pixel, static_cast<int>(base), color[0], color[1], color[2],
+              color[3], static_cast<void*>(destination));
+      ++fb_debug;
+    }
+  }
   const State& state = this->state();
+  if (target_.color_is_integer[attachment]) {
+    uint32_t values[4];
+    const bool unsigned_output =
+        target_.color_is_unsigned[attachment] || base == glsl::BaseType::kUInt;
+    const bool exact_integer =
+        base == glsl::BaseType::kInt || base == glsl::BaseType::kUInt;
+    for (int i = 0; i < 4; ++i) {
+      if (exact_integer) {
+        values[i] = color_int[i];
+      } else if (unsigned_output) {
+        values[i] = static_cast<uint32_t>(
+            std::clamp(color[i], 0.0f, 4294967295.0f));
+      } else if (color[i] >= 2147483520.0f) {
+        values[i] = 0x7fffffffU;
+      } else {
+        const float clamped =
+            std::clamp(color[i], -2147483648.0f, 2147483520.0f);
+        values[i] = static_cast<uint32_t>(static_cast<int64_t>(clamped));
+      }
+    }
+    uint32_t* const integer_destination =
+        target_.integer_colors[attachment];
+    if (getenv("ZGL_DEBUG_INT") && integer_destination) {
+      static int int_debug = 0;
+      if (int_debug < 6) {
+        fprintf(stderr, "[intstore] pix=%zu base=%d ints=%u,%u,%u,%u dst=%p\n",
+                pixel, static_cast<int>(base), values[0], values[1], values[2],
+                values[3], static_cast<void*>(integer_destination));
+        ++int_debug;
+      }
+    }
+    if (!integer_destination)
+      return;
+    if (!(state.color_mask[0] && state.color_mask[1] &&
+          state.color_mask[2] && state.color_mask[3])) {
+      uint32_t existing[4];
+      memcpy(existing, integer_destination + pixel * 4, sizeof(existing));
+      for (int i = 0; i < 4; ++i)
+        if (!state.color_mask[i])
+          values[i] = existing[i];
+    }
+    memcpy(integer_destination + pixel * 4, values, sizeof(values));
+    return;
+  }
+  if (getenv("ZGL_DEBUG_RAST")) {
+    static int bdbg = 0;
+    if (bdbg < 4) {
+      fprintf(stderr, "[blend] enabled=%d src=%x dst=%x\n",
+              state.blend.enabled ? 1 : 0, state.blend.src_rgb,
+              state.blend.dst_rgb);
+      ++bdbg;
+    }
+  }
   if (state.blend.enabled) {
     float destination_color[4];
     uint32_t existing;
     memcpy(&existing, destination + pixel * 4, sizeof(existing));
     UnpackRgba(existing, destination_color);
+    if (target_.color_is_srgb[attachment]) {
+      const Rgba stored = UnpackRgba(existing);
+      destination_color[0] = SrgbToLinear(stored.r);
+      destination_color[1] = SrgbToLinear(stored.g);
+      destination_color[2] = SrgbToLinear(stored.b);
+      destination_color[3] = static_cast<float>(stored.a) / 255.0f;
+    }
     float source[4];
     for (int i = 0; i < 4; ++i)
       source[i] = Clamp01(color[i]);
@@ -1331,19 +1846,34 @@ void Pipeline::StoreFragmentColor(size_t pixel,
     result[3] = BlendCombine(state.blend.equation_alpha, source[3],
                              destination_color[3], sf, df);
     uint8_t bytes[4];
-    for (int i = 0; i < 4; ++i)
-      bytes[i] = state.color_mask[i] ? FloatToUnorm8(result[i])
-                                     : (i == 0   ? UnpackRgba(existing).r
-                                        : i == 1 ? UnpackRgba(existing).g
-                                        : i == 2 ? UnpackRgba(existing).b
-                                                 : UnpackRgba(existing).a);
+    const bool srgb = target_.color_is_srgb[attachment];
+    for (int i = 0; i < 4; ++i) {
+      if (!state.color_mask[i]) {
+        const Rgba previous = UnpackRgba(existing);
+        bytes[i] = i == 0   ? previous.r
+                   : i == 1 ? previous.g
+                   : i == 2 ? previous.b
+                            : previous.a;
+      } else {
+        bytes[i] = srgb && i < 3 ? LinearToSrgb8(result[i])
+                                 : FloatToUnorm8(result[i]);
+      }
+    }
     const uint32_t packed = PackRgba(bytes[0], bytes[1], bytes[2], bytes[3]);
     memcpy(destination + pixel * 4, &packed, sizeof(packed));
     return;
   }
   uint8_t bytes[4];
+  const bool srgb = target_.color_is_srgb[attachment];
+  if (getenv("ZGL_DEBUG_SRGB")) {
+    static int dbg = 0;
+    if (dbg++ < 4)
+      fprintf(stderr, "[store] attach=%d srgb=%d color=%.4f %.4f %.4f\n",
+              attachment, (int)srgb, color[0], color[1], color[2]);
+  }
   for (int i = 0; i < 4; ++i)
-    bytes[i] = FloatToUnorm8(color[i]);
+    bytes[i] = srgb && i < 3 ? LinearToSrgb8(color[i])
+                             : FloatToUnorm8(color[i]);
   if (!(state.color_mask[0] && state.color_mask[1] && state.color_mask[2] &&
         state.color_mask[3])) {
     uint32_t existing;
@@ -1363,6 +1893,195 @@ void Pipeline::StoreFragmentColor(size_t pixel,
   memcpy(destination + pixel * 4, &packed, sizeof(packed));
 }
 
+uint32_t Pipeline::MinFilter(int unit) {
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Sampler* sampler = context_->samplers.Get(state().samplers[slot]);
+  if (sampler)
+    return sampler->min_filter;
+  const Texture* texture = context_->textures.Get(state().textures_2d[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_2d_array[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_3d[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_cube[slot]);
+  return texture ? texture->min_filter : GL_NEAREST;
+}
+
+void Pipeline::Size(int unit, int out[3]) {
+  out[0] = 0;
+  out[1] = 0;
+  out[2] = 0;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture =
+      context_->textures.Get(state().textures_2d_array[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_3d[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_2d[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_cube[slot]);
+  if (!texture)
+    return;
+  const int base_level = std::max(0, texture->base_level);
+  out[0] = std::max(1, texture->width >> base_level);
+  out[1] = std::max(1, texture->height >> base_level);
+  if (texture->target == GL_TEXTURE_3D)
+    out[2] = std::max(1, texture->depth >> base_level);
+  else if (texture->target == GL_TEXTURE_2D_ARRAY)
+    out[2] = texture->depth;  // Layer count does not shrink with mip levels.
+  else
+    out[2] = 1;
+}
+
+void Pipeline::SizeLod(int unit, int lod, int out[3]) {
+  Size(unit, out);
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture =
+      context_->textures.Get(state().textures_2d[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_cube[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_2d_array[slot]);
+  if (!texture)
+    texture = context_->textures.Get(state().textures_3d[slot]);
+  const int base_level = texture ? std::max(0, texture->base_level) : 0;
+  const int max_level =
+      texture ? std::max(0, texture->levels - 1 - base_level) : 0;
+  const int level = ClampInt(lod, 0, max_level);
+  out[0] = std::max(1, out[0] >> level);
+  out[1] = std::max(1, out[1] >> level);
+  // Only a 3D texture has a mipmapped depth; a 2D array keeps its layer count.
+  if (texture && texture->target == GL_TEXTURE_3D)
+    out[2] = std::max(1, out[2] >> level);
+}
+
+namespace {
+
+void MaskSampledAlpha(GLenum internal_format, float out[4]);
+
+// Bound checks shared by the texelFetch entry points.
+int ClampFetchCoord(int coord, int size) {
+  if (size <= 0)
+    return 0;
+  return ClampInt(coord, 0, size - 1);
+}
+
+}  // namespace
+
+void Pipeline::Fetch2D(int unit, int x, int y, int lod, float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture = context_->textures.Get(state().textures_2d[slot]);
+  if (!texture)
+    return;
+  const TextureImage* image = texture->image(
+      ClampInt(lod, 0, 30) + std::max(0, texture->base_level), 0);
+  if (!image || image->width <= 0 || image->height <= 0)
+    return;
+  const int cx = ClampFetchCoord(x, image->width);
+  const int cy = ClampFetchCoord(y, image->height);
+  FetchTexelImage(*image, static_cast<size_t>(cy) * image->width + cx, out);
+  MaskSampledAlpha(texture->internal_format, out);
+}
+
+void Pipeline::Fetch3D(int unit, int x, int y, int z, int lod, float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture = context_->textures.Get(state().textures_3d[slot]);
+  if (!texture)
+    return;
+  const TextureImage* image = texture->image(
+      ClampInt(lod, 0, 30) + std::max(0, texture->base_level), 0);
+  if (!image || image->width <= 0 || image->height <= 0)
+    return;
+  const int cx = ClampFetchCoord(x, image->width);
+  const int cy = ClampFetchCoord(y, image->height);
+  const int cz = ClampFetchCoord(z, image->depth);
+  FetchTexelImage(*image,
+             (static_cast<size_t>(cz) * image->height + cy) *
+                     static_cast<size_t>(image->width) +
+                 cx,
+             out);
+  MaskSampledAlpha(texture->internal_format, out);
+}
+
+void Pipeline::Fetch2DArray(int unit,
+                            int x,
+                            int y,
+                            int layer,
+                            int lod,
+                            float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture =
+      context_->textures.Get(state().textures_2d_array[slot]);
+  if (!texture)
+    return;
+  const int level = ClampInt(lod, 0, 30);
+  const TextureImage* image =
+      texture->image(level + std::max(0, texture->base_level), 0);
+  if (getenv("ZGL_DEBUG_TEX"))
+    fprintf(stderr,
+            "[fetch2da] unit=%d x=%d y=%d layer=%d lod=%d depth=%d levels=%d "
+            "img=%dx%dx%d base=%d\n",
+            unit, x, y, layer, lod, texture->depth, texture->levels,
+            image ? image->width : -1, image ? image->height : -1,
+            image ? image->depth : -1, texture->base_level);
+  if (!image || image->width <= 0 || image->height <= 0)
+    return;
+  const int face = ClampInt(layer, 0, std::max(0, image->depth - 1));
+  const int cx = ClampFetchCoord(x, image->width);
+  const int cy = ClampFetchCoord(y, image->height);
+  const size_t plane =
+      static_cast<size_t>(image->width) * static_cast<size_t>(image->height);
+  FetchTexelImage(*image,
+                  static_cast<size_t>(face) * plane +
+                      static_cast<size_t>(cy) * image->width + cx,
+                  out);
+  MaskSampledAlpha(texture->internal_format, out);
+}
+
+namespace {
+
+void MaskSampledAlpha(GLenum internal_format, float out[4]) {
+  if (getenv("ZGL_DEBUG_ALPHA"))
+    fprintf(stderr, "[alpha] %x %d %g %g %g %g", internal_format, FormatColorChannels(internal_format), out[0], out[1], out[2], out[3]);
+  // Legacy single-channel formats keep their non-color channels explicit.
+  if (internal_format == GL_ALPHA) {
+    out[0] = 0.0f;
+    out[1] = 0.0f;
+    out[2] = 0.0f;
+    return;
+  }
+  if (internal_format == GL_LUMINANCE) {
+    out[3] = 1.0f;
+    return;
+  }
+  if (internal_format == GL_LUMINANCE_ALPHA)
+    return;
+  const int channels = FormatColorChannels(internal_format);
+  for (int channel = channels; channel < 4; ++channel)
+    out[channel] = channel == 3 ? 1.0f : 0.0f;
+}
+
+}  // namespace
+
+namespace {
+void ApplySamplerSwizzle(const Texture* texture,
+                         const Sampler* sampler,
+                         float rgba[4]);
+}  // namespace
+
 void Pipeline::Sample2D(int unit,
                         float u,
                         float v,
@@ -1373,7 +2092,7 @@ void Pipeline::Sample2D(int unit,
   out[2] = 0.0f;
   out[3] = 1.0f;
   const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
-  const Texture* texture = context_->textures.Get(state().textures[slot]);
+  const Texture* texture = context_->textures.Get(state().textures_2d[slot]);
   if (!texture)
     return;
   GLenum min_filter = texture->min_filter;
@@ -1387,8 +2106,291 @@ void Pipeline::Sample2D(int unit,
     wrap_s = sampler->wrap_s;
     wrap_t = sampler->wrap_t;
   }
+  if (getenv("ZGL_DEBUG_VIEWPORT") &&
+      (unit != 0 || (u < 0.01f && v > 0.97f))) {
+    static int sd = 0;
+    if (sd < 200) {
+      const Texture* dbg_tex = context_->textures.Get(state().textures_2d[slot]);
+      fprintf(stderr, "[s2d] unit=%d tex=%u size=%dx%d lod=%.4f min=0x%x mag=0x%x uv=%.4f,%.4f\n",
+              unit, (unsigned)state().textures_2d[slot],
+              dbg_tex ? (dbg_tex->image(0, 0) ? dbg_tex->image(0, 0)->width : -1) : -1,
+              dbg_tex ? (dbg_tex->image(0, 0) ? dbg_tex->image(0, 0)->height : -1) : -1,
+              lod_bias, min_filter, mag_filter, u, v);
+      ++sd;
+    }
+  }
   SampleTexture2D(*texture, u, v, lod_bias, min_filter, mag_filter, wrap_s,
-                  wrap_t, out);
+                  wrap_t, out,
+                  sampler ? sampler->min_lod : texture->min_lod,
+                  sampler ? sampler->max_lod : texture->max_lod);
+  MaskSampledAlpha(texture->internal_format, out);
+  ApplySamplerSwizzle(texture, sampler, out);
+}
+
+namespace {
+
+float CompareDepth(float reference, float depth, GLenum func) {
+  bool pass = false;  switch (func) {
+    case GL_NEVER:
+      break;
+    case GL_LESS:
+      pass = reference < depth;
+      break;
+    case GL_EQUAL:
+      pass = reference == depth;
+      break;
+    case GL_LEQUAL:
+      pass = reference <= depth;
+      break;
+    case GL_GREATER:
+      pass = reference > depth;
+      break;
+    case GL_NOTEQUAL:
+      pass = reference != depth;
+      break;
+    case GL_GEQUAL:
+      pass = reference >= depth;
+      break;
+    case GL_ALWAYS:
+    default:
+      pass = true;
+      break;
+  }
+  if (getenv("ZGL_CMP_INVERT"))
+    pass = !pass;
+  return pass ? 1.0f : 0.0f;
+}
+
+void ApplySamplerSwizzle(const Texture* texture,
+                         const Sampler* sampler,
+                         float rgba[4]) {
+  if (!texture && !sampler)
+    return;
+  const float in[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
+  GLenum sel[4];
+  if (sampler) {
+    sel[0] = sampler->swizzle_r;
+    sel[1] = sampler->swizzle_g;
+    sel[2] = sampler->swizzle_b;
+    sel[3] = sampler->swizzle_a;
+  } else {
+    sel[0] = texture->swizzle_r;
+    sel[1] = texture->swizzle_g;
+    sel[2] = texture->swizzle_b;
+    sel[3] = texture->swizzle_a;
+  }
+  for (int i = 0; i < 4; ++i) {
+    switch (sel[i]) {
+      case GL_RED:
+        rgba[i] = in[0];
+        break;
+      case GL_GREEN:
+        rgba[i] = in[1];
+        break;
+      case GL_BLUE:
+        rgba[i] = in[2];
+        break;
+      case GL_ALPHA:
+        rgba[i] = in[3];
+        break;
+      case GL_ZERO:
+        rgba[i] = 0.0f;
+        break;
+      case GL_ONE:
+        rgba[i] = 1.0f;
+        break;
+      default:
+        rgba[i] = in[i];
+        break;
+    }
+  }
+}
+
+}  // namespace
+
+void Pipeline::Sample2DShadow(int unit,
+                              float u,
+                              float v,
+                              float ref,
+                              float lod_bias,
+                              float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture = context_->textures.Get(state().textures_2d[slot]);
+  if (!texture)
+    return;
+  GLenum min_filter = texture->min_filter;
+  GLenum mag_filter = texture->mag_filter;
+  GLenum wrap_s = texture->wrap_s;
+  GLenum wrap_t = texture->wrap_t;
+  GLenum compare_func = texture->compare_func;
+  const Sampler* sampler = context_->samplers.Get(state().samplers[slot]);
+  if (sampler) {
+    min_filter = sampler->min_filter;
+    mag_filter = sampler->mag_filter;
+    wrap_s = sampler->wrap_s;
+    wrap_t = sampler->wrap_t;
+    compare_func = sampler->compare_func;
+  }
+  float depth[4];
+  SampleTexture2D(*texture, u, v, lod_bias, min_filter, mag_filter, wrap_s,
+                  wrap_t, depth,
+                  sampler ? sampler->min_lod : texture->min_lod,
+                  sampler ? sampler->max_lod : texture->max_lod);
+  out[0] = CompareDepth(ref, depth[0], compare_func);
+}
+
+void Pipeline::Sample2DArrayShadow(int unit,
+                                   float u,
+                                   float v,
+                                   float layer,
+                                   float ref,
+                                   float lod_bias,
+                                   float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture =
+      context_->textures.Get(state().textures_2d_array[slot]);
+  if (!texture)
+    return;
+  GLenum min_filter = texture->min_filter;
+  GLenum mag_filter = texture->mag_filter;
+  GLenum wrap_s = texture->wrap_s;
+  GLenum wrap_t = texture->wrap_t;
+  GLenum compare_func = texture->compare_func;
+  const Sampler* sampler = context_->samplers.Get(state().samplers[slot]);
+  if (sampler) {
+    min_filter = sampler->min_filter;
+    mag_filter = sampler->mag_filter;
+    wrap_s = sampler->wrap_s;
+    wrap_t = sampler->wrap_t;
+    compare_func = sampler->compare_func;
+  }
+  float depth[4];
+  float layer_arg = layer;
+  if (const char* off = getenv("ZGL_LAYER_OFF"))
+    layer_arg += static_cast<float>(atof(off));
+  const bool swap_uv = getenv("ZGL_SHADOW_SWAP") != nullptr;
+  const float su = getenv("ZGL_SHADOW_FLIP_S") ? 1.0f - (swap_uv ? v : u)
+                                               : (swap_uv ? v : u);
+  const float sv = getenv("ZGL_SHADOW_FLIP_T") ? 1.0f - (swap_uv ? u : v)
+                                               : (swap_uv ? u : v);
+  const GLenum active_filter =
+      lod_bias <= 0.0f ? mag_filter : min_filter;
+  const bool pcf = active_filter == GL_LINEAR ||
+                   active_filter == GL_LINEAR_MIPMAP_NEAREST ||
+                   active_filter == GL_LINEAR_MIPMAP_LINEAR;
+  if (pcf && texture->width > 0 && texture->height > 0) {
+    // ES 3.0 applies the depth comparison before filtering, so a linear
+    // shadow lookup averages four comparisons rather than comparing one
+    // bilinearly filtered depth value.
+    const float fx = su * static_cast<float>(texture->width) - 0.5f;
+    const float fy = sv * static_cast<float>(texture->height) - 0.5f;
+    const int x0 = static_cast<int>(std::floor(fx));
+    const int y0 = static_cast<int>(std::floor(fy));
+    const float ax = fx - static_cast<float>(x0);
+    const float ay = fy - static_cast<float>(y0);
+    auto probe = [&](int x, int y) {
+      float d[4];
+      SampleTexture2DArray(
+          *texture,
+          (static_cast<float>(x) + 0.5f) / static_cast<float>(texture->width),
+          (static_cast<float>(y) + 0.5f) / static_cast<float>(texture->height),
+          layer_arg, lod_bias, GL_NEAREST, GL_NEAREST, wrap_s, wrap_t, d,
+          sampler ? sampler->min_lod : texture->min_lod,
+          sampler ? sampler->max_lod : texture->max_lod);
+      return CompareDepth(ref, d[0], compare_func);
+    };
+    out[0] = probe(x0, y0) * (1.0f - ax) * (1.0f - ay) +
+             probe(x0 + 1, y0) * ax * (1.0f - ay) +
+             probe(x0, y0 + 1) * (1.0f - ax) * ay +
+             probe(x0 + 1, y0 + 1) * ax * ay;
+  } else {
+    float depth[4];
+    SampleTexture2DArray(*texture, su, sv, layer_arg, lod_bias, min_filter,
+                         mag_filter, wrap_s, wrap_t, depth,
+                         sampler ? sampler->min_lod : texture->min_lod,
+                         sampler ? sampler->max_lod : texture->max_lod);
+    out[0] = CompareDepth(ref, depth[0], compare_func);
+  }
+
+  if (getenv("ZGL_DEBUG_TEXARR")) {
+    static int cdbg = 0;
+    if (cdbg++ < 5)
+      fprintf(stderr, "[cmp] func=%x ref=%.4f depth=%.4f out=%.1f\n",
+              compare_func, ref, depth[0], out[0]);
+  }
+}
+
+void Pipeline::SampleCubeShadow(int unit,
+                                const float direction[3],
+                                float ref,
+                                float lod_bias,
+                                float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture =
+      context_->textures.Get(state().textures_cube[slot]);
+  if (!texture)
+    return;
+  GLenum min_filter = texture->min_filter;
+  GLenum mag_filter = texture->mag_filter;
+  GLenum compare_func = texture->compare_func;
+  const Sampler* sampler = context_->samplers.Get(state().samplers[slot]);
+  if (sampler) {
+    min_filter = sampler->min_filter;
+    mag_filter = sampler->mag_filter;
+    compare_func = sampler->compare_func;
+  }
+  float depth[4];
+  SampleTextureCube(*texture, direction, lod_bias, min_filter, mag_filter,
+                    depth, compare_func, ref,
+                    sampler ? sampler->min_lod : texture->min_lod,
+                    sampler ? sampler->max_lod : texture->max_lod);
+  out[0] = depth[0];
+}
+
+void Pipeline::Sample2DArray(int unit,
+                             float u,
+                             float v,
+                             float layer,
+                             float lod_bias,
+                             float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
+  const Texture* texture =
+      context_->textures.Get(state().textures_2d_array[slot]);
+  if (!texture)
+    return;
+  GLenum min_filter = texture->min_filter;
+  GLenum mag_filter = texture->mag_filter;
+  GLenum wrap_s = texture->wrap_s;
+  GLenum wrap_t = texture->wrap_t;
+  const Sampler* sampler = context_->samplers.Get(state().samplers[slot]);
+  if (sampler) {
+    min_filter = sampler->min_filter;
+    mag_filter = sampler->mag_filter;
+    wrap_s = sampler->wrap_s;
+    wrap_t = sampler->wrap_t;
+  }
+  SampleTexture2DArray(*texture, u, v, layer, lod_bias, min_filter,
+                       mag_filter, wrap_s, wrap_t, out,
+                       sampler ? sampler->min_lod : texture->min_lod,
+                       sampler ? sampler->max_lod : texture->max_lod);
+  MaskSampledAlpha(texture->internal_format, out);
+  ApplySamplerSwizzle(texture, sampler, out);
 }
 
 void Pipeline::SampleCube(int unit,
@@ -1400,7 +2402,8 @@ void Pipeline::SampleCube(int unit,
   out[2] = 0.0f;
   out[3] = 1.0f;
   const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
-  const Texture* texture = context_->textures.Get(state().textures[slot]);
+  const Texture* texture =
+      context_->textures.Get(state().textures_cube[slot]);
   if (!texture)
     return;
   GLenum min_filter = texture->min_filter;
@@ -1410,7 +2413,12 @@ void Pipeline::SampleCube(int unit,
     min_filter = sampler->min_filter;
     mag_filter = sampler->mag_filter;
   }
-  SampleTextureCube(*texture, direction, lod_bias, min_filter, mag_filter, out);
+  SampleTextureCube(*texture, direction, lod_bias, min_filter, mag_filter, out,
+                    0, 0.0f,
+                    sampler ? sampler->min_lod : texture->min_lod,
+                    sampler ? sampler->max_lod : texture->max_lod);
+  MaskSampledAlpha(texture->internal_format, out);
+  ApplySamplerSwizzle(texture, sampler, out);
 }
 
 void Pipeline::Sample3D(int unit,
@@ -1422,7 +2430,8 @@ void Pipeline::Sample3D(int unit,
   out[2] = 0.0f;
   out[3] = 1.0f;
   const int slot = ClampInt(unit, 0, kMaxCombinedTextureUnits - 1);
-  const Texture* texture = context_->textures.Get(state().textures[slot]);
+  const Texture* texture =
+      context_->textures.Get(state().textures_3d[slot]);
   if (!texture)
     return;
   GLenum min_filter = texture->min_filter;
@@ -1439,7 +2448,47 @@ void Pipeline::Sample3D(int unit,
     wrap_r = sampler->wrap_r;
   }
   SampleTexture3D(*texture, position, lod_bias, min_filter, mag_filter, wrap_s,
-                  wrap_t, wrap_r, out);
+                  wrap_t, wrap_r, out,
+                  sampler ? sampler->min_lod : texture->min_lod,
+                  sampler ? sampler->max_lod : texture->max_lod);
+  MaskSampledAlpha(texture->internal_format, out);
+  ApplySamplerSwizzle(texture, sampler, out);
+}
+
+}  // namespace
+
+namespace {
+
+bool ValidPrimitiveMode(GLenum mode) {
+  switch (mode) {
+    case GL_POINTS:
+    case GL_LINES:
+    case GL_LINE_STRIP:
+    case GL_LINE_LOOP:
+    case GL_TRIANGLES:
+    case GL_TRIANGLE_STRIP:
+    case GL_TRIANGLE_FAN:
+      return true;
+    default:
+      return false;
+  }
+}
+
+int MinimumVertices(GLenum mode) {
+  switch (mode) {
+    case GL_POINTS:
+      return 1;
+    case GL_LINES:
+    case GL_LINE_STRIP:
+    case GL_LINE_LOOP:
+      return 2;
+    case GL_TRIANGLES:
+    case GL_TRIANGLE_STRIP:
+    case GL_TRIANGLE_FAN:
+      return 3;
+    default:
+      return 1;
+  }
 }
 
 }  // namespace
@@ -1455,6 +2504,14 @@ void Draw(GLenum mode,
     return;
   if (count < 0 || instance_count < 0) {
     context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!ValidPrimitiveMode(mode)) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (!context->GetDrawTarget().valid()) {
+    context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
   if (count == 0 || instance_count == 0)

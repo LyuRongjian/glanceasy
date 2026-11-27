@@ -66,7 +66,7 @@ cmake --build build --target zgl_visual_tests
 | GLES 2.0 API | 完整：缓冲、顶点数组、纹理、帧缓冲、着色器、状态、绘制 |
 | GLES 3.0 API | 核心子集：VAO、instancing、primitive restart、query、fence、sampler object、blit、invalidate、uniform block、transform feedback、4x MSAA、ETC2/EAC 压缩纹理与浮点纹理采样 |
 | Uniform block | `layout(std140)` 块，支持标量、向量、矩阵、数组与结构体成员，支持可选实例名、每程序 binding point 和带范围的 `GL_UNIFORM_BUFFER` 绑定 |
-| Transform feedback | 命名的 feedback 对象、interleaved / separate varyings、`GL_TRANSFORM_FEEDBACK_BUFFER` 的 base / range 绑定、begin/end/pause/resume、primitive query 与 `glDrawTransformFeedback`。varying 仅支持浮点标量或向量；尚不支持 instanced feedback 绘制 |
+| Transform feedback | 命名的 feedback 对象、interleaved / separate varyings、`GL_TRANSFORM_FEEDBACK_BUFFER` 的 base / range 绑定、begin/end/pause/resume、primitive query 与 `glDrawTransformFeedback`。varying 支持浮点、整数、无符号整数标量/向量/矩阵以及整个数组或数组元素；尚不支持 instanced feedback 绘制 |
 | GLSL | 支持 ES 1.00 / 3.00 的解释执行与 SLJIT 分层编译；不支持的构造按 stage 回退，见 [docs/GLSL_SUBSET.md](docs/GLSL_SUBSET.md) |
 | 着色器数学 | 超越函数使用 minimax 近似；ARMv7 上 `sin` / `cos` 每次并行计算四个 lane（NEON）。整数、深度、模板与混合路径保持精确 |
 | 固定功能 SIMD | `dot` / `normalize`、颜色/深度/模板的 clear 填充、同尺寸 blit 的行拷贝在 ARMv7 上走四 lane NEON；部分颜色掩码仍走标量路径 |

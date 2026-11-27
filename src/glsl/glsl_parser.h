@@ -39,11 +39,16 @@ class Parser {
     bool is_inout = false;
     bool is_invariant = false;
     bool is_std140 = false;
+    bool is_packed = false;
+    bool has_layout = false;
+    bool flat = false;
+    int matrix_layout = -1;  // -1 = unspecified, 0 = column, 1 = row.
     int location = -1;
   };
 
   // Token helpers.
   void Advance();
+  const Token& Peek();
   bool CheckPunct(const char* text) const;
   bool CheckIdent(const char* text) const;
   bool AcceptPunct(const char* text);
@@ -53,21 +58,27 @@ class Parser {
   bool FailAt(int line, const std::string& message);
 
   // Declarations.
-  bool ParseQualifiers(Qualifiers* qualifiers);
+  bool ParseQualifiers(Qualifiers* qualifiers, bool parameter = false);
   bool ParseTypeSpec(Type* type);
   bool ParseArraySuffix(Type* type);
   bool ParseStructDefinition();
   bool LookupType(const std::string& name, Type* type) const;
   bool IsKnownTypeName(const std::string& name) const;
   bool ParseConstantInt(int* value);
+  bool ParseConstAtom(int* value);
+  bool EvalConstIntExpr(const ExprPtr& expr, int* value);
+  bool EvalConstNumber(const ExprPtr& expr, double* value);
+  bool IsConstantExpr(const ExprPtr& expr) const;
   bool ParseGlobalDeclaration();
   bool ParseUniformBlock(const Qualifiers& qualifiers, int line);
+  bool IsUniformBlockName(const std::string& name) const;
+  bool IsBlockInstanceName(const std::string& name) const;
   bool ParseFunction(const std::string& name,
                      const Type& return_type,
                      const Qualifiers& qualifiers,
                      int line);
   bool ParseParameters(Function* function);
-  StmtPtr ParseDeclarationStatement();
+  StmtPtr ParseDeclarationStatement(bool in_condition = false);
   bool AddGlobalVariable(const std::string& name,
                          const Type& type,
                          const Qualifiers& qualifiers,
@@ -76,6 +87,7 @@ class Parser {
   bool AddLocalVariable(const std::string& name,
                         const Type& type,
                         ExprPtr initializer,
+                        bool is_const,
                         int line,
                         StmtPtr* statement);
   bool RegisterFunction(Function&& function, bool prototype);
@@ -85,6 +97,7 @@ class Parser {
   StmtPtr ParseBlock();
   StmtPtr ParseIf();
   StmtPtr ParseFor();
+  StmtPtr ParseSwitch();
   StmtPtr ParseWhile();
   StmtPtr ParseDoWhile();
   StmtPtr ParseReturn();
@@ -114,6 +127,8 @@ class Parser {
   Stage stage_;
   Lexer lexer_;
   Token current_;
+  Token lookahead_;
+  bool has_lookahead_ = false;
   std::unique_ptr<ShaderAst> ast_;
   std::string error_;
 
@@ -123,7 +138,12 @@ class Parser {
   int slot_count_ = 0;
   int max_slot_count_ = 0;
   int loop_depth_ = 0;
+  int switch_depth_ = 0;
   bool in_function_ = false;
+  std::string current_function_;
+  Type current_return_type_;
+  std::vector<std::pair<std::string, std::string>> calls_;
+  int current_parameter_count_ = 0;
 
   // Name maps for the translation unit.
   std::vector<std::pair<std::string, int>> global_names_;
@@ -134,6 +154,10 @@ class Parser {
   std::vector<std::pair<std::string, int>> block_instances_;
   std::vector<std::string> block_names_;
   std::vector<std::pair<std::string, Type>> struct_types_;
+  std::vector<std::pair<std::string, int>> const_ints_;
+  std::vector<std::pair<std::string, const Expr*>> const_exprs_;
+  std::vector<std::pair<std::string, int>> array_sizes_;
+  std::vector<bool> slot_is_const_;
   int next_attribute_location_ = 0;
 };
 

@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace zgl {
 
@@ -140,23 +142,117 @@ uint32_t ReadPackedColor(const uint8_t* source, GLenum type) {
     return PackRgba(static_cast<uint8_t>(r), static_cast<uint8_t>(g),
                     static_cast<uint8_t>(b), static_cast<uint8_t>(a));
   }
+  if (type == GL_UNSIGNED_INT_2_10_10_10_REV) {
+    uint32_t value;
+    memcpy(&value, source, sizeof(value));
+    const uint32_t r = (value & 0x3ffu) * 255u / 1023u;
+    const uint32_t g = ((value >> 10) & 0x3ffu) * 255u / 1023u;
+    const uint32_t b = ((value >> 20) & 0x3ffu) * 255u / 1023u;
+    const uint32_t a = ((value >> 30) & 0x3u) * 255u / 3u;
+    return PackRgba(static_cast<uint8_t>(r), static_cast<uint8_t>(g),
+                    static_cast<uint8_t>(b), static_cast<uint8_t>(a));
+  }
   return 0;
 }
 
 bool IsPackedType(GLenum type) {
   return type == GL_UNSIGNED_SHORT_5_6_5 || type == GL_UNSIGNED_SHORT_4_4_4_4 ||
-         type == GL_UNSIGNED_SHORT_5_5_5_1;
+         type == GL_UNSIGNED_SHORT_5_5_5_1 ||
+         type == GL_UNSIGNED_INT_2_10_10_10_REV ||
+         type == GL_UNSIGNED_INT_10F_11F_11F_REV ||
+         type == GL_UNSIGNED_INT_5_9_9_9_REV;
 }
+
+int PackedPixelBytes(GLenum type) {
+  return (type == GL_UNSIGNED_INT_2_10_10_10_REV ||
+          type == GL_UNSIGNED_INT_10F_11F_11F_REV ||
+          type == GL_UNSIGNED_INT_5_9_9_9_REV)
+             ? 4
+             : 2;
+}
+
+float DecodeFloat11(uint32_t bits) {
+  const uint32_t exponent = (bits >> 6) & 0x1fu;
+  const uint32_t mantissa = bits & 0x3fu;
+  if (exponent == 0)
+    return static_cast<float>(mantissa) / 64.0f * std::pow(2.0f, -14.0f);
+  if (exponent == 31)
+    return mantissa ? NAN : INFINITY;
+  return (1.0f + static_cast<float>(mantissa) / 64.0f) *
+         std::pow(2.0f, static_cast<float>(exponent) - 15.0f);
+}
+
+float DecodeFloat10(uint32_t bits) {
+  const uint32_t exponent = (bits >> 5) & 0x1fu;
+  const uint32_t mantissa = bits & 0x1fu;
+  if (exponent == 0)
+    return static_cast<float>(mantissa) / 32.0f * std::pow(2.0f, -14.0f);
+  if (exponent == 31)
+    return mantissa ? NAN : INFINITY;
+  return (1.0f + static_cast<float>(mantissa) / 32.0f) *
+         std::pow(2.0f, static_cast<float>(exponent) - 15.0f);
+}
+
+bool DecodePackedFloat(const uint8_t* source, GLenum type, float rgba[4]) {
+  if (type == GL_UNSIGNED_INT_10F_11F_11F_REV) {
+    uint32_t value;
+    memcpy(&value, source, sizeof(value));
+    rgba[0] = DecodeFloat11(value & 0x7ffu);
+    rgba[1] = DecodeFloat11((value >> 11) & 0x7ffu);
+    rgba[2] = DecodeFloat10((value >> 22) & 0x3ffu);
+    rgba[3] = 1.0f;
+    return true;
+  }
+  if (type == GL_UNSIGNED_INT_5_9_9_9_REV) {
+    uint32_t value;
+    memcpy(&value, source, sizeof(value));
+    const uint32_t exponent = (value >> 27) & 0x1fu;
+    const float scale = std::pow(2.0f, static_cast<float>(exponent) - 24.0f);
+    rgba[0] = static_cast<float>(value & 0x1ffu) * scale;
+    rgba[1] = static_cast<float>((value >> 9) & 0x1ffu) * scale;
+    rgba[2] = static_cast<float>((value >> 18) & 0x1ffu) * scale;
+    rgba[3] = 1.0f;
+    return true;
+  }
+  if (type == GL_UNSIGNED_INT_2_10_10_10_REV) {
+    uint32_t value;
+    memcpy(&value, source, sizeof(value));
+    rgba[0] = static_cast<float>(value & 0x3ffu) / 1023.0f;
+    rgba[1] = static_cast<float>((value >> 10) & 0x3ffu) / 1023.0f;
+    rgba[2] = static_cast<float>((value >> 20) & 0x3ffu) / 1023.0f;
+    rgba[3] = static_cast<float>((value >> 30) & 0x3u) / 3.0f;
+    return true;
+  }
+  return false;
+}
+
 
 uint16_t FloatToDepth16(float value) {
   return static_cast<uint16_t>(Clamp01(value) * 65535.0f + 0.5f);
 }
 
 bool ImageHasTexels(const TextureImage& image) {
-  return !image.rgba.empty() || !image.float_rgba.empty();
+  return !image.rgba.empty() || !image.float_rgba.empty() ||
+         !image.integer_rgba.empty() || !image.depth16.empty();
 }
 
 void FetchTexel(const TextureImage& image, size_t index, float rgba[4]) {
+  if (!image.depth16.empty()) {
+    const float depth = static_cast<float>(image.depth16[index]) / 65535.0f;
+    rgba[0] = depth;
+    rgba[1] = depth;
+    rgba[2] = depth;
+    rgba[3] = 1.0f;
+    return;
+  }
+  if (!image.integer_rgba.empty()) {
+    const uint32_t* source = image.integer_rgba.data() + index * 4;
+    for (int i = 0; i < 4; ++i)
+      rgba[i] = image.integer_signed
+                    ? static_cast<float>(static_cast<int32_t>(source[i]))
+                    : static_cast<float>(source[i]);
+    return;
+  }
   if (!image.float_rgba.empty()) {
     const float* source = image.float_rgba.data() + index * 4;
     rgba[0] = source[0];
@@ -166,6 +262,29 @@ void FetchTexel(const TextureImage& image, size_t index, float rgba[4]) {
     return;
   }
   UnpackRgba(image.rgba[index], rgba);
+  if (getenv("ZGL_DEBUG_TEXFETCH")) {
+    static int dbg = 0;
+    if (dbg++ < 3) {
+      uint8_t px[4];
+      px[0] = static_cast<uint8_t>(rgba[0] * 255.0f + 0.5f);
+      px[1] = static_cast<uint8_t>(rgba[1] * 255.0f + 0.5f);
+      px[2] = static_cast<uint8_t>(rgba[2] * 255.0f + 0.5f);
+      px[3] = static_cast<uint8_t>(rgba[3] * 255.0f + 0.5f);
+      fprintf(stderr, "[texfetch] %u %u %u %u\n", px[0], px[1], px[2], px[3]);
+    }
+  }
+  if (image.srgb) {
+    if (getenv("ZGL_DEBUG_SRGB")) {
+      static int dbg = 0;
+      if (dbg++ < 3)
+        fprintf(stderr, "[fetch] raw=%u %.4f %.4f %.4f\n",
+                static_cast<uint8_t>(rgba[0] * 255.0f + 0.5f), rgba[0], rgba[1],
+                rgba[2]);
+    }
+    rgba[0] = SrgbToLinear(static_cast<uint8_t>(rgba[0] * 255.0f + 0.5f));
+    rgba[1] = SrgbToLinear(static_cast<uint8_t>(rgba[1] * 255.0f + 0.5f));
+    rgba[2] = SrgbToLinear(static_cast<uint8_t>(rgba[2] * 255.0f + 0.5f));
+  }
 }
 
 }  // namespace
@@ -179,6 +298,19 @@ GLenum BaseFilter(GLenum filter) {
     default:
       return GL_LINEAR;
   }
+}
+
+int WrapTexel(int value, int size, GLenum mode) {
+  if (size <= 0)
+    return 0;
+  if (mode == GL_CLAMP_TO_EDGE)
+    return ClampInt(value, 0, size - 1);
+  if (mode == GL_MIRRORED_REPEAT) {
+    const int period = size * 2;
+    int wrapped = ((value % period) + period) % period;
+    return wrapped < size ? wrapped : period - 1 - wrapped;
+  }
+  return ((value % size) + size) % size;
 }
 
 float WrapCoordinate(float coordinate, GLenum mode) {
@@ -199,6 +331,101 @@ float WrapCoordinate(float coordinate, GLenum mode) {
   }
 }
 
+namespace {
+
+// Samples a single mip level of a 2D texture image.  |base| is the texel
+// offset of the selected array slice for array textures.
+void SampleImage2DLevel(const TextureImage& image,
+                        float s,
+                        float t,
+                        GLenum filter,
+                        GLenum wrap_s,
+                        GLenum wrap_t,
+                        size_t base,
+                        float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  if (image.width <= 0 || image.height <= 0 || !ImageHasTexels(image))
+    return;
+  if (filter == GL_NEAREST) {
+    const int x =
+        std::min(image.width - 1, static_cast<int>(s * image.width));
+    const int y =
+        std::min(image.height - 1, static_cast<int>(t * image.height));
+    FetchTexel(image, base + static_cast<size_t>(y) * image.width + x, out);
+    return;
+  }
+  const float px = s * image.width - 0.5f;
+  const float py = t * image.height - 0.5f;
+  const int x0 = static_cast<int>(std::floor(px));
+  const int y0 = static_cast<int>(std::floor(py));
+  const float fx = px - static_cast<float>(x0);
+  const float fy = py - static_cast<float>(y0);
+  float c00[4];
+  float c10[4];
+  float c01[4];
+  float c11[4];
+  const auto fetch = [&](int x, int y, float rgba[4]) {
+    const int cx = WrapTexel(x, image.width, wrap_s);
+    const int cy = WrapTexel(y, image.height, wrap_t);
+    FetchTexel(image, base + static_cast<size_t>(cy) * image.width + cx, rgba);
+  };
+  fetch(x0, y0, c00);
+  fetch(x0 + 1, y0, c10);
+  fetch(x0, y0 + 1, c01);
+  fetch(x0 + 1, y0 + 1, c11);
+  for (int i = 0; i < 4; ++i) {
+    const float top = c00[i] + (c10[i] - c00[i]) * fx;
+    const float bottom = c01[i] + (c11[i] - c01[i]) * fx;
+    out[i] = top + (bottom - top) * fy;
+  }
+}
+
+}  // namespace
+
+void FetchTexelImage(const TextureImage& image, size_t index, float rgba[4]) {
+  FetchTexel(image, index, rgba);
+}
+
+// First level visible through GL_TEXTURE_BASE_LEVEL.
+int BaseLevel(const Texture& texture) {
+  return texture.base_level > 0 ? texture.base_level : 0;
+}
+
+// Applies the texture object's RGBA swizzle parameters to a sampled color.
+void ApplySwizzle(const Texture& texture, float rgba[4]) {
+  const float in[4] = {rgba[0], rgba[1], rgba[2], rgba[3]};
+  GLenum sel[4] = {texture.swizzle_r, texture.swizzle_g, texture.swizzle_b,
+                   texture.swizzle_a};
+  for (int i = 0; i < 4; ++i) {
+    switch (sel[i]) {
+      case GL_RED:
+        rgba[i] = in[0];
+        break;
+      case GL_GREEN:
+        rgba[i] = in[1];
+        break;
+      case GL_BLUE:
+        rgba[i] = in[2];
+        break;
+      case GL_ALPHA:
+        rgba[i] = in[3];
+        break;
+      case GL_ZERO:
+        rgba[i] = 0.0f;
+        break;
+      case GL_ONE:
+        rgba[i] = 1.0f;
+        break;
+      default:
+        rgba[i] = in[i];
+        break;
+    }
+  }
+}
+
 void SampleTexture2D(const Texture& texture,
                      float u,
                      float v,
@@ -207,197 +434,102 @@ void SampleTexture2D(const Texture& texture,
                      GLenum mag_filter,
                      GLenum wrap_s,
                      GLenum wrap_t,
-                     float out[4]) {
+                     float out[4],
+                     float min_lod,
+                     float max_lod) {
   out[0] = 0.0f;
   out[1] = 0.0f;
   out[2] = 0.0f;
   out[3] = 1.0f;
+  if (getenv("ZGL_DEBUG_TEX")) {
+    static int sdbg = 0;
+    if (sdbg < 8) {
+      const TextureImage* im0 = texture.image(0, 0);
+      fprintf(stderr, "[sample] complete=%d levels=%d base=%d img0=%dx%d lod=%.2f min=%x\n",
+              texture.IsComplete() ? 1 : 0, texture.levels, texture.base_level,
+              im0 ? im0->width : -1, im0 ? im0->height : -1, lod,
+              texture.min_filter);
+      ++sdbg;
+    }
+  }
   if (!texture.IsComplete())
     return;
-  int level = 0;
-  if (lod > 0.0f) {
-    const float max_level = static_cast<float>(texture.levels - 1);
-    level = std::min(static_cast<int>(std::floor(lod)), texture.levels - 1);
-    if (max_level < 0.0f)
-      level = 0;
+  if (getenv("ZGL_DEBUG_TEX")) {
+    const TextureImage* im = texture.image(0, 0);
+    if (im && im->width != 128) {
+      static int idbg = 0;
+      if (idbg < 4) {
+        const uint32_t* ip = im->integer_rgba.empty() ? nullptr : im->integer_rgba.data();
+        fprintf(stderr, "[simg] %dx%d int=%d signed=%d float=%d rgba=%d i0=%u,%u,%u,%u\n",
+                im->width, im->height, ip ? 1 : 0, im->integer_signed ? 1 : 0,
+                im->float_rgba.empty() ? 0 : 1, im->rgba.empty() ? 0 : 1,
+                ip ? ip[0] : 0, ip ? ip[1] : 0, ip ? ip[2] : 0, ip ? ip[3] : 0);
+        ++idbg;
+      }
+    }
   }
-  const TextureImage* image = texture.image(level, 0);
-  if (!image || image->width <= 0 || image->height <= 0 ||
-      !ImageHasTexels(*image))
+  const float t = WrapCoordinate(texture.render_target_flip_y ? 1.0f - v : v,
+                                 wrap_t);
+  if (t < 0.0f)
     return;
-  const GLenum filter = lod > 0.0f ? BaseFilter(min_filter) : mag_filter;
   const float s = WrapCoordinate(u, wrap_s);
-  const float t = WrapCoordinate(v, wrap_t);
-  if (s < 0.0f || t < 0.0f)
+  if (s < 0.0f)
     return;
-  if (filter == GL_NEAREST) {
-    const int x =
-        std::min(image->width - 1, static_cast<int>(s * image->width));
-    const int y =
-        std::min(image->height - 1, static_cast<int>(t * image->height));
-    FetchTexel(*image, static_cast<size_t>(y) * image->width + x, out);
-    return;
+  const int base_level = BaseLevel(texture);
+  const float max_level =
+      static_cast<float>(std::max(
+          0, std::min(texture.max_level - base_level,
+                      texture.levels - 1 - base_level)));
+  const float clamped_lod =
+      std::clamp(std::clamp(lod, min_lod <= max_lod ? min_lod : texture.min_lod,
+                    min_lod <= max_lod ? max_lod : texture.max_lod), 0.0f,
+                 max_level);
+  const bool mipmap_linear =
+      min_filter == GL_LINEAR_MIPMAP_LINEAR ||
+      min_filter == GL_NEAREST_MIPMAP_LINEAR;
+  int level0 = mipmap_linear
+                   ? static_cast<int>(std::floor(clamped_lod))
+                   : std::clamp(static_cast<int>(
+                                    std::floor(clamped_lod + 0.5f)),
+                                0, static_cast<int>(max_level));
+  const bool is_mipmap_filter =
+      min_filter == GL_NEAREST_MIPMAP_NEAREST ||
+      min_filter == GL_LINEAR_MIPMAP_NEAREST ||
+      min_filter == GL_NEAREST_MIPMAP_LINEAR ||
+      min_filter == GL_LINEAR_MIPMAP_LINEAR;
+  if (!is_mipmap_filter) {
+    level0 = 0;
   }
-  const float px = s * image->width - 0.5f;
-  const float py = t * image->height - 0.5f;
-  const int x0 = static_cast<int>(std::floor(px));
-  const int y0 = static_cast<int>(std::floor(py));
-  const float fx = px - static_cast<float>(x0);
-  const float fy = py - static_cast<float>(y0);
-  float c00[4];
-  float c10[4];
-  float c01[4];
-  float c11[4];
-  const auto fetch = [&](int x, int y, float rgba[4]) {
-    const int cx = ClampInt(x, 0, image->width - 1);
-    const int cy = ClampInt(y, 0, image->height - 1);
-    FetchTexel(*image, static_cast<size_t>(cy) * image->width + cx, rgba);
-  };
-  fetch(x0, y0, c00);
-  fetch(x0 + 1, y0, c10);
-  fetch(x0, y0 + 1, c01);
-  fetch(x0 + 1, y0 + 1, c11);
-  for (int i = 0; i < 4; ++i) {
-    const float top = c00[i] + (c10[i] - c00[i]) * fx;
-    const float bottom = c01[i] + (c11[i] - c01[i]) * fx;
-    out[i] = top + (bottom - top) * fy;
-  }
-}
-
-void SampleTextureCube(const Texture& texture,
-                       const float direction[3],
-                       float lod,
-                       GLenum min_filter,
-                       GLenum mag_filter,
-                       float out[4]) {
-  out[0] = 0.0f;
-  out[1] = 0.0f;
-  out[2] = 0.0f;
-  out[3] = 1.0f;
-  if (!texture.IsComplete())
-    return;
-  const float ax = std::fabs(direction[0]);
-  const float ay = std::fabs(direction[1]);
-  const float az = std::fabs(direction[2]);
-  int face = 0;
-  float u = 0.0f;
-  float v = 0.0f;
-  if (ax >= ay && ax >= az) {
-    if (direction[0] >= 0.0f) {
-      face = 0;  // GL_TEXTURE_CUBE_MAP_POSITIVE_X
-      u = -direction[2] / ax;
-      v = -direction[1] / ax;
-    } else {
-      face = 1;  // GL_TEXTURE_CUBE_MAP_NEGATIVE_X
-      u = direction[2] / ax;
-      v = -direction[1] / ax;
-    }
-  } else if (ay >= az) {
-    if (direction[1] >= 0.0f) {
-      face = 2;  // GL_TEXTURE_CUBE_MAP_POSITIVE_Y
-      u = direction[0] / ay;
-      v = direction[2] / ay;
-    } else {
-      face = 3;  // GL_TEXTURE_CUBE_MAP_NEGATIVE_Y
-      u = direction[0] / ay;
-      v = -direction[2] / ay;
-    }
-  } else {
-    if (direction[2] >= 0.0f) {
-      face = 4;  // GL_TEXTURE_CUBE_MAP_POSITIVE_Z
-      u = direction[0] / az;
-      v = -direction[1] / az;
-    } else {
-      face = 5;  // GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
-      u = -direction[0] / az;
-      v = -direction[1] / az;
+  const float level_frac =
+      mipmap_linear ? clamped_lod - static_cast<float>(level0) : 0.0f;
+  const bool magnified = clamped_lod <= 0.0f;
+  const GLenum filter =
+      magnified ? mag_filter : BaseFilter(min_filter);
+  if (getenv("ZGL_DEBUG_FILT") && clamped_lod >= 0.0f) {
+    static int fdbg = 0;
+    if (fdbg < 8) {
+      fprintf(stderr, "[filt] lod=%.3f clamped=%.3f min=%x mag=%x filter=%x s=%.5f t=%.5f\n",
+              lod, clamped_lod, min_filter, mag_filter, filter, s, t);
+      ++fdbg;
     }
   }
-  int level = 0;
-  if (lod > 0.0f)
-    level = std::min(static_cast<int>(std::floor(lod)), texture.levels - 1);
-  const TextureImage* image = texture.image(level, face);
-  if (!image || image->width <= 0 || !ImageHasTexels(*image))
-    return;
-  const GLenum filter = lod > 0.0f ? BaseFilter(min_filter) : mag_filter;
-  const float s = Clamp01((u * 0.5f) + 0.5f);
-  const float t = Clamp01((v * 0.5f) + 0.5f);
-  if (filter == GL_NEAREST) {
-    const int x =
-        std::min(image->width - 1, static_cast<int>(s * image->width));
-    const int y =
-        std::min(image->height - 1, static_cast<int>(t * image->height));
-    FetchTexel(*image, static_cast<size_t>(y) * image->width + x, out);
-    return;
-  }
-  const float px = s * image->width - 0.5f;
-  const float py = t * image->height - 0.5f;
-  const int x0 = static_cast<int>(std::floor(px));
-  const int y0 = static_cast<int>(std::floor(py));
-  const float fx = px - static_cast<float>(x0);
-  const float fy = py - static_cast<float>(y0);
-  float c00[4];
-  float c10[4];
-  float c01[4];
-  float c11[4];
-  const auto fetch = [&](int x, int y, float rgba[4]) {
-    const int cx = ClampInt(x, 0, image->width - 1);
-    const int cy = ClampInt(y, 0, image->height - 1);
-    FetchTexel(*image, static_cast<size_t>(cy) * image->width + cx, rgba);
-  };
-  fetch(x0, y0, c00);
-  fetch(x0 + 1, y0, c10);
-  fetch(x0, y0 + 1, c01);
-  fetch(x0 + 1, y0 + 1, c11);
-  for (int i = 0; i < 4; ++i) {
-    const float top = c00[i] + (c10[i] - c00[i]) * fx;
-    const float bottom = c01[i] + (c11[i] - c01[i]) * fx;
-    out[i] = top + (bottom - top) * fy;
-  }
-}
-
-void SampleTexture3D(const Texture& texture,
-                     const float position[3],
-                     float lod,
-                     GLenum min_filter,
-                     GLenum mag_filter,
-                     GLenum wrap_s,
-                     GLenum wrap_t,
-                     GLenum wrap_r,
-                     float out[4]) {
-  out[0] = 0.0f;
-  out[1] = 0.0f;
-  out[2] = 0.0f;
-  out[3] = 1.0f;
-  if (!texture.IsComplete())
-    return;
-  int level = 0;
-  if (lod > 0.0f)
-    level = std::min(static_cast<int>(std::floor(lod)), texture.levels - 1);
-  const TextureImage* image = texture.image(level, 0);
-  if (!image || image->width <= 0 || !ImageHasTexels(*image))
-    return;
-  const int depth = std::max(1, image->depth);
-  const float s = WrapCoordinate(position[0], wrap_s);
-  const float t = WrapCoordinate(position[1], wrap_t);
-  const float r = WrapCoordinate(position[2], wrap_r);
-  if (s < 0.0f || t < 0.0f || r < 0.0f)
-    return;
-  const GLenum filter = lod > 0.0f ? BaseFilter(min_filter) : mag_filter;
-  const size_t slice = static_cast<size_t>(image->width) * image->height;
-  const auto sample_slice = [&](int z, float rgba[4]) {
-    rgba[0] = 0.0f;
-    rgba[1] = 0.0f;
-    rgba[2] = 0.0f;
-    rgba[3] = 1.0f;
-    if (filter == GL_NEAREST) {
+  const auto sample_level = [&](int level, GLenum level_filter,
+                                float result[4]) {
+    result[0] = 0.0f;
+    result[1] = 0.0f;
+    result[2] = 0.0f;
+    result[3] = 1.0f;
+    const TextureImage* image =
+        texture.image(level + BaseLevel(texture), 0);
+    if (!image || image->width <= 0 || image->height <= 0 ||
+        !ImageHasTexels(*image))
+      return;
+    if (level_filter == GL_NEAREST) {
       const int x =
           std::min(image->width - 1, static_cast<int>(s * image->width));
       const int y =
           std::min(image->height - 1, static_cast<int>(t * image->height));
-      FetchTexel(*image,
-                 z * slice + static_cast<size_t>(y) * image->width + x,
-                 rgba);
+      FetchTexel(*image, static_cast<size_t>(y) * image->width + x, result);
       return;
     }
     const float px = s * image->width - 0.5f;
@@ -410,37 +542,785 @@ void SampleTexture3D(const Texture& texture,
     float c10[4];
     float c01[4];
     float c11[4];
-    const auto fetch = [&](int x, int y, float out_rgba[4]) {
-      const int cx = ClampInt(x, 0, image->width - 1);
-      const int cy = ClampInt(y, 0, image->height - 1);
-      FetchTexel(*image,
-                 z * slice + static_cast<size_t>(cy) * image->width + cx,
-                 out_rgba);
+    const auto fetch = [&](int x, int y, float rgba[4]) {
+      const int cx = WrapTexel(x, image->width, wrap_s);
+      const int cy = WrapTexel(y, image->height, wrap_t);
+      FetchTexel(*image, static_cast<size_t>(cy) * image->width + cx, rgba);
     };
     fetch(x0, y0, c00);
     fetch(x0 + 1, y0, c10);
     fetch(x0, y0 + 1, c01);
     fetch(x0 + 1, y0 + 1, c11);
+    if (getenv("ZGL_DEBUG_TEX")) {
+      static int tdbg = 0;
+      if (tdbg < 4) {
+        fprintf(stderr, "[tap] s=%.6f t=%.6f px=%.3f py=%.3f xy=%d,%d f=%.4f,%.4f c00=%.4f c10=%.4f c01=%.4f c11=%.4f\n",
+                s, t, px, py, x0, y0, fx, fy, c00[0], c10[0], c01[0], c11[0]);
+        ++tdbg;
+      }
+    }
     for (int i = 0; i < 4; ++i) {
-      const float row0 = c00[i] + (c10[i] - c00[i]) * fx;
-      const float row1 = c01[i] + (c11[i] - c01[i]) * fx;
-      rgba[i] = row0 + (row1 - row0) * fy;
+      const float top = c00[i] + (c10[i] - c00[i]) * fx;
+      const float bottom = c01[i] + (c11[i] - c01[i]) * fx;
+      result[i] = top + (bottom - top) * fy;
     }
   };
-  if (depth == 1) {
-    sample_slice(0, out);
-    return;
+  sample_level(level0, filter, out);
+  if (mipmap_linear && level_frac > 0.0f &&
+      level0 + 1 < texture.levels) {
+    float next[4];
+    sample_level(level0 + 1, BaseFilter(min_filter), next);
+    for (int i = 0; i < 4; ++i)
+      out[i] += (next[i] - out[i]) * level_frac;
   }
-  const float pz = r * depth - 0.5f;
-  const int z0 = ClampInt(static_cast<int>(std::floor(pz)), 0, depth - 1);
-  const int z1 = ClampInt(z0 + 1, 0, depth - 1);
-  const float fz = Clamp01(pz - static_cast<float>(z0));
-  float a[4];
-  float b[4];
-  sample_slice(z0, a);
-  sample_slice(z1, b);
-  for (int i = 0; i < 4; ++i)
-    out[i] = a[i] + (b[i] - a[i]) * fz;
+}
+
+void SampleTexture2DArray(const Texture& texture,
+                          float u,
+                          float v,
+                          float layer,
+                          float lod,
+                          GLenum min_filter,
+                          GLenum mag_filter,
+                          GLenum wrap_s,
+                          GLenum wrap_t,
+                          float out[4],
+                          float min_lod,
+                          float max_lod) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  if (!texture.IsComplete())
+    return;
+  const int base_level = BaseLevel(texture);
+  const float max_level =
+      static_cast<float>(std::max(
+          0, std::min(texture.max_level - base_level,
+                      texture.levels - 1 - base_level)));
+  const float clamped_lod =
+      std::clamp(std::clamp(lod, min_lod <= max_lod ? min_lod : texture.min_lod,
+                    min_lod <= max_lod ? max_lod : texture.max_lod), 0.0f,
+                 max_level);
+  const bool mipmap_linear =
+      min_filter == GL_LINEAR_MIPMAP_LINEAR ||
+      min_filter == GL_NEAREST_MIPMAP_LINEAR;
+  int level0 = mipmap_linear
+                   ? static_cast<int>(std::floor(clamped_lod))
+                   : std::clamp(static_cast<int>(
+                                    std::floor(clamped_lod + 0.5f)),
+                                0, static_cast<int>(max_level));
+  const bool is_mipmap_filter =
+      min_filter == GL_NEAREST_MIPMAP_NEAREST ||
+      min_filter == GL_LINEAR_MIPMAP_NEAREST ||
+      min_filter == GL_NEAREST_MIPMAP_LINEAR ||
+      min_filter == GL_LINEAR_MIPMAP_LINEAR;
+  if (!is_mipmap_filter) {
+    level0 = 0;
+  }
+  const float level_frac =
+      mipmap_linear ? clamped_lod - static_cast<float>(level0) : 0.0f;
+  const bool magnified = clamped_lod <= 0.0f;
+  const GLenum filter =
+      magnified ? mag_filter : BaseFilter(min_filter);
+  const float s = WrapCoordinate(u, wrap_s);
+  const float t = WrapCoordinate(texture.render_target_flip_y ? 1.0f - v : v,
+                                 wrap_t);
+  if (s < 0.0f || t < 0.0f)
+    return;
+  const auto sample_level = [&](int level, GLenum level_filter,
+                                float result[4]) {
+    result[0] = 0.0f;
+    result[1] = 0.0f;
+    result[2] = 0.0f;
+    result[3] = 1.0f;
+    const TextureImage* image =
+        texture.image(level + BaseLevel(texture), 0);
+    if (!image || image->width <= 0 || image->height <= 0 ||
+        image->depth <= 0 || !ImageHasTexels(*image))
+      return;
+    const int slice = std::max(
+        0, std::min(image->depth - 1,
+                    static_cast<int>(std::floor(layer + 0.5f))));
+    const size_t base =
+        static_cast<size_t>(slice) * image->width * image->height;
+    if (getenv("ZGL_DEBUG_TEXARR")) {
+      static int dbg = 0;
+      if (dbg++ < 6)
+        fprintf(stderr,
+                "[arr] texdepth=%d levels=%d level=%d %dx%d depth=%d rgba=%zu "
+                "float=%zu depth16=%zu slice=%.1f s=%.3f t=%.3f base=%zu\n",
+                texture.depth, texture.levels, level, image->width,
+                image->height, image->depth, image->rgba.size(),
+                image->float_rgba.size(), image->depth16.size(), layer, s, t,
+                base);
+    }
+    SampleImage2DLevel(*image, s, t, level_filter, wrap_s, wrap_t, base,
+                       result);
+    if (getenv("ZGL_DEBUG_TEXARR")) {
+      static int dval = 0;
+      if (dval++ < 6) {
+        size_t nz = 0;
+        for (size_t k = base; k < base + image->width * image->height; ++k)
+          if (image->depth16[k] != 0)
+            ++nz;
+        fprintf(stderr,
+                "[arrval] slice=%d base=%zu depth=%.4f nonzero=%zu/%d "
+                "d16=%u,%u,%u\n",
+                slice, base, result[0], nz, image->width * image->height,
+                image->depth16.empty() ? 0u : image->depth16[base],
+                image->depth16.size() > base + 1 ? image->depth16[base + 1] : 0u,
+                image->depth16.size() > base + image->width
+                    ? image->depth16[base + image->width]
+                    : 0u);
+      }
+      if (getenv("ZGL_DEBUG_ARR_LAYERS")) {
+        static int ldbg = 0;
+        if (ldbg++ < 1) {
+          for (int s2 = 0; s2 < image->depth; ++s2) {
+            const size_t b2 =
+                static_cast<size_t>(s2) * image->width * image->height;
+            fprintf(stderr, "[layer] %d d16=%u,%u,%u nonzero=%zu\n", s2,
+                    image->depth16.size() > b2 ? image->depth16[b2] : 0u,
+                    image->depth16.size() > b2 + 1 ? image->depth16[b2 + 1] : 0u,
+                    image->depth16.size() > b2 + image->width
+                        ? image->depth16[b2 + image->width]
+                        : 0u,
+                    [&] {
+                      size_t n = 0;
+                      for (size_t k = b2; k < b2 + image->width * image->height &&
+                                           k < image->depth16.size();
+                           ++k)
+                        if (image->depth16[k] != 0) ++n;
+                      return n;
+                    }());
+          }
+        }
+      }
+    }
+  };
+  sample_level(level0, filter, out);
+  if (mipmap_linear && level_frac > 0.0f &&
+      level0 + 1 < texture.levels) {
+    float next[4];
+    sample_level(level0 + 1, BaseFilter(min_filter), next);
+    for (int i = 0; i < 4; ++i)
+      out[i] += (next[i] - out[i]) * level_frac;
+  }
+
+}
+
+static float ShadowCompareValue(float reference, float depth, GLenum func) {
+  bool pass = false;
+  switch (func) {
+    case GL_NEVER:
+      break;
+    case GL_LESS:
+      pass = reference < depth;
+      break;
+    case GL_EQUAL:
+      pass = reference == depth;
+      break;
+    case GL_LEQUAL:
+      pass = reference <= depth;
+      break;
+    case GL_GREATER:
+      pass = reference > depth;
+      break;
+    case GL_NOTEQUAL:
+      pass = reference != depth;
+      break;
+    case GL_GEQUAL:
+      pass = reference >= depth;
+      break;
+    case GL_ALWAYS:
+    default:
+      pass = true;
+      break;
+  }
+  return pass ? 1.0f : 0.0f;
+}
+
+void SampleTextureCube(const Texture& texture,
+                       const float direction[3],
+                       float lod,
+                       GLenum min_filter,
+                       GLenum mag_filter,
+                       float out[4],
+                       GLenum compare_func,
+                       float ref,
+                       float min_lod,
+                       float max_lod) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  if (!texture.IsComplete())
+    return;
+  const float ax = std::fabs(direction[0]);
+  const float ay = std::fabs(direction[1]);
+  const float az = std::fabs(direction[2]);
+  int face = 0;
+  float u = 0.0f;
+  float v = 0.0f;
+  if (ay < ax && az < ax) {
+    if (direction[0] >= 0.0f) {
+      face = 0;  // GL_TEXTURE_CUBE_MAP_POSITIVE_X
+      u = -direction[2] / ax;
+      v = -direction[1] / ax;
+    } else {
+      face = 1;  // GL_TEXTURE_CUBE_MAP_NEGATIVE_X
+      u = direction[2] / ax;
+      v = -direction[1] / ax;
+    }
+  } else if (ax < ay && az < ay) {
+    if (direction[1] >= 0.0f) {
+      face = 2;  // GL_TEXTURE_CUBE_MAP_POSITIVE_Y
+      u = direction[0] / ay;
+      v = direction[2] / ay;
+    } else {
+      face = 3;  // GL_TEXTURE_CUBE_MAP_NEGATIVE_Y
+      u = direction[0] / ay;
+      v = -direction[2] / ay;
+    }
+  } else if (ax < az && ay < az) {
+    if (direction[2] >= 0.0f) {
+      face = 4;  // GL_TEXTURE_CUBE_MAP_POSITIVE_Z
+      u = direction[0] / az;
+      v = -direction[1] / az;
+    } else {
+      face = 5;  // GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
+      u = -direction[0] / az;
+      v = -direction[1] / az;
+    }
+  } else if (ax == ay) {
+    if (ax < az) {
+      face = direction[2] >= 0.0f ? 4 : 5;
+      u = (face == 4 ? 1.0f : -1.0f) * direction[0] / az;
+      v = -direction[1] / az;
+    } else {
+      face = direction[0] >= 0.0f ? 0 : 1;
+      u = (face == 0 ? -1.0f : 1.0f) * direction[2] / ax;
+      v = -direction[1] / ax;
+    }
+  } else if (ax == az) {
+    if (az < ay) {
+      face = direction[1] >= 0.0f ? 2 : 3;
+      u = direction[0] / ay;
+      v = (face == 2 ? 1.0f : -1.0f) * direction[2] / ay;
+    } else {
+      face = direction[2] >= 0.0f ? 4 : 5;
+      u = (face == 4 ? 1.0f : -1.0f) * direction[0] / az;
+      v = -direction[1] / az;
+    }
+  } else if (ay == az) {
+    if (ay < ax) {
+      face = direction[0] >= 0.0f ? 0 : 1;
+      u = (face == 0 ? -1.0f : 1.0f) * direction[2] / ax;
+      v = -direction[1] / ax;
+    } else {
+      face = direction[1] >= 0.0f ? 2 : 3;
+      u = direction[0] / ay;
+      v = (face == 2 ? 1.0f : -1.0f) * direction[2] / ay;
+    }
+  }
+  const int base_level = BaseLevel(texture);
+  const float max_level =
+      static_cast<float>(std::max(
+          0, std::min(texture.max_level - base_level,
+                      texture.levels - 1 - base_level)));
+  const float clamped_lod =
+      std::clamp(std::clamp(lod, min_lod <= max_lod ? min_lod : texture.min_lod,
+                    min_lod <= max_lod ? max_lod : texture.max_lod), 0.0f,
+                 max_level);
+  const bool mipmap_linear =
+      min_filter == GL_LINEAR_MIPMAP_LINEAR ||
+      min_filter == GL_NEAREST_MIPMAP_LINEAR;
+  int level0 = mipmap_linear
+                   ? static_cast<int>(std::floor(clamped_lod))
+                   : std::clamp(static_cast<int>(
+                                    std::ceil(clamped_lod + 0.5f)) - 1,
+                                0, static_cast<int>(max_level));
+  const bool is_mipmap_filter =
+      min_filter == GL_NEAREST_MIPMAP_NEAREST ||
+      min_filter == GL_LINEAR_MIPMAP_NEAREST ||
+      min_filter == GL_NEAREST_MIPMAP_LINEAR ||
+      min_filter == GL_LINEAR_MIPMAP_LINEAR;
+  if (!is_mipmap_filter) {
+    level0 = 0;
+  }
+  const float level_frac =
+      mipmap_linear ? clamped_lod - static_cast<float>(level0) : 0.0f;
+  const TextureImage* image =
+      texture.image(level0 + BaseLevel(texture), face);
+  if (!image || image->width <= 0 || !ImageHasTexels(*image))
+    return;
+  const float s = Clamp01((u * 0.5f) + 0.5f);
+  float t = Clamp01((v * 0.5f) + 0.5f);
+  if (texture.render_target_flip_y)
+    t = 1.0f - t;
+  const bool magnified = clamped_lod <= 0.0f;
+  const GLenum filter =
+      magnified ? mag_filter : BaseFilter(min_filter);
+  if (compare_func != 0 && getenv("ZGL_DEBUG_CUBE_LEVEL")) {
+    static float dbg_ref = -99.0f;
+    static int dbg_level = -1;
+    static GLenum dbg_filter = 0;
+    if (ref != dbg_ref || level0 != dbg_level || filter != dbg_filter) {
+      fprintf(stderr,
+              "[clevel] ref=%.3f lod=%.3f level=%d face=%d filter=%x min=%x\n",
+              ref, clamped_lod, level0, face, filter, min_filter);
+      dbg_ref = ref; dbg_level = level0; dbg_filter = filter;
+    }
+  }
+  const auto face_direction = [](int face_index, float fs, float ft,
+                                 float direction_out[3]) {
+    const float x = fs * 2.0f - 1.0f;
+    const float y = ft * 2.0f - 1.0f;
+    switch (face_index) {
+      case 0:
+        direction_out[0] = 1.0f;
+        direction_out[1] = -y;
+        direction_out[2] = -x;
+        break;
+      case 1:
+        direction_out[0] = -1.0f;
+        direction_out[1] = -y;
+        direction_out[2] = x;
+        break;
+      case 2:
+        direction_out[0] = x;
+        direction_out[1] = 1.0f;
+        direction_out[2] = y;
+        break;
+      case 3:
+        direction_out[0] = x;
+        direction_out[1] = -1.0f;
+        direction_out[2] = -y;
+        break;
+      case 4:
+        direction_out[0] = x;
+        direction_out[1] = -y;
+        direction_out[2] = 1.0f;
+        break;
+      default:
+        direction_out[0] = -x;
+        direction_out[1] = -y;
+        direction_out[2] = -1.0f;
+        break;
+    }
+  };
+  const auto fetch_texel = [&](const TextureImage& image, size_t index,
+                               float result[4]) {
+    FetchTexel(image, index, result);
+    if (compare_func != 0)
+      result[0] = ShadowCompareValue(ref, result[0], compare_func);
+  };
+  const auto face_texel = [&](int level, int face_index, float fs, float ft,
+                              float result[4]) {
+    result[0] = 0.0f;
+    result[1] = 0.0f;
+    result[2] = 0.0f;
+    result[3] = 1.0f;
+    const TextureImage* level_image =
+        texture.image(level + BaseLevel(texture), face_index);
+    if (!level_image || level_image->width <= 0 || level_image->height <= 0 ||
+        !ImageHasTexels(*level_image))
+      return;
+    const int x = std::min(
+        level_image->width - 1,
+        std::max(0, static_cast<int>(fs * level_image->width)));
+    const int y = std::min(
+        level_image->height - 1,
+        std::max(0, static_cast<int>(ft * level_image->height)));
+    fetch_texel(*level_image,
+               static_cast<size_t>(y) * level_image->width + x, result);
+  };
+  const auto remap_tap = [&](int level, int base_face, int tx, int ty,
+                             float result[4], bool* both_out) {
+    result[0] = 0.0f;
+    result[1] = 0.0f;
+    result[2] = 0.0f;
+    result[3] = 1.0f;
+    const TextureImage* level_image =
+        texture.image(level + BaseLevel(texture), base_face);
+    if (!level_image || level_image->width <= 0 ||
+        !ImageHasTexels(*level_image))
+      return;
+    const int size = level_image->width;
+    const bool u_in_bounds = tx >= 0 && tx < size;
+    const bool v_in_bounds = ty >= 0 && ty < size;
+    if (u_in_bounds && v_in_bounds) {
+      fetch_texel(*level_image,
+                 static_cast<size_t>(ty) * size + tx, result);
+      return;
+    }
+    if (!u_in_bounds && !v_in_bounds) {
+      *both_out = true;
+      return;
+    }
+    if (false) {
+      float direction_out[3];
+      face_direction(base_face, (static_cast<float>(tx) + 0.5f) / size,
+                     (static_cast<float>(ty) + 0.5f) / size, direction_out);
+      const float ax = std::fabs(direction_out[0]);
+      const float ay = std::fabs(direction_out[1]);
+      const float az = std::fabs(direction_out[2]);
+      int tap_face = 0;
+      float tu = 0.0f;
+      float tv = 0.0f;
+      if (ax >= ay && ax >= az) {
+        if (direction_out[0] >= 0.0f) {
+          tap_face = 0;
+          tu = -direction_out[2] / ax;
+          tv = -direction_out[1] / ax;
+        } else {
+          tap_face = 1;
+          tu = direction_out[2] / ax;
+          tv = -direction_out[1] / ax;
+        }
+      } else if (ay >= az) {
+        if (direction_out[1] >= 0.0f) {
+          tap_face = 2;
+          tu = direction_out[0] / ay;
+          tv = direction_out[2] / ay;
+        } else {
+          tap_face = 3;
+          tu = direction_out[0] / ay;
+          tv = -direction_out[2] / ay;
+        }
+      } else {
+        if (direction_out[2] >= 0.0f) {
+          tap_face = 4;
+          tu = direction_out[0] / az;
+          tv = -direction_out[1] / az;
+        } else {
+          tap_face = 5;
+          tu = -direction_out[0] / az;
+          tv = -direction_out[1] / az;
+        }
+      }
+      face_texel(level, tap_face, (tu + 1.0f) * 0.5f,
+                 (tv + 1.0f) * 0.5f, result);
+      return;
+    }
+    const int u = tx < 0 ? -1 : (tx >= size ? size : tx);
+    const int v = ty < 0 ? -1 : (ty >= size ? size : ty);
+    int face = base_face;
+    int s = u;
+    int t = v;
+    auto remap_face = [&](int canonical_x, int canonical_y, int canonical_z) {
+      if (canonical_x == -1) {
+        face = 1;
+        s = canonical_z;
+        t = size - 1 - canonical_y;
+      } else if (canonical_x == size) {
+        face = 0;
+        s = size - 1 - canonical_z;
+        t = size - 1 - canonical_y;
+      } else if (canonical_y == -1) {
+        face = 3;
+        s = canonical_x;
+        t = size - 1 - canonical_z;
+      } else if (canonical_y == size) {
+        face = 2;
+        s = canonical_x;
+        t = canonical_z;
+      } else if (canonical_z == -1) {
+        face = 5;
+        s = size - 1 - canonical_x;
+        t = size - 1 - canonical_y;
+      } else if (canonical_z == size) {
+        face = 4;
+        s = canonical_x;
+        t = size - 1 - canonical_y;
+      }
+    };
+    switch (base_face) {
+      case 1:
+        remap_face(0, size - 1 - v, u);
+        break;
+      case 0:
+        remap_face(size - 1, size - 1 - v, size - 1 - u);
+        break;
+      case 3:
+        remap_face(u, 0, size - 1 - v);
+        break;
+      case 2:
+        remap_face(u, size - 1, v);
+        break;
+      case 5:
+        remap_face(size - 1 - u, size - 1 - v, 0);
+        break;
+      default:
+        remap_face(u, size - 1 - v, size - 1);
+        break;
+    }
+    const TextureImage* target =
+        texture.image(level + BaseLevel(texture), face);
+    if (!target || target->width <= 0 || !ImageHasTexels(*target))
+      return;
+    fetch_texel(*target, static_cast<size_t>(t) * target->width + s, result);
+  };
+  const auto sample_level = [&](int level, GLenum level_filter,
+                                float result[4]) {
+    result[0] = 0.0f;
+    result[1] = 0.0f;
+    result[2] = 0.0f;
+    result[3] = 1.0f;
+    const TextureImage* level_image =
+        texture.image(level + BaseLevel(texture), face);
+    if (!level_image || level_image->width <= 0 ||
+        !ImageHasTexels(*level_image))
+      return;
+    if (getenv("ZGL_DEBUG_CUBE") && level == 2 && face == 0) {
+      static int td = 0;
+      if (td++ == 0) {
+        float rgba[4];
+        FetchTexel(*level_image, 0, rgba);
+        float rgba0[4];
+        const TextureImage* im0 = texture.image(0, face);
+        if (im0) FetchTexel(*im0, 0, rgba0); else for (int k=0;k<4;k++) rgba0[k]=-1.0f;
+        fprintf(stderr, "[tex2] ifmt=%x %dx%d first=%.3f %.3f %.3f %.3f l0=%.3f %.3f %.3f %.3f rgba=%zu\n",
+                texture.internal_format, level_image->width, level_image->height,
+                rgba[0], rgba[1], rgba[2], rgba[3], rgba0[0], rgba0[1], rgba0[2], rgba0[3],
+                level_image->rgba.size());
+      }
+    }
+    if (getenv("ZGL_DEBUG_CUBE")) {
+      static int cdbg = 0;
+      if (level > 0 && cdbg++ < 8)
+        fprintf(stderr, "[cube] base=%dx%d level=%d face=%d %dx%d lod=%.3f frac=%.3f filter=%x\n",
+                texture.width, texture.height, level, face, level_image->width,
+                level_image->height, lod, level_frac, level_filter);
+    }
+    float ls = s;
+    float lt = t;
+    if (level_filter == GL_NEAREST) {
+      ls = std::clamp(s, 0.5f / level_image->width,
+                      1.0f - 0.5f / level_image->width);
+      lt = std::clamp(t, 0.5f / level_image->height,
+                      1.0f - 0.5f / level_image->height);
+      const int x =
+          std::min(level_image->width - 1,
+                   static_cast<int>(ls * level_image->width));
+      const int y =
+          std::min(level_image->height - 1,
+                   static_cast<int>(lt * level_image->height));
+      fetch_texel(*level_image,
+                 static_cast<size_t>(y) * level_image->width + x, result);
+      return;
+    }
+    const float px = ls * level_image->width - 0.5f;
+    const float py = lt * level_image->height - 0.5f;
+    const int x0 = static_cast<int>(std::floor(px));
+    const int y0 = static_cast<int>(std::floor(py));
+    if (getenv("ZGL_DEBUG_CUBE") && level > 0) {
+      static int tdbg = 0;
+      if (tdbg++ < 4)
+        fprintf(stderr, "[ctap] level=%d s=%.5f t=%.5f px=%.3f py=%.3f x0=%d y0=%d\n",
+                level, s, t, px, py, x0, y0);
+    }
+    const float fx = px - static_cast<float>(x0);
+    const float fy = py - static_cast<float>(y0);
+    float c00[4];
+    float c10[4];
+    float c01[4];
+    float c11[4];
+    bool b00 = false;
+    bool b10 = false;
+    bool b01 = false;
+    bool b11 = false;
+    remap_tap(level, face, x0, y0, c00, &b00);
+    remap_tap(level, face, x0 + 1, y0, c10, &b10);
+    remap_tap(level, face, x0, y0 + 1, c01, &b01);
+    remap_tap(level, face, x0 + 1, y0 + 1, c11, &b11);
+    float* colors[4] = {c00, c10, c01, c11};
+    bool* both[4] = {&b00, &b10, &b01, &b11};
+    for (int i = 0; i < 4; ++i) {
+      if (!*both[i])
+        continue;
+      colors[i][0] = 0.0f;
+      colors[i][1] = 0.0f;
+      colors[i][2] = 0.0f;
+      colors[i][3] = 0.0f;
+      int count = 0;
+      for (int j = 0; j < 4; ++j) {
+        if (j == i || *both[j])
+          continue;
+        for (int c = 0; c < 4; ++c)
+          colors[i][c] += colors[j][c];
+        ++count;
+      }
+      if (count > 0) {
+        for (int c = 0; c < 4; ++c)
+          colors[i][c] /= static_cast<float>(count);
+      }
+    }
+    for (int i = 0; i < 4; ++i) {
+      const float top = c00[i] + (c10[i] - c00[i]) * fx;
+      const float bottom = c01[i] + (c11[i] - c01[i]) * fx;
+      result[i] = top + (bottom - top) * fy;
+    }
+  };
+  sample_level(level0, filter, out);
+  if (mipmap_linear && level_frac > 0.0f &&
+      level0 + 1 < texture.levels) {
+    float next[4];
+    sample_level(level0 + 1, BaseFilter(min_filter), next);
+    for (int i = 0; i < 4; ++i)
+      out[i] += (next[i] - out[i]) * level_frac;
+  }
+}
+
+void SampleTexture3D(const Texture& texture,
+                     const float position[3],
+                     float lod,
+                     GLenum min_filter,
+                     GLenum mag_filter,
+                     GLenum wrap_s,
+                     GLenum wrap_t,
+                     GLenum wrap_r,
+                     float out[4],
+                     float min_lod,
+                     float max_lod) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  if (!texture.IsComplete())
+    return;
+  const int base_level = BaseLevel(texture);
+  const float max_level =
+      static_cast<float>(std::max(
+          0, std::min(texture.max_level - base_level,
+                      texture.levels - 1 - base_level)));
+  const float clamped_lod =
+      std::clamp(std::clamp(lod, min_lod <= max_lod ? min_lod : texture.min_lod,
+                    min_lod <= max_lod ? max_lod : texture.max_lod), 0.0f,
+                 max_level);
+  const bool mipmap_linear =
+      min_filter == GL_LINEAR_MIPMAP_LINEAR ||
+      min_filter == GL_NEAREST_MIPMAP_LINEAR;
+  int level0 = mipmap_linear
+                   ? static_cast<int>(std::floor(clamped_lod))
+                   : std::clamp(static_cast<int>(
+                                    std::floor(clamped_lod + 0.5f)),
+                                0, static_cast<int>(max_level));
+  const bool is_mipmap_filter =
+      min_filter == GL_NEAREST_MIPMAP_NEAREST ||
+      min_filter == GL_LINEAR_MIPMAP_NEAREST ||
+      min_filter == GL_NEAREST_MIPMAP_LINEAR ||
+      min_filter == GL_LINEAR_MIPMAP_LINEAR;
+  if (!is_mipmap_filter) {
+    level0 = 0;
+  }
+  const float level_frac =
+      mipmap_linear ? clamped_lod - static_cast<float>(level0) : 0.0f;
+  const float s = WrapCoordinate(position[0], wrap_s);
+  const float t =
+      WrapCoordinate(texture.render_target_flip_y ? 1.0f - position[1]
+                                                   : position[1],
+                     wrap_t);
+  const float r = WrapCoordinate(position[2], wrap_r);
+  if (s < 0.0f || t < 0.0f || r < 0.0f)
+    return;
+  const bool magnified = clamped_lod <= 0.0f;
+  const GLenum filter =
+      magnified ? mag_filter : BaseFilter(min_filter);
+  const auto sample_level = [&](int level, GLenum level_filter,
+                                float result[4]) {
+    result[0] = 0.0f;
+    result[1] = 0.0f;
+    result[2] = 0.0f;
+    result[3] = 1.0f;
+    const TextureImage* image =
+        texture.image(level + BaseLevel(texture), 0);
+    if (!image || image->width <= 0 || !ImageHasTexels(*image))
+      return;
+    const int depth = std::max(1, image->depth);
+    if (getenv("ZGL_DEBUG_3D")) {
+      static int dbg3d = 0;
+      if (dbg3d++ < 24)
+        fprintf(stderr,
+                "[tex3d] lvl=%d size=%dx%dx%d pos=%.3f,%.3f,%.3f lod=%.3f filt=%x\n",
+                level, image->width, image->height, depth, position[0],
+                position[1], position[2], lod, (unsigned)level_filter);
+    }
+    const size_t slice = static_cast<size_t>(image->width) * image->height;
+    const auto sample_slice = [&](int z, float rgba[4]) {
+      if (level_filter == GL_NEAREST) {
+        const int x =
+            std::min(image->width - 1, static_cast<int>(s * image->width));
+        const int y =
+            std::min(image->height - 1, static_cast<int>(t * image->height));
+        FetchTexel(*image,
+                   z * slice + static_cast<size_t>(y) * image->width + x,
+                   rgba);
+        return;
+      }
+      const float px = s * image->width - 0.5f;
+      const float py = t * image->height - 0.5f;
+      const int x0 = static_cast<int>(std::floor(px));
+      const int y0 = static_cast<int>(std::floor(py));
+      const float fx = px - static_cast<float>(x0);
+      const float fy = py - static_cast<float>(y0);
+      float c00[4];
+      float c10[4];
+      float c01[4];
+      float c11[4];
+      const auto fetch = [&](int x, int y, float out_rgba[4]) {
+        const int cx = WrapTexel(x, image->width, wrap_s);
+        const int cy = WrapTexel(y, image->height, wrap_t);
+        FetchTexel(*image,
+                   z * slice + static_cast<size_t>(cy) * image->width + cx,
+                   out_rgba);
+      };
+      fetch(x0, y0, c00);
+      fetch(x0 + 1, y0, c10);
+      fetch(x0, y0 + 1, c01);
+      fetch(x0 + 1, y0 + 1, c11);
+      for (int i = 0; i < 4; ++i) {
+        const float row0 = c00[i] + (c10[i] - c00[i]) * fx;
+        const float row1 = c01[i] + (c11[i] - c01[i]) * fx;
+        rgba[i] = row0 + (row1 - row0) * fy;
+      }
+    };
+    if (depth == 1) {
+      sample_slice(0, result);
+      if (getenv("ZGL_DEBUG_3D"))
+        fprintf(stderr, "[tex3d-out] %.4f %.4f %.4f %.4f\n", result[0],
+                result[1], result[2], result[3]);
+      return;
+    }
+    if (level_filter == GL_NEAREST) {
+      const int z = WrapTexel(static_cast<int>(r * depth), depth, wrap_r);
+      sample_slice(z, result);
+      if (getenv("ZGL_DEBUG_3D"))
+        fprintf(stderr, "[tex3d-out] z=%d %.4f %.4f %.4f %.4f\n", z,
+                result[0], result[1], result[2], result[3]);
+      return;
+    }
+    const float pz = r * depth - 0.5f;
+    const int base_z = static_cast<int>(std::floor(pz));
+    const int z0 = WrapTexel(base_z, depth, wrap_r);
+    const int z1 = WrapTexel(base_z + 1, depth, wrap_r);
+    const float fz = pz - static_cast<float>(base_z);
+    float a[4];
+    float b[4];
+    sample_slice(z0, a);
+    sample_slice(z1, b);
+    for (int i = 0; i < 4; ++i)
+      result[i] = a[i] + (b[i] - a[i]) * fz;
+  };
+  sample_level(level0, filter, out);
+  if (mipmap_linear && level_frac > 0.0f &&
+      level0 + 1 < texture.levels) {
+    float next[4];
+    sample_level(level0 + 1, BaseFilter(min_filter), next);
+    for (int i = 0; i < 4; ++i)
+      out[i] += (next[i] - out[i]) * level_frac;
+  }
 }
 
 bool UploadTextureImage(TextureImage* image,
@@ -451,7 +1331,8 @@ bool UploadTextureImage(TextureImage* image,
                         int row_length,
                         int skip_rows,
                         int skip_pixels,
-                        const void* pixels) {
+                        const void* pixels,
+                        int alignment) {
   if (!image || width <= 0 || height <= 0 || !pixels)
     return false;
   if (width > kMaxTextureSize || height > kMaxTextureSize)
@@ -468,15 +1349,32 @@ bool UploadTextureImage(TextureImage* image,
     const uint8_t* source = static_cast<const uint8_t*>(pixels);
     // GL_UNSIGNED_INT_24_8 packs 24 depth bits and 8 stencil bits into a
     // 32-bit word, so it reads the same way as GL_UNSIGNED_INT here.
-    const int element =
-        (type == GL_UNSIGNED_INT || type == GL_UNSIGNED_INT_24_8) ? 4 : 2;
+    const int element = type == GL_FLOAT_32_UNSIGNED_INT_24_8_REV
+                            ? 8
+                            : (type == GL_FLOAT || type == GL_UNSIGNED_INT ||
+                               type == GL_UNSIGNED_INT_24_8)
+                                  ? 4
+                                  : 2;
     for (int y = 0; y < height; ++y) {
-      const uint8_t* row = source + (static_cast<size_t>(skip_rows + y) *
-                                         (row_length > 0 ? row_length : width) +
-                                     skip_pixels) *
-                                        element;
+      size_t row_bytes =
+          static_cast<size_t>(row_length > 0 ? row_length : width) * element;
+      const size_t alignment_value = alignment > 0 ? static_cast<size_t>(alignment) : 1u;
+      row_bytes = (row_bytes + alignment_value - 1u) / alignment_value * alignment_value;
+      const uint8_t* row = source +
+                           static_cast<size_t>(skip_rows + y) * row_bytes +
+                           static_cast<size_t>(skip_pixels) * element;
       for (int x = 0; x < width; ++x) {
-        if (type == GL_FLOAT) {
+        if (type == GL_FLOAT_32_UNSIGNED_INT_24_8_REV) {
+          float value;
+          uint32_t stencil;
+          memcpy(&value, row + x * 8, sizeof(value));
+          memcpy(&stencil, row + x * 8 + 4, sizeof(stencil));
+          image->depth16[static_cast<size_t>(y) * width + x] =
+              FloatToDepth16(value);
+          if (format == GL_DEPTH_STENCIL)
+            image->stencil8[static_cast<size_t>(y) * width + x] =
+                static_cast<uint8_t>(stencil & 0xFFu);
+        } else if (type == GL_FLOAT) {
           float value;
           memcpy(&value, row + x * 4, sizeof(value));
           image->depth16[static_cast<size_t>(y) * width + x] =
@@ -507,9 +1405,12 @@ bool UploadTextureImage(TextureImage* image,
     return false;
 
   image->rgba.assign(static_cast<size_t>(width) * height, 0u);
-  const int packed_size = IsPackedType(type) ? 2 : components * bytes;
-  const int source_stride =
-      row_length > 0 ? row_length * packed_size : width * packed_size;
+  const int packed_size =
+      IsPackedType(type) ? PackedPixelBytes(type) : components * bytes;
+  size_t source_stride =
+      static_cast<size_t>(row_length > 0 ? row_length : width) * packed_size;
+  const size_t alignment_value = alignment > 0 ? static_cast<size_t>(alignment) : 1u;
+  source_stride = (source_stride + alignment_value - 1u) / alignment_value * alignment_value;
   const uint8_t* source = static_cast<const uint8_t*>(pixels);
   for (int y = 0; y < height; ++y) {
     const uint8_t* row = source +
@@ -534,8 +1435,10 @@ bool UploadTextureImage(TextureImage* image,
           r = g = b = FloatToUnorm8(values[0]);
           break;
         case GL_RG:
-          r = g = b = FloatToUnorm8(values[0]);
-          a = FloatToUnorm8(values[1]);
+          r = FloatToUnorm8(values[0]);
+          g = FloatToUnorm8(values[1]);
+          b = 0;
+          a = 255;
           break;
         case GL_RGB:
           r = FloatToUnorm8(values[0]);
@@ -568,6 +1471,119 @@ bool UploadTextureImage(TextureImage* image,
 }
 
 
+bool UploadTextureImageInteger(TextureImage* image,
+                               int width,
+                               int height,
+                               GLenum format,
+                               GLenum type,
+                               int row_length,
+                               int skip_rows,
+                               int skip_pixels,
+                               const void* pixels,
+                               int alignment) {
+  if (!image || width <= 0 || height <= 0 || !pixels)
+    return false;
+  int components = 0;
+  switch (format) {
+    case GL_RED_INTEGER:
+      components = 1;
+      break;
+    case GL_RG_INTEGER:
+      components = 2;
+      break;
+    case GL_RGB_INTEGER:
+      components = 3;
+      break;
+    case GL_RGBA_INTEGER:
+      components = 4;
+      break;
+    default:
+      return false;
+  }
+  const int packed_size = IsPackedType(type) ? PackedPixelBytes(type) : 0;
+  int bytes = 0;
+  switch (type) {
+    case GL_BYTE:
+    case GL_UNSIGNED_BYTE:
+      bytes = 1;
+      break;
+    case GL_SHORT:
+    case GL_UNSIGNED_SHORT:
+      bytes = 2;
+      break;
+    case GL_INT:
+    case GL_UNSIGNED_INT:
+      bytes = 4;
+      break;
+    default:
+      if (!packed_size)
+        return false;
+      break;
+  }
+  const bool source_signed = type == GL_BYTE || type == GL_SHORT ||
+                             type == GL_INT;
+  const size_t texels = static_cast<size_t>(width) * height;
+  image->width = width;
+  image->height = height;
+  image->depth = 1;
+  image->integer_rgba.assign(texels * 4, 0u);
+  const int pixel_bytes = packed_size ? packed_size : components * bytes;
+  size_t stride =
+      static_cast<size_t>(row_length > 0 ? row_length : width) * pixel_bytes;
+  const size_t alignment_value = alignment > 0 ? static_cast<size_t>(alignment) : 1u;
+  stride = (stride + alignment_value - 1u) / alignment_value * alignment_value;
+  const uint8_t* source = static_cast<const uint8_t*>(pixels);
+  for (int y = 0; y < height; ++y) {
+    const uint8_t* row = source +
+                         static_cast<size_t>(skip_rows + y) * stride +
+                         static_cast<size_t>(skip_pixels) * pixel_bytes;
+    for (int x = 0; x < width; ++x) {
+      const uint8_t* texel = row + static_cast<size_t>(x) * pixel_bytes;
+      uint32_t values[4] = {0u, 0u, 0u, 1u};
+      if (packed_size) {
+        uint32_t packed = 0u;
+        memcpy(&packed, texel, sizeof(packed));
+        if (type == GL_UNSIGNED_INT_2_10_10_10_REV) {
+          values[0] = packed & 0x3ffu;
+          values[1] = (packed >> 10) & 0x3ffu;
+          values[2] = (packed >> 20) & 0x3ffu;
+          values[3] = (packed >> 30) & 0x3u;
+        }
+        memcpy(image->integer_rgba.data() +
+                   (static_cast<size_t>(y) * width + x) * 4,
+               values, sizeof(values));
+        continue;
+      }
+      for (int c = 0; c < components; ++c) {
+        const uint8_t* component = texel + c * bytes;
+        int64_t raw = 0;
+        if (bytes == 1) {
+          raw = source_signed
+                    ? static_cast<int64_t>(static_cast<int8_t>(component[0]))
+                    : static_cast<int64_t>(component[0]);
+        } else if (bytes == 2) {
+          uint16_t bits;
+          memcpy(&bits, component, sizeof(bits));
+          raw = source_signed
+                    ? static_cast<int64_t>(static_cast<int16_t>(bits))
+                    : static_cast<int64_t>(bits);
+        } else {
+          uint32_t bits;
+          memcpy(&bits, component, sizeof(bits));
+          raw = source_signed
+                    ? static_cast<int64_t>(static_cast<int32_t>(bits))
+                    : static_cast<int64_t>(bits);
+        }
+        values[c] = static_cast<uint32_t>(raw);
+      }
+      memcpy(image->integer_rgba.data() +
+                 (static_cast<size_t>(y) * width + x) * 4,
+             values, sizeof(values));
+    }
+  }
+  return true;
+}
+
 bool UploadTextureImageFloat(TextureImage* image,
                              int width,
                              int height,
@@ -576,27 +1592,37 @@ bool UploadTextureImageFloat(TextureImage* image,
                              int row_length,
                              int skip_rows,
                              int skip_pixels,
-                             const void* pixels) {
+                             const void* pixels,
+                             int alignment) {
   if (!image || width <= 0 || height <= 0 || !pixels)
     return false;
   const int components = ComponentCount(format);
   const int bytes = BytesPerComponent(type);
-  if (components == 0 || bytes == 0 || IsPackedType(type))
+  if (components == 0 || (bytes == 0 && !IsPackedType(type)))
     return false;
   const size_t texels = static_cast<size_t>(width) * height;
   if (image->float_rgba.size() < texels * 4)
     image->float_rgba.assign(texels * 4, 0.0f);
-  const int source_stride =
-      row_length > 0 ? row_length * components * bytes
-                     : width * components * bytes;
+  const int packed_size = IsPackedType(type) ? PackedPixelBytes(type)
+                                             : components * bytes;
+  size_t source_stride =
+      static_cast<size_t>(row_length > 0 ? row_length : width) * packed_size;
+  const size_t alignment_value = alignment > 0 ? static_cast<size_t>(alignment) : 1u;
+  source_stride = (source_stride + alignment_value - 1u) / alignment_value * alignment_value;
   const uint8_t* source = static_cast<const uint8_t*>(pixels);
   for (int y = 0; y < height; ++y) {
     const uint8_t* row = source +
                          static_cast<size_t>(skip_rows + y) * source_stride +
-                         static_cast<size_t>(skip_pixels) * components * bytes;
+                         static_cast<size_t>(skip_pixels) * packed_size;
     for (int x = 0; x < width; ++x) {
-      const uint8_t* texel =
-          row + static_cast<size_t>(x) * components * bytes;
+      const uint8_t* texel = row + static_cast<size_t>(x) * packed_size;
+      float packed_values[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+      if (DecodePackedFloat(texel, type, packed_values)) {
+        memcpy(image->float_rgba.data() +
+                   (static_cast<size_t>(y) * width + x) * 4,
+               packed_values, sizeof(packed_values));
+        continue;
+      }
       float values[4] = {0.0f, 0.0f, 0.0f, 1.0f};
       for (int c = 0; c < components; ++c)
         values[c] = ReadComponent(texel, c, type);
@@ -671,13 +1697,23 @@ void GenerateMipmap(Texture* texture) {
         destination->rgba.assign(destination_texels, 0u);
       }
       for (int y = 0; y < next_height; ++y) {
+        const int sy0 = static_cast<int>(
+            static_cast<long long>(y) * height / next_height);
+        int sy1 = static_cast<int>(
+            static_cast<long long>(y + 1) * height / next_height);
+        if (sy1 <= sy0) sy1 = sy0 + 1;
+        if (sy1 > height) sy1 = height;
         for (int x = 0; x < next_width; ++x) {
+          const int sx0 = static_cast<int>(
+              static_cast<long long>(x) * width / next_width);
+          int sx1 = static_cast<int>(
+              static_cast<long long>(x + 1) * width / next_width);
+          if (sx1 <= sx0) sx1 = sx0 + 1;
+          if (sx1 > width) sx1 = width;
           float accum[4] = {0.0f, 0.0f, 0.0f, 0.0f};
           int count = 0;
-          for (int dy = 0; dy < 2; ++dy) {
-            for (int dx = 0; dx < 2; ++dx) {
-              const int sx = ClampInt(x * 2 + dx, 0, width - 1);
-              const int sy = ClampInt(y * 2 + dy, 0, height - 1);
+          for (int sy = sy0; sy < sy1; ++sy) {
+            for (int sx = sx0; sx < sx1; ++sx) {
               float rgba[4];
               FetchTexel(*source, static_cast<size_t>(sy) * width + sx,
                          rgba);

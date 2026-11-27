@@ -1,0 +1,4 @@
+/home/user/zcat-gles-push/build-push/CMakeFiles/sljit.dir
+/home/user/zcat-gles-push/build-push/CMakeFiles/zcat_gles.dir
+/home/user/zcat-gles-push/build-push/CMakeFiles/edit_cache.dir
+/home/user/zcat-gles-push/build-push/CMakeFiles/rebuild_cache.dir

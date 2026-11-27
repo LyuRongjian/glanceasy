@@ -28,6 +28,18 @@ enum class BaseType {
   kSampler2D,
   kSamplerCube,
   kSampler3D,
+  kSampler2DShadow,
+  kSampler2DArray,
+  kSampler2DArrayShadow,
+  kSamplerCubeShadow,
+  kISampler2D,
+  kISampler3D,
+  kISamplerCube,
+  kISampler2DArray,
+  kUSampler2D,
+  kUSampler3D,
+  kUSamplerCube,
+  kUSampler2DArray,
 };
 
 enum class TypeKind {
@@ -108,9 +120,7 @@ class Type {
   }
   bool is_sampler() const {
     return kind_ == TypeKind::kBasic &&
-           (base_ == BaseType::kSampler2D ||
-            base_ == BaseType::kSamplerCube ||
-            base_ == BaseType::kSampler3D);
+           base_ >= BaseType::kSampler2D;
   }
 
   // Element type of a vector / matrix (scalar).
@@ -159,7 +169,9 @@ struct Value {
 
   Type type;
   float data[kValueFloats] = {};
+  uint32_t int_data[kValueFloats] = {};
   std::vector<float> aggregate;
+  std::vector<uint32_t> int_aggregate;
 
   int size() const { return type.components(); }
 
@@ -167,13 +179,22 @@ struct Value {
     return aggregate.empty() ? data : aggregate.data();
   }
   float* Data() { return aggregate.empty() ? data : aggregate.data(); }
+  const uint32_t* IntData() const {
+    return int_aggregate.empty() ? int_data : int_aggregate.data();
+  }
+  uint32_t* IntData() {
+    return int_aggregate.empty() ? int_data : int_aggregate.data();
+  }
 
   void ResetType(const Type& t) {
     type = t;
-    if (t.is_aggregate())
+    if (t.is_aggregate()) {
       aggregate.assign(static_cast<size_t>(std::max(0, t.components())), 0.0f);
-    else
+      int_aggregate.assign(static_cast<size_t>(std::max(0, t.components())), 0u);
+    } else {
       aggregate.clear();
+      int_aggregate.clear();
+    }
   }
 };
 
@@ -206,8 +227,10 @@ bool IsTrue(const Value& value);
 // Vectors are not padded to their alignment when stored alone; the next
 // member's offset is rounded up instead, matching the std140 rules.
 int Std140Alignment(const Type& type);
-int Std140Size(const Type& type);
-int Std140ArrayStride(const Type& element_type);
+int Std140Size(const Type& type, int matrix_layout = 0);
+int Std140ArrayStride(const Type& element_type, int matrix_layout = 0);
+int Std140StructMemberOffset(const StructInfo& info, int member_index,
+                             int matrix_layout = 0);
 
 }  // namespace glsl
 }  // namespace zgl

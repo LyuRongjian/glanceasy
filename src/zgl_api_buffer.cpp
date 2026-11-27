@@ -34,8 +34,10 @@ Buffer* BoundBuffer(Context* context, GLenum target) {
     return context->buffers.Get(context->state.uniform_buffer);
   if (target == GL_TRANSFORM_FEEDBACK_BUFFER)
     return context->buffers.Get(context->state.transform_feedback_buffer);
-  if (target == GL_PIXEL_PACK_BUFFER || target == GL_PIXEL_UNPACK_BUFFER)
-    return nullptr;
+  if (target == GL_PIXEL_PACK_BUFFER)
+    return context->buffers.Get(context->state.pixel_pack_buffer);
+  if (target == GL_PIXEL_UNPACK_BUFFER)
+    return context->buffers.Get(context->state.pixel_unpack_buffer);
   return nullptr;
 }
 
@@ -66,6 +68,8 @@ bool ValidAttributeType(GLenum type) {
     case GL_FLOAT:
     case GL_HALF_FLOAT:
     case GL_FIXED:
+    case GL_INT_2_10_10_10_REV:
+    case GL_UNSIGNED_INT_2_10_10_10_REV:
       return true;
     default:
       return false;
@@ -90,8 +94,18 @@ void SetAttributePointer(GLuint index,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  const bool packed_type = type == GL_INT_2_10_10_10_REV ||
+                           type == GL_UNSIGNED_INT_2_10_10_10_REV;
+  if (integer != GL_FALSE && packed_type) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (!ValidAttributeType(type)) {
     context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  if (!integer && packed_type && size != 4) {
+    context->SetError(GL_INVALID_OPERATION);
     return;
   }
   if (stride < 0 || stride > 255) {
@@ -103,16 +117,31 @@ void SetAttributePointer(GLuint index,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  if (context->state.vertex_array != 0 && context->state.array_buffer == 0 &&
+      pointer != nullptr) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   VertexAttribute& attribute = array->attributes[index];
-  attribute.enabled = true;
+  if (getenv("ZGL_DEBUG_VIEWPORT") && index == 1 && pointer) {
+    const float* values = static_cast<const float*>(pointer);
+    fprintf(stderr, "[attribptr] %u %.3f %.3f %.3f %.3f %.3f %.3f\n", index,
+            values[0], values[1], values[2], values[3], values[4], values[5]);
+  }
   attribute.size = size;
   attribute.type = type;
   attribute.normalized = normalized != GL_FALSE;
   attribute.integer = integer != GL_FALSE;
   attribute.stride = stride;
-  attribute.offset = 0;
-  attribute.client_pointer = static_cast<const uint8_t*>(pointer);
   attribute.buffer = context->state.array_buffer;
+  if (attribute.buffer != 0) {
+    // A pointer argument names a byte offset inside the bound buffer.
+    attribute.offset = reinterpret_cast<intptr_t>(pointer);
+    attribute.client_pointer = nullptr;
+  } else {
+    attribute.offset = 0;
+    attribute.client_pointer = static_cast<const uint8_t*>(pointer);
+  }
 }
 
 }  // namespace
@@ -124,27 +153,36 @@ extern "C" {
 
 void glGenBuffers(GLsizei n, GLuint* buffers) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !buffers)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!buffers)
+    return;
   for (GLsizei i = 0; i < n; ++i)
-    buffers[i] = context->buffers.Create();
+    buffers[i] = context->buffers.Generate();
 }
 
 void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !buffers)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!buffers)
+    return;
   for (GLsizei i = 0; i < n; ++i) {
     const GLuint name = buffers[i];
-    context->buffers.Delete(name);
+    if (name == 0)
+      continue;
+    // A deleted buffer stays alive while a vertex array or transform feedback
+    // object still references it.  Its data remains readable by draws.
+    if (zgl::Buffer* object = context->buffers.Get(name))
+      object->delete_status = true;
     if (context->state.array_buffer == name)
       context->state.array_buffer = 0;
     if (context->state.element_buffer == name) {
@@ -155,21 +193,29 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
       context->state.uniform_buffer = 0;
     if (context->state.transform_feedback_buffer == name)
       context->state.transform_feedback_buffer = 0;
+    if (context->state.copy_read_buffer == name)
+      context->state.copy_read_buffer = 0;
+    if (context->state.copy_write_buffer == name)
+      context->state.copy_write_buffer = 0;
+    if (context->state.pixel_pack_buffer == name)
+      context->state.pixel_pack_buffer = 0;
+    if (context->state.pixel_unpack_buffer == name)
+      context->state.pixel_unpack_buffer = 0;
     for (int i = 0; i < zgl::kMaxUniformBufferBindings; ++i) {
       if (context->state.uniform_buffers[i].buffer == name)
         context->state.uniform_buffers[i] = zgl::IndexedBufferBinding();
     }
-    auto clear_feedback = [name](zgl::TransformFeedback* feedback) {
-      if (!feedback)
-        return;
+    // Deleting a buffer does not break a transform-feedback attachment: the
+    // container keeps the name, but must no longer write into storage that a
+    // later glGenBuffers may recycle for a different object.
+    auto mark_deleted = [name](zgl::TransformFeedback& feedback) {
       for (int i = 0; i < zgl::kMaxTransformFeedbackBuffers; ++i) {
-        if (feedback->buffers[i].buffer == name)
-          feedback->buffers[i] = zgl::IndexedBufferBinding();
+        if (feedback.buffers[i].buffer == name)
+          feedback.buffers[i].attachment_deleted = true;
       }
     };
-    clear_feedback(&context->default_transform_feedback);
-    for (int i = 1; i <= context->transform_feedbacks.size(); ++i)
-      clear_feedback(context->transform_feedbacks.Get(static_cast<GLuint>(i)));
+    mark_deleted(context->default_transform_feedback);
+    context->transform_feedbacks.ForEach(mark_deleted);
   }
 }
 
@@ -177,7 +223,8 @@ GLboolean glIsBuffer(GLuint buffer) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || buffer == 0)
     return GL_FALSE;
-  return context->buffers.Get(buffer) ? GL_TRUE : GL_FALSE;
+  const zgl::Buffer* object = context->buffers.Get(buffer);
+  return object && !object->delete_status ? GL_TRUE : GL_FALSE;
 }
 
 void glBindBuffer(GLenum target, GLuint buffer) {
@@ -188,10 +235,8 @@ void glBindBuffer(GLenum target, GLuint buffer) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (buffer != 0 && !context->buffers.Get(buffer)) {
-    context->SetError(GL_INVALID_OPERATION);
+  if (buffer != 0 && !context->buffers.GetOrCreate(buffer))
     return;
-  }
   if (target == GL_ARRAY_BUFFER) {
     context->state.array_buffer = buffer;
   } else if (target == GL_ELEMENT_ARRAY_BUFFER) {
@@ -207,6 +252,10 @@ void glBindBuffer(GLenum target, GLuint buffer) {
     context->state.uniform_buffer = buffer;
   } else if (target == GL_TRANSFORM_FEEDBACK_BUFFER) {
     context->state.transform_feedback_buffer = buffer;
+  } else if (target == GL_PIXEL_PACK_BUFFER) {
+    context->state.pixel_pack_buffer = buffer;
+  } else if (target == GL_PIXEL_UNPACK_BUFFER) {
+    context->state.pixel_unpack_buffer = buffer;
   }
 }
 
@@ -272,6 +321,10 @@ void glBufferSubData(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
+  if (buffer->mapped) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   const size_t begin = static_cast<size_t>(offset);
   const size_t length = static_cast<size_t>(size);
   if (begin + length > buffer->data.size()) {
@@ -308,6 +361,10 @@ void glCopyBufferSubData(GLenum read_target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (source->mapped || destination->mapped) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
   if (source == destination && read_begin < write_begin + length &&
       write_begin < read_begin + length) {
     context->SetError(GL_INVALID_VALUE);
@@ -330,7 +387,11 @@ void* glMapBufferRange(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return nullptr;
   }
-  if (offset < 0 || length < 0 || buffer->mapped) {
+  if (offset < 0 || length <= 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return nullptr;
+  }
+  if (buffer->mapped) {
     context->SetError(GL_INVALID_OPERATION);
     return nullptr;
   }
@@ -340,7 +401,27 @@ void* glMapBufferRange(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return nullptr;
   }
+  const GLbitfield valid_bits = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT |
+                                GL_MAP_INVALIDATE_RANGE_BIT |
+                                GL_MAP_INVALIDATE_BUFFER_BIT |
+                                GL_MAP_FLUSH_EXPLICIT_BIT |
+                                GL_MAP_UNSYNCHRONIZED_BIT;
+  if (access & ~valid_bits) {
+    context->SetError(GL_INVALID_VALUE);
+    return nullptr;
+  }
+  const bool read = (access & GL_MAP_READ_BIT) != 0;
+  const bool write = (access & GL_MAP_WRITE_BIT) != 0;
+  if ((!read && !write) ||
+      (read && (access & (GL_MAP_INVALIDATE_RANGE_BIT |
+                          GL_MAP_INVALIDATE_BUFFER_BIT |
+                          GL_MAP_UNSYNCHRONIZED_BIT))) ||
+      ((access & GL_MAP_FLUSH_EXPLICIT_BIT) && !write)) {
+    context->SetError(GL_INVALID_OPERATION);
+    return nullptr;
+  }
   buffer->mapped = true;
+  buffer->access_flags = access;
   buffer->map_offset = begin;
   buffer->map_length = size;
   return buffer->data.data() + begin;
@@ -356,6 +437,7 @@ GLboolean glUnmapBuffer(GLenum target) {
     return GL_FALSE;
   }
   buffer->mapped = false;
+  buffer->access_flags = 0;
   buffer->map_offset = 0;
   buffer->map_length = 0;
   return GL_TRUE;
@@ -364,15 +446,41 @@ GLboolean glUnmapBuffer(GLenum target) {
 void glFlushMappedBufferRange(GLenum target,
                               GLintptr offset,
                               GLsizeiptr length) {
-  (void)target;
-  (void)offset;
-  (void)length;
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (!zgl::ValidBufferTarget(target)) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
+  zgl::Buffer* buffer = zgl::BoundBuffer(context, target);
+  if (!buffer) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (offset < 0 || length < 0) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  if (!buffer->mapped || !(buffer->access_flags & GL_MAP_FLUSH_EXPLICIT_BIT)) {
+    context->SetError(GL_INVALID_OPERATION);
+    return;
+  }
+  if (static_cast<size_t>(offset) + static_cast<size_t>(length) >
+      buffer->map_length) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
 }
 
 void glGetBufferParameteriv(GLenum target, GLenum pname, GLint* params) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !params)
     return;
+  if (!zgl::ValidBufferTarget(target)) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   zgl::Buffer* buffer = zgl::BoundBuffer(context, target);
   if (!buffer) {
     context->SetError(GL_INVALID_OPERATION);
@@ -387,6 +495,9 @@ void glGetBufferParameteriv(GLenum target, GLenum pname, GLint* params) {
       return;
     case GL_BUFFER_MAPPED:
       params[0] = buffer->mapped ? GL_TRUE : GL_FALSE;
+      return;
+    case GL_BUFFER_ACCESS_FLAGS:
+      params[0] = static_cast<GLint>(buffer->access_flags);
       return;
     case GL_BUFFER_MAP_OFFSET:
       params[0] = static_cast<GLint>(buffer->map_offset);
@@ -404,6 +515,10 @@ void glGetBufferPointerv(GLenum target, GLenum pname, void** params) {
   zgl::Context* context = zgl::ApiContext();
   if (!context || !params)
     return;
+  if (!zgl::ValidBufferTarget(target)) {
+    context->SetError(GL_INVALID_ENUM);
+    return;
+  }
   if (pname != GL_BUFFER_MAP_POINTER) {
     context->SetError(GL_INVALID_ENUM);
     return;
@@ -420,24 +535,28 @@ void glGetBufferPointerv(GLenum target, GLenum pname, void** params) {
 
 void glGenVertexArrays(GLsizei n, GLuint* arrays) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !arrays)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!arrays)
+    return;
   for (GLsizei i = 0; i < n; ++i)
-    arrays[i] = context->vertex_arrays.Create();
+    arrays[i] = context->vertex_arrays.Generate();
 }
 
 void glDeleteVertexArrays(GLsizei n, const GLuint* arrays) {
   zgl::Context* context = zgl::ApiContext();
-  if (!context || !arrays)
+  if (!context)
     return;
   if (n < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
+  if (!arrays)
+    return;
   for (GLsizei i = 0; i < n; ++i) {
     context->vertex_arrays.Delete(arrays[i]);
     if (context->state.vertex_array == arrays[i])
@@ -456,7 +575,7 @@ void glBindVertexArray(GLuint array) {
   zgl::Context* context = zgl::ApiContext();
   if (!context)
     return;
-  if (array != 0 && !context->vertex_arrays.Get(array)) {
+  if (array != 0 && !context->vertex_arrays.GetOrCreateReserved(array)) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -574,8 +693,51 @@ void glVertexAttrib4fv(GLuint index, const GLfloat* values) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  for (int i = 0; i < 4; ++i)
+  for (int i = 0; i < 4; ++i) {
     context->state.current_attribute[index][i] = values[i];
+    context->state.current_attribute_integer[index][i] =
+        values[i] >= 0.0f ? static_cast<GLint>(values[i] + 0.5f)
+                          : static_cast<GLint>(values[i] - 0.5f);
+  }
+}
+
+void glVertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint w) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const GLint values[4] = {x, y, z, w};
+  for (int i = 0; i < 4; ++i) {
+    context->state.current_attribute[index][i] =
+        static_cast<float>(values[i]);
+    context->state.current_attribute_integer[index][i] = values[i];
+  }
+}
+
+void glVertexAttribI4iv(GLuint index, const GLint* values) {
+  if (!values)
+    return;
+  glVertexAttribI4i(index, values[0], values[1], values[2], values[3]);
+}
+
+void glVertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z, GLuint w) {
+  zgl::Context* context = zgl::ApiContext();
+  if (!context)
+    return;
+  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+    context->SetError(GL_INVALID_VALUE);
+    return;
+  }
+  const GLuint values[4] = {x, y, z, w};
+  for (int i = 0; i < 4; ++i) {
+    context->state.current_attribute[index][i] =
+        static_cast<float>(values[i]);
+    context->state.current_attribute_integer[index][i] =
+        static_cast<GLint>(values[i]);
+  }
 }
 
 void glGetVertexAttribiv(GLuint index, GLenum pname, GLint* params) {
@@ -614,13 +776,37 @@ void glGetVertexAttribiv(GLuint index, GLenum pname, GLint* params) {
     case GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING:
       params[0] = static_cast<GLint>(attribute.buffer);
       return;
+    case GL_VERTEX_ATTRIB_ARRAY_INTEGER:
+      params[0] = attribute.integer ? GL_TRUE : GL_FALSE;
+      return;
     case GL_CURRENT_VERTEX_ATTRIB:
-      params[0] = 0;
+      for (int i = 0; i < 4; ++i)
+        params[i] = context->state.current_attribute_integer[index][i];
       return;
     default:
       context->SetError(GL_INVALID_ENUM);
       return;
   }
+}
+
+void glVertexAttribI4uiv(GLuint index, const GLuint* values) {
+  if (!values)
+    return;
+  glVertexAttribI4ui(index, values[0], values[1], values[2], values[3]);
+}
+
+void glGetVertexAttribIiv(GLuint index, GLenum pname, GLint* params) {
+  glGetVertexAttribiv(index, pname, params);
+}
+
+void glGetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params) {
+  GLint values[4] = {};
+  glGetVertexAttribiv(index, pname, values);
+  if (!params)
+    return;
+  const int count = pname == GL_CURRENT_VERTEX_ATTRIB ? 4 : 1;
+  for (int i = 0; i < count; ++i)
+    params[i] = static_cast<GLuint>(values[i]);
 }
 
 void glGetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) {
@@ -658,7 +844,11 @@ void glGetVertexAttribPointerv(GLuint index, GLenum pname, void** pointer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  *pointer = const_cast<uint8_t*>(array->attributes[index].client_pointer);
+  const zgl::VertexAttribute& attribute = array->attributes[index];
+  *pointer = attribute.buffer
+                 ? reinterpret_cast<void*>(
+                       static_cast<intptr_t>(attribute.offset))
+                 : const_cast<uint8_t*>(attribute.client_pointer);
 }
 
 }  // extern "C"
