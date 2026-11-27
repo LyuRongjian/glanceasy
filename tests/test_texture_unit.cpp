@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -12,20 +12,20 @@
 #include <vector>
 
 #include "GLES3/gl32.h"
-#include "src/zgl_context.h"
-#include "src/zgl_texture.h"
-#include "src/zgl_texture_compressed.h"
-#include "tests/zgl_test.h"
+#include "src/glanceasy_context.h"
+#include "src/glanceasy_texture.h"
+#include "src/glanceasy_texture_compressed.h"
+#include "tests/glanceasy_test.h"
 
 namespace {
 
-using zgl::GenerateMipmap;
-using zgl::SampleTexture2D;
-using zgl::SampleTexture3D;
-using zgl::SampleTextureCube;
-using zgl::Texture;
-using zgl::TextureImage;
-using zgl::UploadTextureImage;
+using glanceasy::GenerateMipmap;
+using glanceasy::SampleTexture2D;
+using glanceasy::SampleTexture3D;
+using glanceasy::SampleTextureCube;
+using glanceasy::Texture;
+using glanceasy::TextureImage;
+using glanceasy::UploadTextureImage;
 
 void Make2D(Texture* texture, int width, int height, int levels) {
   texture->target = GL_TEXTURE_2D;
@@ -101,7 +101,7 @@ TEST(UploadConvertsEveryFormatAndType) {
 
   EXPECT_TRUE(Upload(image, pixels, GL_RGBA, GL_UNSIGNED_BYTE));
   float rgba[4];
-  zgl::UnpackRgba(image->rgba[0], rgba);
+  glanceasy::UnpackRgba(image->rgba[0], rgba);
   ExpectColour(rgba, 255, 128, 64, 32, 0.01f);
 
   // GL_BYTE uses the signed normalised range, so -128 clamps to zero.
@@ -111,7 +111,7 @@ TEST(UploadConvertsEveryFormatAndType) {
     signed_pixels[i + 3] = 0x7F;
   }
   EXPECT_TRUE(Upload(image, signed_pixels, GL_RGBA, GL_BYTE));
-  zgl::UnpackRgba(image->rgba[0], rgba);
+  glanceasy::UnpackRgba(image->rgba[0], rgba);
   EXPECT_NEAR(rgba[0], 0.0f, 0.01f);
   EXPECT_NEAR(rgba[3], 1.0f, 0.01f);
 
@@ -122,7 +122,7 @@ TEST(UploadConvertsEveryFormatAndType) {
     half_pixels[i + 1] = 0x3C;
   }
   EXPECT_TRUE(Upload(image, half_pixels, GL_RED, GL_HALF_FLOAT));
-  zgl::UnpackRgba(image->rgba[0], rgba);
+  glanceasy::UnpackRgba(image->rgba[0], rgba);
   EXPECT_NEAR(rgba[0], 1.0f, 0.01f);
 
   // Float input is copied without normalisation.
@@ -133,7 +133,7 @@ TEST(UploadConvertsEveryFormatAndType) {
   }
   EXPECT_TRUE(UploadTextureImage(image, 2, 2, GL_RGBA, GL_FLOAT, 0, 0, 0,
                                  float_pixels.data()));
-  zgl::UnpackRgba(image->rgba[0], rgba);
+  glanceasy::UnpackRgba(image->rgba[0], rgba);
   EXPECT_NEAR(rgba[0], 0.25f, 0.01f);
   EXPECT_NEAR(rgba[3], 0.5f, 0.01f);
 }
@@ -148,25 +148,25 @@ TEST(UploadDecodesPackedFormats) {
   uint16_t packed = 0xF800u;  // 5_6_5: pure red.
   memcpy(pixels.data(), &packed, sizeof(packed));
   EXPECT_TRUE(Upload(image, pixels, GL_RGB, GL_UNSIGNED_SHORT_5_6_5));
-  zgl::UnpackRgba(image->rgba[0], rgba);
+  glanceasy::UnpackRgba(image->rgba[0], rgba);
   ExpectColour(rgba, 255, 0, 0, 255, 0.02f);
 
   packed = 0x000Fu;  // 4_4_4_4: full alpha only.
   memcpy(pixels.data(), &packed, sizeof(packed));
   EXPECT_TRUE(Upload(image, pixels, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4));
-  zgl::UnpackRgba(image->rgba[0], rgba);
+  glanceasy::UnpackRgba(image->rgba[0], rgba);
   ExpectColour(rgba, 0, 0, 0, 255, 0.02f);
 
   packed = 0xF801u;  // 5_5_5_1: full red with the alpha bit set.
   memcpy(pixels.data(), &packed, sizeof(packed));
   EXPECT_TRUE(Upload(image, pixels, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1));
-  zgl::UnpackRgba(image->rgba[0], rgba);
+  glanceasy::UnpackRgba(image->rgba[0], rgba);
   ExpectColour(rgba, 255, 0, 0, 255, 0.02f);
 
   packed = 0x0000u;
   memcpy(pixels.data(), &packed, sizeof(packed));
   EXPECT_TRUE(Upload(image, pixels, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1));
-  zgl::UnpackRgba(image->rgba[0], rgba);
+  glanceasy::UnpackRgba(image->rgba[0], rgba);
   ExpectColour(rgba, 0, 0, 0, 0, 0.02f);
 }
 
@@ -213,7 +213,7 @@ TEST(UploadAppliesPixelStorageOffsets) {
   EXPECT_TRUE(UploadTextureImage(image, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, 4, 1,
                                  1, pixels.data()));
   float rgba[4];
-  zgl::UnpackRgba(image->rgba[0], rgba);
+  glanceasy::UnpackRgba(image->rgba[0], rgba);
   // Row 1, pixel 1 -> index 4 + 1 = 5 of the sequence 1..16.
   EXPECT_NEAR(rgba[0], 5.0f / 255.0f, 0.01f);
   EXPECT_TRUE(image->rgba.size() == 4);
@@ -232,7 +232,7 @@ TEST(WrapModesClampRepeatAndMirror) {
   TextureImage* image = texture.mutable_image(0, 0);
   image->width = 2;
   image->height = 2;
-  image->rgba.assign(4, zgl::PackRgba(255, 0, 0, 255));
+  image->rgba.assign(4, glanceasy::PackRgba(255, 0, 0, 255));
   float rgba[4];
 
   SampleTexture2D(texture, 1.25f, 0.5f, -1.0f, GL_NEAREST, GL_NEAREST,
@@ -258,9 +258,9 @@ TEST(BilinearFilteringBlendsNeighbours) {
   TextureImage* image = texture.mutable_image(0, 0);
   image->width = 2;
   image->height = 2;
-  image->rgba = {zgl::PackRgba(255, 0, 0, 255), zgl::PackRgba(0, 255, 0, 255),
-                 zgl::PackRgba(0, 0, 255, 255),
-                 zgl::PackRgba(255, 255, 255, 255)};
+  image->rgba = {glanceasy::PackRgba(255, 0, 0, 255), glanceasy::PackRgba(0, 255, 0, 255),
+                 glanceasy::PackRgba(0, 0, 255, 255),
+                 glanceasy::PackRgba(255, 255, 255, 255)};
   float rgba[4];
   SampleTexture2D(texture, 0.5f, 0.5f, -1.0f, GL_LINEAR, GL_LINEAR, GL_REPEAT,
                   GL_REPEAT, rgba);
@@ -274,9 +274,9 @@ TEST(BilinearFilteringBlendsNeighbours) {
 TEST(MipSelectionUsesTheRequestedLevel) {
   Texture texture;
   Make2D(&texture, 4, 4, 3);
-  const uint32_t colours[3] = {zgl::PackRgba(255, 0, 0, 255),
-                               zgl::PackRgba(0, 255, 0, 255),
-                               zgl::PackRgba(0, 0, 255, 255)};
+  const uint32_t colours[3] = {glanceasy::PackRgba(255, 0, 0, 255),
+                               glanceasy::PackRgba(0, 255, 0, 255),
+                               glanceasy::PackRgba(0, 0, 255, 255)};
   for (int level = 0; level < 3; ++level) {
     TextureImage* image = texture.mutable_image(level, 0);
     const int size = 4 >> level;
@@ -307,9 +307,9 @@ TEST(CubeSamplingSelectsTheMajorAxisFace) {
   Texture texture;
   MakeCube(&texture, 1);
   const uint32_t colours[6] = {
-      zgl::PackRgba(255, 0, 0, 255),   zgl::PackRgba(0, 255, 0, 255),
-      zgl::PackRgba(0, 0, 255, 255),   zgl::PackRgba(255, 255, 0, 255),
-      zgl::PackRgba(255, 0, 255, 255), zgl::PackRgba(0, 255, 255, 255)};
+      glanceasy::PackRgba(255, 0, 0, 255),   glanceasy::PackRgba(0, 255, 0, 255),
+      glanceasy::PackRgba(0, 0, 255, 255),   glanceasy::PackRgba(255, 255, 0, 255),
+      glanceasy::PackRgba(255, 0, 255, 255), glanceasy::PackRgba(0, 255, 255, 255)};
   for (int face = 0; face < 6; ++face) {
     TextureImage* image = texture.mutable_image(0, face);
     image->width = 1;
@@ -338,7 +338,7 @@ TEST(ThreeDimensionalSamplingBlendsSlices) {
   image->width = 1;
   image->height = 1;
   image->depth = 2;
-  image->rgba = {zgl::PackRgba(255, 0, 0, 255), zgl::PackRgba(0, 0, 255, 255)};
+  image->rgba = {glanceasy::PackRgba(255, 0, 0, 255), glanceasy::PackRgba(0, 0, 255, 255)};
   EXPECT_TRUE(texture.IsComplete());
   float rgba[4];
   const float centre[3] = {0.5f, 0.5f, 0.5f};
@@ -352,7 +352,7 @@ TEST(ThreeDimensionalSamplingBlendsSlices) {
   one->width = 1;
   one->height = 1;
   one->depth = 1;
-  one->rgba.assign(1, zgl::PackRgba(10, 20, 30, 255));
+  one->rgba.assign(1, glanceasy::PackRgba(10, 20, 30, 255));
   SampleTexture3D(single, centre, 0.0f, GL_NEAREST, GL_NEAREST, GL_REPEAT,
                   GL_REPEAT, GL_REPEAT, rgba);
   ExpectColour(rgba, 10, 20, 30, 255, 0.02f);
@@ -369,19 +369,19 @@ TEST(GenerateMipmapAveragesTwoByTwoBlocks) {
   TextureImage* level0 = texture.mutable_image(0, 0);
   level0->width = 4;
   level0->height = 4;
-  level0->rgba.assign(16, zgl::PackRgba(255, 0, 0, 255));
+  level0->rgba.assign(16, glanceasy::PackRgba(255, 0, 0, 255));
   GenerateMipmap(&texture);
   const TextureImage* level1 = texture.image(1, 0);
   EXPECT_EQ(level1->width, 2);
   EXPECT_EQ(level1->height, 2);
   float rgba[4];
-  zgl::UnpackRgba(level1->rgba[0], rgba);
+  glanceasy::UnpackRgba(level1->rgba[0], rgba);
   EXPECT_NEAR(rgba[0], 1.0f, 0.02f);
 
   const TextureImage* level2 = texture.image(2, 0);
   EXPECT_EQ(level2->width, 1);
   EXPECT_EQ(level2->height, 1);
-  zgl::UnpackRgba(level2->rgba[0], rgba);
+  glanceasy::UnpackRgba(level2->rgba[0], rgba);
   EXPECT_NEAR(rgba[0], 1.0f, 0.02f);
 
   // Degenerate textures and null pointers are ignored.
@@ -420,7 +420,7 @@ TEST(Etc2DecoderProducesExpectedColours) {
   uint8_t block[16] = {0xFF, 0x00, 0x00, 0x00, 0, 0, 0, 0,
                        0x00, 0x00, 0, 0, 0, 0, 0, 0};
   uint8_t rgba[16 * 4] = {};
-  EXPECT_TRUE(zgl::DecodeEtc2Block(GL_COMPRESSED_RGB8_ETC2, block, rgba));
+  EXPECT_TRUE(glanceasy::DecodeEtc2Block(GL_COMPRESSED_RGB8_ETC2, block, rgba));
   for (int i = 0; i < 16; ++i) {
     EXPECT_EQ(rgba[i * 4 + 0], 255);
     EXPECT_TRUE(rgba[i * 4 + 1] <= 2);
@@ -431,7 +431,7 @@ TEST(Etc2DecoderProducesExpectedColours) {
   // The EAC alpha half stores base 255, table zero and zero indices.
   block[8] = 255;
   block[9] = 0;
-  EXPECT_TRUE(zgl::DecodeEtc2Block(GL_COMPRESSED_RGBA8_ETC2_EAC, block,
+  EXPECT_TRUE(glanceasy::DecodeEtc2Block(GL_COMPRESSED_RGBA8_ETC2_EAC, block,
                                    rgba));
   for (int i = 0; i < 16; ++i)
     EXPECT_EQ(rgba[i * 4 + 3], 255);

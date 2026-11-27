@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace zgl {
+namespace glanceasy {
 namespace glsl {
 
 namespace {
@@ -437,4 +437,4 @@ int Std140StructMemberOffset(const StructInfo& info, int member_index,
 }
 
 }  // namespace glsl
-}  // namespace zgl
+}  // namespace glanceasy

@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 #include <string.h>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -48,7 +48,7 @@ void DrawFullscreen() {
 }  // namespace
 
 TEST(CopyTexImageCapturesTheFramebuffer) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
   GLuint texture = 0;
@@ -77,11 +77,11 @@ TEST(CopyTexImageCapturesTheFramebuffer) {
   EXPECT_TRUE(rgba[2] < 40);
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(CopyTexSubImageUpdatesARegion) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -111,11 +111,11 @@ TEST(CopyTexSubImageUpdatesARegion) {
   EXPECT_EQ(rgba[1], 255);
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ThreeDimensionalStorageAcceptsSubUpdates) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_3D, texture);
@@ -153,11 +153,11 @@ TEST(ThreeDimensionalStorageAcceptsSubUpdates) {
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UnpackRowLengthAndSkipOffsetsAreApplied) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   // Two rows of four pixels; only the middle two pixels of the second row
   // should end up in the texture.
   unsigned char pixels[4 * 4 * 2] = {};
@@ -178,11 +178,11 @@ TEST(UnpackRowLengthAndSkipOffsetsAreApplied) {
   glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(MipLevelsCanBeDefinedIndividually) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -209,11 +209,11 @@ TEST(MipLevelsCanBeDefinedIndividually) {
   glGenerateMipmap(GL_TEXTURE_2D);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureStorageRejectsInvalidSizes) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -236,11 +236,11 @@ TEST(TextureStorageRejectsInvalidSizes) {
                nullptr);
   EXPECT_TRUE(glGetError() != GL_NO_ERROR);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DepthTextureAttachmentEnablesDepthTesting) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint colour = 0;
   GLuint depth = 0;
   glGenTextures(1, &colour);
@@ -300,5 +300,5 @@ TEST(DepthTextureAttachmentEnablesDepthTesting) {
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteTextures(1, &depth);
   glDeleteTextures(1, &colour);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

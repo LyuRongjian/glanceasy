@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -81,7 +81,7 @@ void ReadPixel(int x, int y, unsigned char rgba[4]) {
 }  // namespace
 
 TEST(TextureFilteringInterpolatesTexels) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const unsigned char texels[16] = {255, 255, 255, 255, 0, 0, 0, 255,
                                     0,   0,   0,   255, 0, 0, 0, 255};
   GLuint texture = 0;
@@ -120,11 +120,11 @@ TEST(TextureFilteringInterpolatesTexels) {
 
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureWrapModesChangeSampling) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const unsigned char texels[8] = {255, 0, 0, 255, 0, 255, 0, 255};
   GLuint texture = 0;
   glGenTextures(1, &texture);
@@ -175,11 +175,11 @@ TEST(TextureWrapModesChangeSampling) {
 
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureStorageCanBeUpdatedAndQueried) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -212,11 +212,11 @@ TEST(TextureStorageCanBeUpdatedAndQueried) {
 
   glDeleteTextures(1, &texture);
   EXPECT_EQ(glIsTexture(texture), GL_FALSE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureUploadAcceptsPackedAndNarrowFormats) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const unsigned char rgb[12] = {255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0};
   GLuint texture = 0;
   glGenTextures(1, &texture);
@@ -242,11 +242,11 @@ TEST(TextureUploadAcceptsPackedAndNarrowFormats) {
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
 
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureObjectsRejectInvalidInput) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -269,11 +269,11 @@ TEST(TextureObjectsRejectInvalidInput) {
                nullptr);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(CubeMapsSampleSixFaces) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const unsigned char colors[6][4] = {{255, 0, 0, 255},   {0, 255, 0, 255},
                                       {0, 0, 255, 255},   {255, 255, 0, 255},
                                       {255, 0, 255, 255}, {0, 255, 255, 255}};
@@ -333,11 +333,11 @@ TEST(CubeMapsSampleSixFaces) {
 
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ThreeDimensionalTexturesSampleLayers) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   // Two layers: red at z = 0, green at z = 1.
   const unsigned char texels[8] = {255, 0, 0, 255, 255, 0, 0, 255};
   const unsigned char layer1[8] = {0, 255, 0, 255, 0, 255, 0, 255};
@@ -383,11 +383,11 @@ TEST(ThreeDimensionalTexturesSampleLayers) {
 
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(SamplerObjectsOverrideTextureState) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   GLuint sampler = 0;
   glGenSamplers(1, &sampler);
   EXPECT_EQ(glIsSampler(sampler), GL_TRUE);
@@ -413,11 +413,11 @@ TEST(SamplerObjectsOverrideTextureState) {
   glDeleteSamplers(1, &sampler);
   EXPECT_EQ(glIsSampler(sampler), GL_FALSE);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(FloatTextureSamplingPreservesHdrValues) {
-  EXPECT_EQ(zglCreateContext(8, 8), 1);
+  EXPECT_EQ(glanceasyCreateContext(8, 8), 1);
   const float texels[4] = {2.0f, -1.0f, 0.25f, 0.5f};
   GLuint texture = 0;
   glGenTextures(1, &texture);
@@ -448,11 +448,11 @@ TEST(FloatTextureSamplingPreservesHdrValues) {
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(CompressedEtc2TextureUploadsAndSamples) {
-  EXPECT_EQ(zglCreateContext(8, 8), 1);
+  EXPECT_EQ(glanceasyCreateContext(8, 8), 1);
   // Solid red in ETC2 individual mode.
   const unsigned char block[8] = {0xFF, 0x00, 0x00, 0x00, 0, 0, 0, 0};
   GLuint texture = 0;
@@ -485,5 +485,5 @@ TEST(CompressedEtc2TextureUploadsAndSamples) {
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

@@ -1,15 +1,15 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_ZGL_TEXTURE_COMPRESSED_H_
-#define ZGL_SRC_ZGL_TEXTURE_COMPRESSED_H_
+#ifndef GLANCEASY_SRC_TEXTURE_COMPRESSED_H_
+#define GLANCEASY_SRC_TEXTURE_COMPRESSED_H_
 
 #include <stdint.h>
 
-#include "zgl/zgl.h"
+#include "glanceasy/glanceasy.h"
 
-namespace zgl {
+namespace glanceasy {
 
 // Decodes one 4x4 ETC2/EAC block into tightly packed RGBA8 texels.  |rgba| is
 // laid out row-major with four bytes per texel.  Returns false when |format|
@@ -23,6 +23,6 @@ bool DecodeSignedEacBlock(GLenum format, const uint8_t* block, float* rgba);
 // an unsupported format.
 int CompressedBlockBytes(GLenum format);
 
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_ZGL_TEXTURE_COMPRESSED_H_
+#endif  // GLANCEASY_SRC_TEXTURE_COMPRESSED_H_

@@ -1,12 +1,12 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string.h>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -41,7 +41,7 @@ const char* kFragment =
 }  // namespace
 
 TEST(ShaderObjectsCompileAndReportStatus) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const GLuint vertex = MakeShader(GL_VERTEX_SHADER, kVertex);
   EXPECT_EQ(glIsShader(vertex), GL_TRUE);
   GLint value = 0;
@@ -62,11 +62,11 @@ TEST(ShaderObjectsCompileAndReportStatus) {
   glDeleteShader(vertex);
   glDeleteShader(fragment);
   EXPECT_EQ(glIsShader(vertex), GL_FALSE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(CompileErrorsProduceAnInfoLog) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* broken =
       "#version 100\n"
       "attribute vec2 a_pos;\n"
@@ -85,11 +85,11 @@ TEST(CompileErrorsProduceAnInfoLog) {
   EXPECT_TRUE(log[0] != '\0');
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteShader(shader);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(LinkRequiresTheMandatoryOutputs) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   // A vertex shader without gl_Position cannot link.
   const char* no_position =
       "#version 100\n"
@@ -115,11 +115,11 @@ TEST(LinkRequiresTheMandatoryOutputs) {
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ProgramIntrospectionListsAttributesAndUniforms) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const GLuint vs = MakeShader(GL_VERTEX_SHADER, kVertex);
   const GLuint fs = MakeShader(GL_FRAGMENT_SHADER, kFragment);
   const GLuint program = glCreateProgram();
@@ -181,11 +181,11 @@ TEST(ProgramIntrospectionListsAttributesAndUniforms) {
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformValuesRoundTripThroughGetters) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
       "attribute vec2 a_pos;\n"
@@ -249,11 +249,11 @@ TEST(UniformValuesRoundTripThroughGetters) {
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UnsignedUniformsAndMatricesRoundTrip) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 300 es\n"
       "in vec2 a_pos;\n"
@@ -294,11 +294,11 @@ TEST(UnsignedUniformsAndMatricesRoundTrip) {
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformArraysRoundTrip) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
       "attribute vec2 a_pos;\n"
@@ -332,11 +332,11 @@ TEST(UniformArraysRoundTrip) {
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ValidationAndUseProgramRejectBadInput) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glUseProgram(12345);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glValidateProgram(12345);
@@ -371,11 +371,11 @@ TEST(ValidationAndUseProgramRejectBadInput) {
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DeletedShadersStayAliveWhileAttached) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const GLuint vs = MakeShader(GL_VERTEX_SHADER, kVertex);
   const GLuint fs = MakeShader(GL_FRAGMENT_SHADER, kFragment);
   const GLuint program = glCreateProgram();
@@ -393,11 +393,11 @@ TEST(DeletedShadersStayAliveWhileAttached) {
   glDeleteProgram(program);
   glDeleteShader(fs);
   glDeleteTextures(1, names);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(SamplerAndBooleanUniformsSetIntegers) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const GLuint vs = MakeShader(GL_VERTEX_SHADER, kVertex);
   const GLuint fs = MakeShader(GL_FRAGMENT_SHADER, kFragment);
   const GLuint program = glCreateProgram();
@@ -416,11 +416,11 @@ TEST(SamplerAndBooleanUniformsSetIntegers) {
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ProgramInfoLogIsEmptyAfterSuccessfulLink) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const GLuint vs = MakeShader(GL_VERTEX_SHADER, kVertex);
   const GLuint fs = MakeShader(GL_FRAGMENT_SHADER, kFragment);
   const GLuint program = glCreateProgram();
@@ -438,11 +438,11 @@ TEST(ProgramInfoLogIsEmptyAfterSuccessfulLink) {
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(FragmentOutputLocationsAreBoundedAndUnique) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* five_outputs =
       "#version 300 es\n"
       "precision mediump float;\n"
@@ -471,5 +471,5 @@ TEST(FragmentOutputLocationsAreBoundedAndUnique) {
   EXPECT_EQ(status, GL_FALSE);
   glDeleteShader(fs);
   glDeleteShader(duplicate_shader);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

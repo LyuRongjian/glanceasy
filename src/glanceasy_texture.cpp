@@ -1,8 +1,8 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/zgl_texture.h"
+#include "src/glanceasy_texture.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -13,7 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace zgl {
+namespace glanceasy {
 
 namespace {
 
@@ -262,7 +262,7 @@ void FetchTexel(const TextureImage& image, size_t index, float rgba[4]) {
     return;
   }
   UnpackRgba(image.rgba[index], rgba);
-  if (getenv("ZGL_DEBUG_TEXFETCH")) {
+  if (getenv("GLANCEASY_DEBUG_TEXFETCH")) {
     static int dbg = 0;
     if (dbg++ < 3) {
       uint8_t px[4];
@@ -274,7 +274,7 @@ void FetchTexel(const TextureImage& image, size_t index, float rgba[4]) {
     }
   }
   if (image.srgb) {
-    if (getenv("ZGL_DEBUG_SRGB")) {
+    if (getenv("GLANCEASY_DEBUG_SRGB")) {
       static int dbg = 0;
       if (dbg++ < 3)
         fprintf(stderr, "[fetch] raw=%u %.4f %.4f %.4f\n",
@@ -441,7 +441,7 @@ void SampleTexture2D(const Texture& texture,
   out[1] = 0.0f;
   out[2] = 0.0f;
   out[3] = 1.0f;
-  if (getenv("ZGL_DEBUG_TEX")) {
+  if (getenv("GLANCEASY_DEBUG_TEX")) {
     static int sdbg = 0;
     if (sdbg < 8) {
       const TextureImage* im0 = texture.image(0, 0);
@@ -454,7 +454,7 @@ void SampleTexture2D(const Texture& texture,
   }
   if (!texture.IsComplete())
     return;
-  if (getenv("ZGL_DEBUG_TEX")) {
+  if (getenv("GLANCEASY_DEBUG_TEX")) {
     const TextureImage* im = texture.image(0, 0);
     if (im && im->width != 128) {
       static int idbg = 0;
@@ -505,7 +505,7 @@ void SampleTexture2D(const Texture& texture,
   const bool magnified = clamped_lod <= 0.0f;
   const GLenum filter =
       magnified ? mag_filter : BaseFilter(min_filter);
-  if (getenv("ZGL_DEBUG_FILT") && clamped_lod >= 0.0f) {
+  if (getenv("GLANCEASY_DEBUG_FILT") && clamped_lod >= 0.0f) {
     static int fdbg = 0;
     if (fdbg < 8) {
       fprintf(stderr, "[filt] lod=%.3f clamped=%.3f min=%x mag=%x filter=%x s=%.5f t=%.5f\n",
@@ -551,7 +551,7 @@ void SampleTexture2D(const Texture& texture,
     fetch(x0 + 1, y0, c10);
     fetch(x0, y0 + 1, c01);
     fetch(x0 + 1, y0 + 1, c11);
-    if (getenv("ZGL_DEBUG_TEX")) {
+    if (getenv("GLANCEASY_DEBUG_TEX")) {
       static int tdbg = 0;
       if (tdbg < 4) {
         fprintf(stderr, "[tap] s=%.6f t=%.6f px=%.3f py=%.3f xy=%d,%d f=%.4f,%.4f c00=%.4f c10=%.4f c01=%.4f c11=%.4f\n",
@@ -644,7 +644,7 @@ void SampleTexture2DArray(const Texture& texture,
                     static_cast<int>(std::floor(layer + 0.5f))));
     const size_t base =
         static_cast<size_t>(slice) * image->width * image->height;
-    if (getenv("ZGL_DEBUG_TEXARR")) {
+    if (getenv("GLANCEASY_DEBUG_TEXARR")) {
       static int dbg = 0;
       if (dbg++ < 6)
         fprintf(stderr,
@@ -657,7 +657,7 @@ void SampleTexture2DArray(const Texture& texture,
     }
     SampleImage2DLevel(*image, s, t, level_filter, wrap_s, wrap_t, base,
                        result);
-    if (getenv("ZGL_DEBUG_TEXARR")) {
+    if (getenv("GLANCEASY_DEBUG_TEXARR")) {
       static int dval = 0;
       if (dval++ < 6) {
         size_t nz = 0;
@@ -674,7 +674,7 @@ void SampleTexture2DArray(const Texture& texture,
                     ? image->depth16[base + image->width]
                     : 0u);
       }
-      if (getenv("ZGL_DEBUG_ARR_LAYERS")) {
+      if (getenv("GLANCEASY_DEBUG_ARR_LAYERS")) {
         static int ldbg = 0;
         if (ldbg++ < 1) {
           for (int s2 = 0; s2 < image->depth; ++s2) {
@@ -862,7 +862,7 @@ void SampleTextureCube(const Texture& texture,
   const bool magnified = clamped_lod <= 0.0f;
   const GLenum filter =
       magnified ? mag_filter : BaseFilter(min_filter);
-  if (compare_func != 0 && getenv("ZGL_DEBUG_CUBE_LEVEL")) {
+  if (compare_func != 0 && getenv("GLANCEASY_DEBUG_CUBE_LEVEL")) {
     static float dbg_ref = -99.0f;
     static int dbg_level = -1;
     static GLenum dbg_filter = 0;
@@ -1073,7 +1073,7 @@ void SampleTextureCube(const Texture& texture,
     if (!level_image || level_image->width <= 0 ||
         !ImageHasTexels(*level_image))
       return;
-    if (getenv("ZGL_DEBUG_CUBE") && level == 2 && face == 0) {
+    if (getenv("GLANCEASY_DEBUG_CUBE") && level == 2 && face == 0) {
       static int td = 0;
       if (td++ == 0) {
         float rgba[4];
@@ -1087,7 +1087,7 @@ void SampleTextureCube(const Texture& texture,
                 level_image->rgba.size());
       }
     }
-    if (getenv("ZGL_DEBUG_CUBE")) {
+    if (getenv("GLANCEASY_DEBUG_CUBE")) {
       static int cdbg = 0;
       if (level > 0 && cdbg++ < 8)
         fprintf(stderr, "[cube] base=%dx%d level=%d face=%d %dx%d lod=%.3f frac=%.3f filter=%x\n",
@@ -1115,7 +1115,7 @@ void SampleTextureCube(const Texture& texture,
     const float py = lt * level_image->height - 0.5f;
     const int x0 = static_cast<int>(std::floor(px));
     const int y0 = static_cast<int>(std::floor(py));
-    if (getenv("ZGL_DEBUG_CUBE") && level > 0) {
+    if (getenv("GLANCEASY_DEBUG_CUBE") && level > 0) {
       static int tdbg = 0;
       if (tdbg++ < 4)
         fprintf(stderr, "[ctap] level=%d s=%.5f t=%.5f px=%.3f py=%.3f x0=%d y0=%d\n",
@@ -1239,7 +1239,7 @@ void SampleTexture3D(const Texture& texture,
     if (!image || image->width <= 0 || !ImageHasTexels(*image))
       return;
     const int depth = std::max(1, image->depth);
-    if (getenv("ZGL_DEBUG_3D")) {
+    if (getenv("GLANCEASY_DEBUG_3D")) {
       static int dbg3d = 0;
       if (dbg3d++ < 24)
         fprintf(stderr,
@@ -1288,7 +1288,7 @@ void SampleTexture3D(const Texture& texture,
     };
     if (depth == 1) {
       sample_slice(0, result);
-      if (getenv("ZGL_DEBUG_3D"))
+      if (getenv("GLANCEASY_DEBUG_3D"))
         fprintf(stderr, "[tex3d-out] %.4f %.4f %.4f %.4f\n", result[0],
                 result[1], result[2], result[3]);
       return;
@@ -1296,7 +1296,7 @@ void SampleTexture3D(const Texture& texture,
     if (level_filter == GL_NEAREST) {
       const int z = WrapTexel(static_cast<int>(r * depth), depth, wrap_r);
       sample_slice(z, result);
-      if (getenv("ZGL_DEBUG_3D"))
+      if (getenv("GLANCEASY_DEBUG_3D"))
         fprintf(stderr, "[tex3d-out] z=%d %.4f %.4f %.4f %.4f\n", z,
                 result[0], result[1], result[2], result[3]);
       return;
@@ -1744,4 +1744,4 @@ void GenerateMipmap(Texture* texture) {
   }
 }
 
-}  // namespace zgl
+}  // namespace glanceasy

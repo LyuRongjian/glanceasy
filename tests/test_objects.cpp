@@ -1,15 +1,15 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string.h>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 TEST(BufferObjectsStoreAndCopyData) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint buffers[2] = {};
   glGenBuffers(2, buffers);
   EXPECT_TRUE(glIsBuffer(buffers[0]) == GL_TRUE);
@@ -48,11 +48,11 @@ TEST(BufferObjectsStoreAndCopyData) {
 
   glDeleteBuffers(2, buffers);
   EXPECT_EQ(glIsBuffer(buffers[0]), GL_FALSE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(BufferRangesBehaveLikeTheSpecification) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint buffer = 0;
   glGenBuffers(1, &buffer);
   glBindBuffer(GL_ARRAY_BUFFER, buffer);
@@ -80,11 +80,11 @@ TEST(BufferRangesBehaveLikeTheSpecification) {
   glGetBufferParameteri64v(GL_ARRAY_BUFFER, GL_BUFFER_SIZE, &size64);
   EXPECT_EQ(size64, 16);
   glDeleteBuffers(1, &buffer);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ObjectLifecycleForTexturesAndFramebuffers) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint textures[2] = {};
   glGenTextures(2, textures);
   EXPECT_EQ(glIsTexture(textures[0]), GL_TRUE);
@@ -118,11 +118,11 @@ TEST(ObjectLifecycleForTexturesAndFramebuffers) {
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
   glGenBuffers(negative, nullptr);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(QueriesReportSampleCounts) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint query = 0;
   glGenQueries(1, &query);
   EXPECT_EQ(glIsQuery(query), GL_TRUE);
@@ -169,11 +169,11 @@ TEST(QueriesReportSampleCounts) {
   glDeleteProgram(program);
   glDeleteShader(vs);
   glDeleteShader(fs);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(FencesStartSignalledAndCanBeWaited) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   EXPECT_TRUE(sync != nullptr);
   EXPECT_EQ(glIsSync(sync), GL_TRUE);
@@ -187,11 +187,11 @@ TEST(FencesStartSignalledAndCanBeWaited) {
   EXPECT_EQ(glIsSync(sync), GL_FALSE);
   glClientWaitSync(sync, 0, 0);
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(MultipleColourAttachmentsResolveForReading) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   GLuint textures[2] = {};
   glGenTextures(2, textures);
   for (int i = 0; i < 2; ++i) {
@@ -226,11 +226,11 @@ TEST(MultipleColourAttachmentsResolveForReading) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteTextures(2, textures);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ReadPixelsHonoursPackAlignmentAndRowLength) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
   // A three pixel row with alignment one has no padding.
@@ -244,11 +244,11 @@ TEST(ReadPixelsHonoursPackAlignmentAndRowLength) {
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glPixelStorei(GL_PACK_ROW_LENGTH, 0);
   glPixelStorei(GL_PACK_ALIGNMENT, 4);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(BlitCopiesBetweenFramebuffersWithScaling) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   GLuint textures[2] = {};
   glGenTextures(2, textures);
   for (int i = 0; i < 2; ++i) {
@@ -288,11 +288,11 @@ TEST(BlitCopiesBetweenFramebuffersWithScaling) {
   glDeleteFramebuffers(1, &source);
   glDeleteFramebuffers(1, &destination);
   glDeleteTextures(2, textures);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UnsupportedFeaturesReportInvalidOperation) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint ids[2] = {7, 8};
   glGenTransformFeedbacks(2, ids);
   EXPECT_TRUE(ids[0] != 0);
@@ -320,5 +320,5 @@ TEST(UnsupportedFeaturesReportInvalidOperation) {
   glGetInteger64v(GL_MAX_TEXTURE_SIZE, &value);
   EXPECT_EQ(value, 4096);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

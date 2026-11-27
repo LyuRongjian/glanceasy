@@ -1,8 +1,8 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/zgl_texture_compressed.h"
+#include "src/glanceasy_texture_compressed.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
-namespace zgl {
+namespace glanceasy {
 
 namespace {
 
@@ -309,7 +309,7 @@ void DecodeEac11(uint8_t* rgba, uint64_t src, bool signed_mode, int channel) {
       value = multiplier != 0 ? base * 8 + multiplier * modifier * 8
                               : base * 8 + modifier;
       value = std::max(-1023, std::min(1023, value));
-      if (getenv("ZGL_DEBUG_EAC") && i < 4)
+      if (getenv("GLANCEASY_DEBUG_EAC") && i < 4)
         fprintf(stderr, "[eac] src=%llx base=%d mul=%d tab=%u idx=%u mod=%d raw=%d\n",
                 (unsigned long long)src, base, multiplier, table, index,
                 modifier, value);
@@ -433,4 +433,4 @@ bool DecodeSignedEacBlock(GLenum format, const uint8_t* block, float* rgba) {
   return true;
 }
 
-}  // namespace zgl
+}  // namespace glanceasy

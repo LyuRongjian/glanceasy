@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -18,10 +18,10 @@
 #include <vector>
 
 #include "GLES3/gl32.h"
-#include "src/zgl_api_common.h"
-#include "src/zgl_draw.h"
+#include "src/glanceasy_api_common.h"
+#include "src/glanceasy_draw.h"
 
-namespace zgl {
+namespace glanceasy {
 
 GLenum GlslTypeToGlEnum(const glsl::Type& type);
 
@@ -34,14 +34,14 @@ void Reject() {
 }
 
 }  // namespace
-}  // namespace zgl
+}  // namespace glanceasy
 
 extern "C" {
 
 // ---- Transform feedback ---------------------------------------------------
 
 void glGenTransformFeedbacks(GLsizei n, GLuint* ids) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -55,7 +55,7 @@ void glGenTransformFeedbacks(GLsizei n, GLuint* ids) {
 }
 
 void glDeleteTransformFeedbacks(GLsizei n, const GLuint* ids) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -67,7 +67,7 @@ void glDeleteTransformFeedbacks(GLsizei n, const GLuint* ids) {
   for (GLsizei i = 0; i < n; ++i) {
     if (ids[i] == 0)
       continue;
-    zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+    glanceasy::TransformFeedback* current = glanceasy::CurrentTransformFeedback(context);
     if (current && current->active &&
         context->state.transform_feedback == ids[i]) {
       context->SetError(GL_INVALID_OPERATION);
@@ -80,14 +80,14 @@ void glDeleteTransformFeedbacks(GLsizei n, const GLuint* ids) {
 }
 
 GLboolean glIsTransformFeedback(GLuint id) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || id == 0)
     return GL_FALSE;
   return context->transform_feedbacks.Get(id) ? GL_TRUE : GL_FALSE;
 }
 
 void glBindTransformFeedback(GLenum target, GLuint id) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (target != GL_TRANSFORM_FEEDBACK) {
@@ -98,7 +98,7 @@ void glBindTransformFeedback(GLenum target, GLuint id) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  glanceasy::TransformFeedback* current = glanceasy::CurrentTransformFeedback(context);
   if (current && current->active) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -107,7 +107,7 @@ void glBindTransformFeedback(GLenum target, GLuint id) {
 }
 
 void glBeginTransformFeedback(GLenum primitive_mode) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   switch (primitive_mode) {
@@ -119,12 +119,12 @@ void glBeginTransformFeedback(GLenum primitive_mode) {
       context->SetError(GL_INVALID_ENUM);
       return;
   }
-  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  glanceasy::TransformFeedback* current = glanceasy::CurrentTransformFeedback(context);
   if (!current || current->active) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::ProgramObject* object = context->programs.Get(context->state.program);
+  glanceasy::ProgramObject* object = context->programs.Get(context->state.program);
   if (!object || !object->linked || !object->program ||
       object->program->transform_feedback_varyings().empty()) {
     context->SetError(GL_INVALID_OPERATION);
@@ -134,7 +134,7 @@ void glBeginTransformFeedback(GLenum primitive_mode) {
        object->program->transform_feedback_varyings()) {
     const int buffer_index = varying.buffer_index;
     if (buffer_index < 0 ||
-        buffer_index >= zgl::kMaxTransformFeedbackBuffers ||
+        buffer_index >= glanceasy::kMaxTransformFeedbackBuffers ||
         current->buffers[buffer_index].buffer == 0) {
       context->SetError(GL_INVALID_OPERATION);
       return;
@@ -144,15 +144,15 @@ void glBeginTransformFeedback(GLenum primitive_mode) {
   current->paused = false;
   current->primitive_mode = primitive_mode;
   current->vertex_count = 0;
-  for (int i = 0; i < zgl::kMaxTransformFeedbackBuffers; ++i)
+  for (int i = 0; i < glanceasy::kMaxTransformFeedbackBuffers; ++i)
     current->cursors[i] = 0;
 }
 
 void glEndTransformFeedback(void) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  glanceasy::TransformFeedback* current = glanceasy::CurrentTransformFeedback(context);
   if (!current || !current->active) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -162,10 +162,10 @@ void glEndTransformFeedback(void) {
 }
 
 void glPauseTransformFeedback(void) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  glanceasy::TransformFeedback* current = glanceasy::CurrentTransformFeedback(context);
   if (!current || !current->active || current->paused) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -174,10 +174,10 @@ void glPauseTransformFeedback(void) {
 }
 
 void glResumeTransformFeedback(void) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::TransformFeedback* current = zgl::CurrentTransformFeedback(context);
+  glanceasy::TransformFeedback* current = glanceasy::CurrentTransformFeedback(context);
   if (!current || !current->active || !current->paused) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -189,10 +189,10 @@ void glTransformFeedbackVaryings(GLuint program,
                                  GLsizei count,
                                  const GLchar* const* varyings,
                                  GLenum buffer_mode) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
+  glanceasy::ProgramObject* object = context->programs.Get(program);
   if (!object) {
     context->SetError(GL_INVALID_VALUE);
     return;
@@ -207,7 +207,7 @@ void glTransformFeedbackVaryings(GLuint program,
     return;
   }
   if (buffer_mode == GL_SEPARATE_ATTRIBS &&
-      count > zgl::kMaxTransformFeedbackBuffers) {
+      count > glanceasy::kMaxTransformFeedbackBuffers) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -230,10 +230,10 @@ void glGetTransformFeedbackVarying(GLuint program,
                                    GLsizei* size,
                                    GLenum* type,
                                    GLchar* name) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
+  glanceasy::ProgramObject* object = context->programs.Get(program);
   if (!object) {
     context->SetError(context->FindShader(program) ? GL_INVALID_OPERATION
                                                    : GL_INVALID_VALUE);
@@ -248,20 +248,20 @@ void glGetTransformFeedbackVarying(GLuint program,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  const zgl::glsl::TransformFeedbackVaryingInfo& varying = varyings[index];
+  const glanceasy::glsl::TransformFeedbackVaryingInfo& varying = varyings[index];
   const int copy = buffer_size > 0
                        ? std::min(static_cast<int>(varying.name.size()),
                                   static_cast<int>(buffer_size) - 1)
                        : 0;
   if (length)
     *length = copy;
-  const zgl::glsl::Type& declared = varying.type;
-  const zgl::glsl::Type& element =
+  const glanceasy::glsl::Type& declared = varying.type;
+  const glanceasy::glsl::Type& element =
       declared.is_array() ? declared.array_element() : declared;
   if (size)
     *size = declared.is_array() ? declared.array_size() : 1;
   if (type)
-    *type = zgl::GlslTypeToGlEnum(element);
+    *type = glanceasy::GlslTypeToGlEnum(element);
   if (name && buffer_size > 0) {
     const int copy = std::min(static_cast<int>(varying.name.size()),
                               static_cast<int>(buffer_size) - 1);
@@ -271,10 +271,10 @@ void glGetTransformFeedbackVarying(GLuint program,
 }
 
 void glDrawTransformFeedback(GLenum mode, GLuint id) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::TransformFeedback* feedback = context->transform_feedbacks.Get(id);
+  glanceasy::TransformFeedback* feedback = context->transform_feedbacks.Get(id);
   if (!feedback) {
     context->SetError(GL_INVALID_VALUE);
     return;
@@ -295,40 +295,40 @@ void glDrawTransformFeedback(GLenum mode, GLuint id) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::Draw(mode, 0, feedback->vertex_count, GL_NONE, nullptr, 1);
+  glanceasy::Draw(mode, 0, feedback->vertex_count, GL_NONE, nullptr, 1);
 }
 
 // ---- Buffer binding points and 64-bit queries -----------------------------
 
 void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   const bool transform_feedback = target == GL_TRANSFORM_FEEDBACK_BUFFER;
   if (target != GL_UNIFORM_BUFFER && !transform_feedback) {
     if (target == GL_SHADER_STORAGE_BUFFER) {
-      zgl::Reject();
+      glanceasy::Reject();
     } else {
       context->SetError(GL_INVALID_ENUM);
     }
     return;
   }
   const GLuint limit = static_cast<GLuint>(
-      transform_feedback ? zgl::kMaxTransformFeedbackBuffers
-                         : zgl::kMaxUniformBufferBindings);
+      transform_feedback ? glanceasy::kMaxTransformFeedbackBuffers
+                         : glanceasy::kMaxUniformBufferBindings);
   if (index >= limit) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::TransformFeedback* feedback =
-      transform_feedback ? zgl::CurrentTransformFeedback(context) : nullptr;
+  glanceasy::TransformFeedback* feedback =
+      transform_feedback ? glanceasy::CurrentTransformFeedback(context) : nullptr;
   if (transform_feedback && (!feedback || feedback->active)) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::IndexedBufferBinding binding;
+  glanceasy::IndexedBufferBinding binding;
   if (buffer != 0) {
-    zgl::Buffer* object = context->buffers.GetOrCreate(buffer);
+    glanceasy::Buffer* object = context->buffers.GetOrCreate(buffer);
     if (!object) {
       context->SetError(GL_INVALID_OPERATION);
       return;
@@ -350,21 +350,21 @@ void glBindBufferRange(GLenum target,
                        GLuint buffer,
                        GLintptr offset,
                        GLsizeiptr size) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   const bool transform_feedback = target == GL_TRANSFORM_FEEDBACK_BUFFER;
   if (target != GL_UNIFORM_BUFFER && !transform_feedback) {
     if (target == GL_SHADER_STORAGE_BUFFER) {
-      zgl::Reject();
+      glanceasy::Reject();
     } else {
       context->SetError(GL_INVALID_ENUM);
     }
     return;
   }
   const GLuint limit = static_cast<GLuint>(
-      transform_feedback ? zgl::kMaxTransformFeedbackBuffers
-                         : zgl::kMaxUniformBufferBindings);
+      transform_feedback ? glanceasy::kMaxTransformFeedbackBuffers
+                         : glanceasy::kMaxUniformBufferBindings);
   if (index >= limit) {
     context->SetError(GL_INVALID_VALUE);
     return;
@@ -377,15 +377,15 @@ void glBindBufferRange(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::TransformFeedback* feedback =
-      transform_feedback ? zgl::CurrentTransformFeedback(context) : nullptr;
+  glanceasy::TransformFeedback* feedback =
+      transform_feedback ? glanceasy::CurrentTransformFeedback(context) : nullptr;
   if (transform_feedback && (!feedback || feedback->active)) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::IndexedBufferBinding binding;
+  glanceasy::IndexedBufferBinding binding;
   if (buffer != 0) {
-    zgl::Buffer* object = context->buffers.Get(buffer);
+    glanceasy::Buffer* object = context->buffers.Get(buffer);
     if (!object) {
       context->SetError(GL_INVALID_OPERATION);
       return;
@@ -422,8 +422,8 @@ void glGetInteger64v(GLenum pname, GLint64* data) {
     return;
   GLint value = 0;
   int count = 1;
-  zgl::Context* context = zgl::ApiContext();
-  if (!context || !zgl::GetIntegerValue(context, pname, &value, &count)) {
+  glanceasy::Context* context = glanceasy::ApiContext();
+  if (!context || !glanceasy::GetIntegerValue(context, pname, &value, &count)) {
     if (context)
       context->SetError(GL_INVALID_ENUM);
     return;
@@ -439,14 +439,14 @@ void glGetInteger64v(GLenum pname, GLint64* data) {
 }
 
 void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !data)
     return;
   switch (pname) {
     case GL_UNIFORM_BUFFER_BINDING:
     case GL_UNIFORM_BUFFER_START:
     case GL_UNIFORM_BUFFER_SIZE:
-      if (index >= static_cast<GLuint>(zgl::kMaxUniformBufferBindings)) {
+      if (index >= static_cast<GLuint>(glanceasy::kMaxUniformBufferBindings)) {
         context->SetError(GL_INVALID_VALUE);
         return;
       }
@@ -457,7 +457,7 @@ void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
         data[0] =
             static_cast<GLint>(context->state.uniform_buffers[index].offset);
       } else {
-        const zgl::IndexedBufferBinding& binding =
+        const glanceasy::IndexedBufferBinding& binding =
             context->state.uniform_buffers[index];
         data[0] = binding.whole_buffer
                       ? 0
@@ -467,11 +467,11 @@ void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
     case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
     case GL_TRANSFORM_FEEDBACK_BUFFER_START:
     case GL_TRANSFORM_FEEDBACK_BUFFER_SIZE: {
-      if (index >= static_cast<GLuint>(zgl::kMaxTransformFeedbackBuffers)) {
+      if (index >= static_cast<GLuint>(glanceasy::kMaxTransformFeedbackBuffers)) {
         context->SetError(GL_INVALID_VALUE);
         return;
       }
-      zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+      glanceasy::TransformFeedback* feedback = glanceasy::CurrentTransformFeedback(context);
       if (!feedback) {
         context->SetError(GL_INVALID_OPERATION);
         return;
@@ -481,7 +481,7 @@ void glGetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
       else if (pname == GL_TRANSFORM_FEEDBACK_BUFFER_START)
         data[0] = static_cast<GLint>(feedback->buffers[index].offset);
       else {
-        const zgl::IndexedBufferBinding& binding = feedback->buffers[index];
+        const glanceasy::IndexedBufferBinding& binding = feedback->buffers[index];
         data[0] = binding.whole_buffer
                       ? 0
                       : static_cast<GLint>(binding.size);
@@ -532,25 +532,25 @@ void glDispatchCompute(GLuint num_groups_x,
   (void)num_groups_x;
   (void)num_groups_y;
   (void)num_groups_z;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glDispatchComputeIndirect(GLintptr indirect) {
   (void)indirect;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glDrawArraysIndirect(GLenum mode, const void* indirect) {
   (void)mode;
   (void)indirect;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glDrawElementsIndirect(GLenum mode, GLenum type, const void* indirect) {
   (void)mode;
   (void)type;
   (void)indirect;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glMemoryBarrier(GLbitfield barriers) {
@@ -575,7 +575,7 @@ void glBindImageTexture(GLuint unit,
   (void)layer;
   (void)access;
   (void)format;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glShaderStorageBlockBinding(GLuint program,
@@ -584,7 +584,7 @@ void glShaderStorageBlockBinding(GLuint program,
   (void)program;
   (void)storage_block_index;
   (void)storage_block_binding;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 // ---- Uniform blocks -------------------------------------------------------
@@ -678,7 +678,7 @@ void glGetProgramBinary(GLuint program,
     *length = 0;
   if (binary_format)
     *binary_format = 0;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glProgramBinary(GLuint program,
@@ -689,14 +689,14 @@ void glProgramBinary(GLuint program,
   (void)binary_format;
   (void)binary;
   (void)length;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glProgramParameteri(GLuint program, GLenum pname, GLint value) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::ProgramObject* object = context->programs.Get(program);
+  glanceasy::ProgramObject* object = context->programs.Get(program);
   if (!object) {
     context->SetError(GL_INVALID_VALUE);
     return;
@@ -728,11 +728,11 @@ void glTexStorage3DMultisample(GLenum target,
   (void)height;
   (void)depth;
   (void)fixed_sample_locations;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glGetMultisamplefv(GLenum pname, GLuint index, GLfloat* value) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!value)
     return;
   if (pname != GL_SAMPLE_POSITION) {
@@ -740,7 +740,7 @@ void glGetMultisamplefv(GLenum pname, GLuint index, GLfloat* value) {
       context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (index >= static_cast<GLuint>(zgl::kMaxSamples)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxSamples)) {
     if (context)
       context->SetError(GL_INVALID_VALUE);
     return;
@@ -780,7 +780,7 @@ void glTexBuffer(GLenum target, GLenum internal_format, GLuint buffer) {
   (void)target;
   (void)internal_format;
   (void)buffer;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glTexBufferRange(GLenum target,
@@ -793,7 +793,7 @@ void glTexBufferRange(GLenum target,
   (void)buffer;
   (void)offset;
   (void)size;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glCopyImageSubData(GLuint src_name,
@@ -826,7 +826,7 @@ void glCopyImageSubData(GLuint src_name,
   (void)src_width;
   (void)src_height;
   (void)src_depth;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 // ---- Tessellation and geometry -------------------------------------------
@@ -834,7 +834,7 @@ void glCopyImageSubData(GLuint src_name,
 void glPatchParameteri(GLenum pname, GLint value) {
   (void)pname;
   (void)value;
-  zgl::Reject();
+  glanceasy::Reject();
 }
 
 void glPrimitiveBoundingBox(GLfloat min_x,
@@ -872,7 +872,7 @@ void glGetInternalformativ(GLenum target,
                            GLenum pname,
                            GLsizei buffer_size,
                            GLint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (buffer_size < 0) {

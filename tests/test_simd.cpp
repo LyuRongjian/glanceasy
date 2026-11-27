@@ -1,14 +1,14 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdint.h>
 #include <string.h>
 
-#include "src/zgl_simd.h"
-#include "tests/zgl_test.h"
+#include "src/glanceasy_simd.h"
+#include "tests/glanceasy_test.h"
 
-using namespace zgl::simd;
+using namespace glanceasy::simd;
 
 TEST(SimdDotAndScaleMatchScalar) {
   float a[16];

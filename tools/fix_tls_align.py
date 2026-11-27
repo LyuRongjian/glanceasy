@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+# Copyright 2026 The Glanceasy Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Raise the PT_TLS alignment of an ELF32 ARM executable to 32 bytes.

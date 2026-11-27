@@ -1,14 +1,14 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_ZGL_API_COMMON_H_
-#define ZGL_SRC_ZGL_API_COMMON_H_
+#ifndef GLANCEASY_SRC_API_COMMON_H_
+#define GLANCEASY_SRC_API_COMMON_H_
 
 #include "GLES3/gl32.h"
-#include "src/zgl_context.h"
+#include "src/glanceasy_context.h"
 
-namespace zgl {
+namespace glanceasy {
 
 // The context the entry point should operate on.  Entry points are no-ops
 // when no context is current, matching the behaviour of a null EGL context.
@@ -44,6 +44,6 @@ int MipLevelCount(int width, int height);
 // vector use glGetIntegerv().
 bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count);
 
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_ZGL_API_COMMON_H_
+#endif  // GLANCEASY_SRC_API_COMMON_H_

@@ -1,9 +1,9 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_GLSL_GLSL_PARSER_H_
-#define ZGL_SRC_GLSL_GLSL_PARSER_H_
+#ifndef GLANCEASY_SRC_GLSL_GLSL_PARSER_H_
+#define GLANCEASY_SRC_GLSL_GLSL_PARSER_H_
 
 #include <memory>
 #include <string>
@@ -13,7 +13,7 @@
 #include "src/glsl/glsl_ast.h"
 #include "src/glsl/glsl_lexer.h"
 
-namespace zgl {
+namespace glanceasy {
 namespace glsl {
 
 // Recursive descent parser for the GLSL ES 1.00 / 3.00 subset documented in
@@ -162,6 +162,6 @@ class Parser {
 };
 
 }  // namespace glsl
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_GLSL_GLSL_PARSER_H_
+#endif  // GLANCEASY_SRC_GLSL_GLSL_PARSER_H_

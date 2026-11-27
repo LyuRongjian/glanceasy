@@ -1,8 +1,8 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/zgl_context.h"
+#include "src/glanceasy_context.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -13,9 +13,9 @@
 #include <memory>
 #include <string>
 
-#include "zgl/zgl.h"
+#include "glanceasy/glanceasy.h"
 
-namespace zgl {
+namespace glanceasy {
 
 namespace {
 
@@ -303,14 +303,14 @@ RenderTarget ResolveFramebuffer(Context* context, GLuint framebuffer_name) {
       target.color_is_unsigned[i] = IsUnsignedIntegerFormat(format);
       target.color_has_alpha[i] = FormatHasAlpha(format);
       target.color_is_srgb[i] = format == GL_SRGB8_ALPHA8;
-      if (getenv("ZGL_DEBUG_SRGB"))
+      if (getenv("GLANCEASY_DEBUG_SRGB"))
         fprintf(stderr, "[rt] attach=%d format=0x%x srgb=%d\n", i, format,
                 (int)target.color_is_srgb[i]);
       target.color_format[i] = format;
       target.color_channels[i] = FormatColorChannels(format);
       target.color_integer_bits[i] = FormatIntegerBits(format, 0);
       target.color_bytes[i] = integer ? 16 : 4;
-      if (getenv("ZGL_DEBUG_INT")) {
+      if (getenv("GLANCEASY_DEBUG_INT")) {
         static int rt_debug = 0;
         if (rt_debug < 12) {
           fprintf(stderr, "[rtint] i=%d fmt=0x%x int=%d sz=%zu rgba=%zu\n", i,
@@ -508,7 +508,7 @@ Context::Context(int width, int height) {
     state.current_attribute[i][3] = 1.0f;
     state.current_attribute_integer[i][3] = 1;
   }
-  diagnostics = "ZCat-GLES 0.1.0 RGBA8/16-bit depth/8-bit stencil";
+  diagnostics = "Glanceasy 0.1.0 RGBA8/16-bit depth/8-bit stencil";
   ++g_live_contexts;
 }
 
@@ -619,75 +619,75 @@ void SetError(GLenum error) {
     g_current_context->SetError(error);
 }
 
-}  // namespace zgl
+}  // namespace glanceasy
 
 // ---------------------------------------------------------------------------
 // Context lifetime, the only entry points that are not part of GL ES.
 
 extern "C" {
 
-int zglCreateContext(int width, int height) {
+int glanceasyCreateContext(int width, int height) {
   if (width <= 0 || height <= 0)
     return 0;
-  zgl::g_default_context.reset(new zgl::Context(width, height));
-  zgl::SetCurrentContext(zgl::g_default_context.get());
+  glanceasy::g_default_context.reset(new glanceasy::Context(width, height));
+  glanceasy::SetCurrentContext(glanceasy::g_default_context.get());
   return 1;
 }
 
-void zglDestroyContext(void) {
-  if (zgl::g_current_context == zgl::g_default_context.get())
-    zgl::SetCurrentContext(nullptr);
-  zgl::g_default_context.reset();
+void glanceasyDestroyContext(void) {
+  if (glanceasy::g_current_context == glanceasy::g_default_context.get())
+    glanceasy::SetCurrentContext(nullptr);
+  glanceasy::g_default_context.reset();
 }
 
-int zglContextReady(void) {
-  return zgl::CurrentContext() ? 1 : 0;
+int glanceasyContextReady(void) {
+  return glanceasy::CurrentContext() ? 1 : 0;
 }
 
-ZglContext* zglCreateContextHandle(int width, int height) {
+GlanceasyContext* glanceasyCreateContextHandle(int width, int height) {
   if (width <= 0 || height <= 0)
     return nullptr;
-  return reinterpret_cast<ZglContext*>(new zgl::Context(width, height));
+  return reinterpret_cast<GlanceasyContext*>(new glanceasy::Context(width, height));
 }
 
-void zglDestroyContextHandle(ZglContext* context) {
+void glanceasyDestroyContextHandle(GlanceasyContext* context) {
   if (!context)
     return;
-  zgl::Context* ctx = reinterpret_cast<zgl::Context*>(context);
-  if (zgl::CurrentContext() == ctx)
-    zgl::SetCurrentContext(nullptr);
+  glanceasy::Context* ctx = reinterpret_cast<glanceasy::Context*>(context);
+  if (glanceasy::CurrentContext() == ctx)
+    glanceasy::SetCurrentContext(nullptr);
   delete ctx;
 }
 
-void zglMakeCurrent(ZglContext* context) {
-  zgl::SetCurrentContext(reinterpret_cast<zgl::Context*>(context));
+void glanceasyMakeCurrent(GlanceasyContext* context) {
+  glanceasy::SetCurrentContext(reinterpret_cast<glanceasy::Context*>(context));
 }
 
-ZglContext* zglGetCurrentContext(void) {
-  return reinterpret_cast<ZglContext*>(zgl::CurrentContext());
+GlanceasyContext* glanceasyGetCurrentContext(void) {
+  return reinterpret_cast<GlanceasyContext*>(glanceasy::CurrentContext());
 }
 
-int zglResizeContext(ZglContext* context, int width, int height) {
-  zgl::Context* ctx = reinterpret_cast<zgl::Context*>(context);
+int glanceasyResizeContext(GlanceasyContext* context, int width, int height) {
+  glanceasy::Context* ctx = reinterpret_cast<glanceasy::Context*>(context);
   if (!ctx)
-    ctx = zgl::CurrentContext();
+    ctx = glanceasy::CurrentContext();
   if (!ctx)
     return 0;
   return ctx->Resize(width, height) ? 1 : 0;
 }
 
-int zglGetWidth(void) {
-  zgl::Context* context = zgl::CurrentContext();
+int glanceasyGetWidth(void) {
+  glanceasy::Context* context = glanceasy::CurrentContext();
   return context ? context->surface.width : 0;
 }
 
-int zglGetHeight(void) {
-  zgl::Context* context = zgl::CurrentContext();
+int glanceasyGetHeight(void) {
+  glanceasy::Context* context = glanceasy::CurrentContext();
   return context ? context->surface.height : 0;
 }
 
-const uint8_t* zglGetPixels(int* width, int* height) {
-  zgl::Context* context = zgl::CurrentContext();
+const uint8_t* glanceasyGetPixels(int* width, int* height) {
+  glanceasy::Context* context = glanceasy::CurrentContext();
   if (!context)
     return nullptr;
   if (width)
@@ -697,29 +697,29 @@ const uint8_t* zglGetPixels(int* width, int* height) {
   return context->surface.rgba.data();
 }
 
-const uint32_t* zglGetPixels32(int* width, int* height) {
-  return reinterpret_cast<const uint32_t*>(zglGetPixels(width, height));
+const uint32_t* glanceasyGetPixels32(int* width, int* height) {
+  return reinterpret_cast<const uint32_t*>(glanceasyGetPixels(width, height));
 }
 
-void zglGetStats(ZglStats* stats) {
+void glanceasyGetStats(GlanceasyStats* stats) {
   if (!stats)
     return;
-  zgl::Context* context = zgl::CurrentContext();
-  *stats = context ? context->stats : ZglStats{};
+  glanceasy::Context* context = glanceasy::CurrentContext();
+  *stats = context ? context->stats : GlanceasyStats{};
 }
 
-void zglResetStats(void) {
-  zgl::Context* context = zgl::CurrentContext();
+void glanceasyResetStats(void) {
+  glanceasy::Context* context = glanceasy::CurrentContext();
   if (context)
-    context->stats = ZglStats{};
+    context->stats = GlanceasyStats{};
 }
 
-int zglLiveContextCount(void) {
-  return zgl::LiveContextCount();
+int glanceasyLiveContextCount(void) {
+  return glanceasy::LiveContextCount();
 }
 
-const char* zglGetDiagnostics(void) {
-  zgl::Context* context = zgl::CurrentContext();
+const char* glanceasyGetDiagnostics(void) {
+  glanceasy::Context* context = glanceasy::CurrentContext();
   if (!context)
     return "";
   return context->diagnostics.c_str();

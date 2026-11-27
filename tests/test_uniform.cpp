@@ -1,10 +1,10 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -42,7 +42,7 @@ void DrawAndRead(unsigned char* rgba) {
 }  // namespace
 
 TEST(MatrixUniformsHonourTheTransposeFlag) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -73,11 +73,11 @@ TEST(MatrixUniformsHonourTheTransposeFlag) {
   glUniformMatrix3fv(location, 1, GL_FALSE, values);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(FloatUniformsRejectMismatchedComponentCounts) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -110,15 +110,15 @@ TEST(FloatUniformsRejectMismatchedComponentCounts) {
   glUniform1f(99, 1.0f);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformUpdatesWithoutAProgramAreIgnored) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glUniform1f(0, 1.0f);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
   glUniformMatrix4fv(0, 1, GL_FALSE, identity);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

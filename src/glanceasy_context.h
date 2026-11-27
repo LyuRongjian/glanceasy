@@ -1,9 +1,9 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_ZGL_CONTEXT_H_
-#define ZGL_SRC_ZGL_CONTEXT_H_
+#ifndef GLANCEASY_SRC_CONTEXT_H_
+#define GLANCEASY_SRC_CONTEXT_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -20,10 +20,10 @@
 
 #include "GLES3/gl32.h"
 #include "src/glsl/glsl_program.h"
-#include "src/zgl_common.h"
-#include "zgl/zgl.h"
+#include "src/glanceasy_common.h"
+#include "glanceasy/glanceasy.h"
 
-namespace zgl {
+namespace glanceasy {
 
 // Returns the number of color channels carried by an internal format.
 int FormatColorChannels(GLenum format);
@@ -646,13 +646,13 @@ class Context {
   RenderTarget GetDrawTarget();
   RenderTarget GetReadTarget();
 
-  // The colour buffer that zglGetPixels() exposes.
+  // The colour buffer that glanceasyGetPixels() exposes.
   const uint8_t* color_bytes() const { return surface.rgba.data(); }
 
   void SetError(GLenum error) {
     if (error == GL_NO_ERROR)
       return;
-    if (getenv("ZGL_DEBUG_ERROR"))
+    if (getenv("GLANCEASY_DEBUG_ERROR"))
       fprintf(stderr, "[glerr] 0x%x\n", static_cast<unsigned>(error));
     if (error_ == GL_NO_ERROR)
       error_ = error;
@@ -685,7 +685,7 @@ class Context {
   ObjectTable<Sampler> samplers;
   ObjectTable<SyncObject> syncs;
 
-  ZglStats stats = {};
+  GlanceasyStats stats = {};
   std::string diagnostics;
 
   // Shaders deleted while a program still references them.  The GL
@@ -717,6 +717,6 @@ int LiveContextCount();
 // Sets the sticky error of the current context.
 void SetError(GLenum error);
 
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_ZGL_CONTEXT_H_
+#endif  // GLANCEASY_SRC_CONTEXT_H_

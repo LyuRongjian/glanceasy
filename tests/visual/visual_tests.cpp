@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -20,16 +20,16 @@
 
 #include "GLES3/gl32.h"
 #include "tests/visual/visual_common.h"
-#include "zgl/zgl.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 
 bool FinishCase(const char* path, int width, int height, bool ok) {
-  if (!zglvis::TakeGlError("case"))
+  if (!glanceasyvis::TakeGlError("case"))
     ok = false;
-  if (!zglvis::WritePpm(path, width, height))
+  if (!glanceasyvis::WritePpm(path, width, height))
     ok = false;
   return ok;
 }
@@ -38,7 +38,7 @@ bool FinishCase(const char* path, int width, int height, bool ok) {
 // 01: A full-screen gradient with a vignette, using mix() and smoothstep().
 
 bool RenderGradient(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -59,18 +59,18 @@ bool RenderGradient(const char* path, int width, int height) {
       "  gl_FragColor = vec4(colour, 1.0);\n"
       "}\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}});
   if (!program)
     return false;
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
-  zglvis::DrawFullscreenTriangle();
+  glanceasyvis::DrawFullscreenTriangle();
   unsigned char centre[4] = {};
   unsigned char top[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
-  zglvis::ReadTexel(width / 2, 2, width, height, top);
-  bool ok = !zglvis::ColourIsDark(centre) && centre[2] > centre[0];
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(width / 2, 2, width, height, top);
+  bool ok = !glanceasyvis::ColourIsDark(centre) && centre[2] > centre[0];
   glDeleteProgram(program);
   return FinishCase(path, width, height, ok);
 }
@@ -80,7 +80,7 @@ bool RenderGradient(const char* path, int width, int height) {
 // interpolation.
 
 bool RenderTriangle(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -94,7 +94,7 @@ bool RenderTriangle(const char* path, int width, int height) {
       "varying vec3 v_color;\n"
       "void main() { gl_FragColor = vec4(v_color, 1.0); }\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
   if (!program)
     return false;
   static const float kPositions[] = {-0.85f, -0.85f, 0.85f, -0.85f, 0.05f, 0.85f};
@@ -111,9 +111,9 @@ bool RenderTriangle(const char* path, int width, int height) {
   glDrawArrays(GL_TRIANGLES, 0, 3);
   unsigned char centre[4] = {};
   unsigned char left[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
-  zglvis::ReadTexel(width * 2 / 5, height * 4 / 5, width, height, left);
-  bool ok = !zglvis::ColourIsDark(centre) && left[0] > left[2];
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(width * 2 / 5, height * 4 / 5, width, height, left);
+  bool ok = !glanceasyvis::ColourIsDark(centre) && left[0] > left[2];
   glDeleteProgram(program);
   return FinishCase(path, width, height, ok);
 }
@@ -122,7 +122,7 @@ bool RenderTriangle(const char* path, int width, int height) {
 // 03: An indexed quad backed by an element buffer.
 
 bool RenderIndexedQuad(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -136,7 +136,7 @@ bool RenderIndexedQuad(const char* path, int width, int height) {
       "varying vec3 v_color;\n"
       "void main() { gl_FragColor = vec4(v_color, 1.0); }\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
   if (!program)
     return false;
   static const float kVertices[] = {
@@ -165,10 +165,10 @@ bool RenderIndexedQuad(const char* path, int width, int height) {
                         reinterpret_cast<const void*>(2 * sizeof(float)));
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr);
   unsigned char samples[4][4] = {};
-  zglvis::ReadTexel(width / 6, height / 6, width, height, samples[0]);
-  zglvis::ReadTexel(width * 5 / 6, height / 6, width, height, samples[1]);
-  zglvis::ReadTexel(width * 5 / 6, height * 5 / 6, width, height, samples[2]);
-  zglvis::ReadTexel(width / 6, height * 5 / 6, width, height, samples[3]);
+  glanceasyvis::ReadTexel(width / 6, height / 6, width, height, samples[0]);
+  glanceasyvis::ReadTexel(width * 5 / 6, height / 6, width, height, samples[1]);
+  glanceasyvis::ReadTexel(width * 5 / 6, height * 5 / 6, width, height, samples[2]);
+  glanceasyvis::ReadTexel(width / 6, height * 5 / 6, width, height, samples[3]);
   int distinct = 0;
   for (int i = 1; i < 4; ++i) {
     if (abs(static_cast<int>(samples[i][0]) - samples[0][0]) > 30 ||
@@ -188,7 +188,7 @@ bool RenderIndexedQuad(const char* path, int width, int height) {
 // 04: Depth testing. The near triangle must occlude the far triangle.
 
 bool RenderDepthTest(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -202,7 +202,7 @@ bool RenderDepthTest(const char* path, int width, int height) {
       "varying vec3 v_color;\n"
       "void main() { gl_FragColor = vec4(v_color, 1.0); }\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
   if (!program)
     return false;
   static const float kFar[] = {
@@ -233,8 +233,8 @@ bool RenderDepthTest(const char* path, int width, int height) {
   glDrawArrays(GL_TRIANGLES, 0, 3);
   unsigned char centre[4] = {};
   unsigned char corner[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
-  zglvis::ReadTexel(width * 2 / 3, height / 2, width, height, corner);
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(width * 2 / 3, height / 2, width, height, corner);
   bool ok = centre[0] > 180 && centre[2] < 80 && corner[2] > 150;
   glDeleteProgram(program);
   return FinishCase(path, width, height, ok);
@@ -244,7 +244,7 @@ bool RenderDepthTest(const char* path, int width, int height) {
 // 05: Alpha blending over an opaque base layer.
 
 bool RenderAlphaBlend(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -258,7 +258,7 @@ bool RenderAlphaBlend(const char* path, int width, int height) {
       "varying vec4 v_color;\n"
       "void main() { gl_FragColor = v_color; }\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
   if (!program)
     return false;
   // Two quads: an opaque blue base and a half-transparent red overlay.
@@ -293,8 +293,8 @@ bool RenderAlphaBlend(const char* path, int width, int height) {
   glDrawArrays(GL_TRIANGLES, 0, 6);
   unsigned char base[4] = {};
   unsigned char overlap[4] = {};
-  zglvis::ReadTexel(width / 5, height / 2, width, height, base);
-  zglvis::ReadTexel(width / 2, height / 2, width, height, overlap);
+  glanceasyvis::ReadTexel(width / 5, height / 2, width, height, base);
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, overlap);
   bool ok = base[2] > 170 && overlap[0] > 80 && overlap[2] > 60;
   glDeleteProgram(program);
   return FinishCase(path, width, height, ok);
@@ -340,7 +340,7 @@ GLuint MakeTexturedProgram() {
       "varying vec2 v_uv;\n"
       "uniform sampler2D u_tex;\n"
       "void main() { gl_FragColor = texture2D(u_tex, v_uv); }\n";
-  return zglvis::BuildProgram(vertex, fragment,
+  return glanceasyvis::BuildProgram(vertex, fragment,
                               {{0, "a_pos"}, {1, "a_uv"}});
 }
 
@@ -364,7 +364,7 @@ bool RenderTextureCase(const char* path,
                        int height,
                        bool linear,
                        bool mipmap_case) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const GLuint program = MakeTexturedProgram();
   if (!program)
@@ -385,8 +385,8 @@ bool RenderTextureCase(const char* path,
   DrawTexturedQuad(-0.9f, 0.9f, -0.9f, 0.9f);
   unsigned char centre[4] = {};
   unsigned char offset[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
-  zglvis::ReadTexel(width / 2 + 20, height / 2, width, height, offset);
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(width / 2 + 20, height / 2, width, height, offset);
   bool ok = centre[0] + centre[1] + centre[2] > 60 &&
             offset[0] + offset[1] + offset[2] > 60;
   if (linear && !mipmap_case) {
@@ -411,7 +411,7 @@ bool RenderTextureLinear(const char* path, int width, int height) {
 
 // 08: Two mip levels of a 256x256 checker texture side by side.
 bool RenderMipmap(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 300 es\n"
@@ -427,7 +427,7 @@ bool RenderMipmap(const char* path, int width, int height) {
       "out vec4 o_colour;\n"
       "void main() { o_colour = textureLod(u_tex, v_uv, u_lod); }\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}});
   if (!program)
     return false;
   const GLuint texture = MakeCheckerTexture(256, 2, true);
@@ -446,8 +446,8 @@ bool RenderMipmap(const char* path, int width, int height) {
   DrawTexturedQuad(0.04f, 0.92f, -0.9f, 0.9f);
   unsigned char left[4] = {};
   unsigned char right[4] = {};
-  zglvis::ReadTexel(width / 4, height / 2, width, height, left);
-  zglvis::ReadTexel(width * 3 / 4, height / 2, width, height, right);
+  glanceasyvis::ReadTexel(width / 4, height / 2, width, height, left);
+  glanceasyvis::ReadTexel(width * 3 / 4, height / 2, width, height, right);
   bool ok = left[0] + left[1] + left[2] > 60 &&
             right[0] + right[1] + right[2] > 60;
   glDeleteTextures(1, &texture);
@@ -459,7 +459,7 @@ bool RenderMipmap(const char* path, int width, int height) {
 // 09: Back-face culling. Only the counter-clockwise triangle may survive.
 
 bool RenderCulling(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -473,7 +473,7 @@ bool RenderCulling(const char* path, int width, int height) {
       "varying vec3 v_color;\n"
       "void main() { gl_FragColor = vec4(v_color, 1.0); }\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
   if (!program)
     return false;
   // Green is counter-clockwise and front-facing; the red copy is clockwise and
@@ -503,7 +503,7 @@ bool RenderCulling(const char* path, int width, int height) {
                         kGreen + 2);
   glDrawArrays(GL_TRIANGLES, 0, 3);
   unsigned char centre[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
   bool ok = centre[1] > 150 && centre[0] < 100;
   glDeleteProgram(program);
   return FinishCase(path, width, height, ok);
@@ -513,7 +513,7 @@ bool RenderCulling(const char* path, int width, int height) {
 // 10: Scissor rectangle clips both clears and draws.
 
 bool RenderScissor(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   glClearColor(0.65f, 0.10f, 0.12f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -524,8 +524,8 @@ bool RenderScissor(const char* path, int width, int height) {
   glDisable(GL_SCISSOR_TEST);
   unsigned char centre[4] = {};
   unsigned char corner[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
-  zglvis::ReadTexel(4, 4, width, height, corner);
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(4, 4, width, height, corner);
   bool ok = centre[2] > 150 && corner[0] > 120;
   return FinishCase(path, width, height, ok);
 }
@@ -534,7 +534,7 @@ bool RenderScissor(const char* path, int width, int height) {
 // 11: Stencil mask. The gradient is only visible inside a diamond.
 
 bool RenderStencil(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* solid_vertex =
       "#version 100\n"
@@ -545,7 +545,7 @@ bool RenderStencil(const char* path, int width, int height) {
       "precision mediump float;\n"
       "void main() { gl_FragColor = vec4(1.0); }\n";
   const GLuint solid =
-      zglvis::BuildProgram(solid_vertex, solid_fragment, {{0, "a_pos"}});
+      glanceasyvis::BuildProgram(solid_vertex, solid_fragment, {{0, "a_pos"}});
   const char* gradient_vertex =
       "#version 100\n"
       "attribute vec2 a_pos;\n"
@@ -560,7 +560,7 @@ bool RenderStencil(const char* path, int width, int height) {
       "  vec3 b = vec3(0.15, 0.85, 0.95);\n"
       "  gl_FragColor = vec4(mix(a, b, v_uv.y), 1.0);\n"
       "}\n";
-  const GLuint gradient = zglvis::BuildProgram(
+  const GLuint gradient = glanceasyvis::BuildProgram(
       gradient_vertex, gradient_fragment, {{0, "a_pos"}});
   if (!solid || !gradient)
     return false;
@@ -583,13 +583,13 @@ bool RenderStencil(const char* path, int width, int height) {
   glStencilFunc(GL_EQUAL, 1, 0xFF);
   glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
   glUseProgram(gradient);
-  zglvis::DrawFullscreenTriangle();
+  glanceasyvis::DrawFullscreenTriangle();
   glDisable(GL_STENCIL_TEST);
   unsigned char centre[4] = {};
   unsigned char corner[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
-  zglvis::ReadTexel(4, 4, width, height, corner);
-  bool ok = centre[0] > 100 && centre[2] > 60 && zglvis::ColourIsDark(corner);
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(4, 4, width, height, corner);
+  bool ok = centre[0] > 100 && centre[2] > 60 && glanceasyvis::ColourIsDark(corner);
   glDeleteProgram(gradient);
   glDeleteProgram(solid);
   return FinishCase(path, width, height, ok);
@@ -599,7 +599,7 @@ bool RenderStencil(const char* path, int width, int height) {
 // 12: Instanced triangles with per-instance offsets and colours.
 
 bool RenderInstancing(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -616,7 +616,7 @@ bool RenderInstancing(const char* path, int width, int height) {
       "precision mediump float;\n"
       "varying vec3 v_color;\n"
       "void main() { gl_FragColor = vec4(v_color, 1.0); }\n";
-  const GLuint program = zglvis::BuildProgram(
+  const GLuint program = glanceasyvis::BuildProgram(
       vertex, fragment, {{0, "a_pos"}, {1, "a_offset"}, {2, "a_color"}});
   if (!program)
     return false;
@@ -660,10 +660,10 @@ bool RenderInstancing(const char* path, int width, int height) {
   glDrawArraysInstanced(GL_TRIANGLES, 0, 6, 9);
   unsigned char centre[4] = {};
   unsigned char corner[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
-  zglvis::ReadTexel(12, 12, width, height, corner);
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(12, 12, width, height, corner);
   bool ok = centre[0] > 120 && centre[1] > 120 && centre[2] > 120 &&
-            zglvis::ColourIsDark(corner);
+            glanceasyvis::ColourIsDark(corner);
   glDeleteBuffers(1, &colour_buffer);
   glDeleteBuffers(1, &offset_buffer);
   glDeleteBuffers(1, &quad_buffer);
@@ -675,7 +675,7 @@ bool RenderInstancing(const char* path, int width, int height) {
 // 13: Rendering into an offscreen framebuffer and displaying its texture.
 
 bool RenderOffscreenFramebuffer(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -693,7 +693,7 @@ bool RenderOffscreenFramebuffer(const char* path, int width, int height) {
       "  gl_FragColor = vec4(mix(warm, cool, 0.55), 1.0);\n"
       "}\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}});
   const GLuint textured = MakeTexturedProgram();
   if (!program || !textured)
     return false;
@@ -717,7 +717,7 @@ bool RenderOffscreenFramebuffer(const char* path, int width, int height) {
   }
   glViewport(0, 0, width, height);
   glUseProgram(program);
-  zglvis::DrawFullscreenTriangle();
+  glanceasyvis::DrawFullscreenTriangle();
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -727,8 +727,8 @@ bool RenderOffscreenFramebuffer(const char* path, int width, int height) {
   glBindTexture(GL_TEXTURE_2D, texture);
   DrawTexturedQuad(-1.0f, 1.0f, -1.0f, 1.0f);
   unsigned char centre[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
-  bool ok = !zglvis::ColourIsDark(centre);
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  bool ok = !glanceasyvis::ColourIsDark(centre);
   glDeleteTextures(1, &texture);
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteProgram(textured);
@@ -740,7 +740,7 @@ bool RenderOffscreenFramebuffer(const char* path, int width, int height) {
 // 14: Procedural GLSL pattern using sin, length, mix and smoothstep.
 
 bool RenderGlslPattern(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -762,18 +762,18 @@ bool RenderGlslPattern(const char* path, int width, int height) {
       "  gl_FragColor = vec4(colour * (0.35 + 0.75 * glow), 1.0);\n"
       "}\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}});
   if (!program)
     return false;
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
-  zglvis::DrawFullscreenTriangle();
+  glanceasyvis::DrawFullscreenTriangle();
   unsigned char centre[4] = {};
   unsigned char first_ring[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
-  zglvis::ReadTexel(width / 2 + 40, height / 2, width, height, first_ring);
-  bool ok = !zglvis::ColourIsDark(centre) &&
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(width / 2 + 40, height / 2, width, height, first_ring);
+  bool ok = !glanceasyvis::ColourIsDark(centre) &&
             (abs(static_cast<int>(centre[0]) - first_ring[0]) > 20 ||
              abs(static_cast<int>(centre[2]) - first_ring[2]) > 20);
   glDeleteProgram(program);
@@ -881,7 +881,7 @@ void BuildCubeVertices(std::vector<float>* vertices) {
 }
 
 bool RenderPerspectiveCube(const char* path, int width, int height) {
-  if (zglCreateContext(width, height) != 1)
+  if (glanceasyCreateContext(width, height) != 1)
     return false;
   const char* vertex =
       "#version 100\n"
@@ -896,7 +896,7 @@ bool RenderPerspectiveCube(const char* path, int width, int height) {
       "varying vec3 v_color;\n"
       "void main() { gl_FragColor = vec4(v_color, 1.0); }\n";
   const GLuint program =
-      zglvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
+      glanceasyvis::BuildProgram(vertex, fragment, {{0, "a_pos"}, {1, "a_color"}});
   if (!program)
     return false;
   float projection[16];
@@ -934,7 +934,7 @@ bool RenderPerspectiveCube(const char* path, int width, int height) {
                         vertices.data() + 3);
   glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size() / 6));
   unsigned char centre[4] = {};
-  zglvis::ReadTexel(width / 2, height / 2, width, height, centre);
+  glanceasyvis::ReadTexel(width / 2, height / 2, width, height, centre);
   bool ok = centre[0] > 120 && centre[2] > 60;
   glDeleteProgram(program);
   return FinishCase(path, width, height, ok);

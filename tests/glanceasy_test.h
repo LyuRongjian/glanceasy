@@ -1,11 +1,11 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_TESTS_ZGL_TEST_H_
-#define ZGL_TESTS_ZGL_TEST_H_
+#ifndef GLANCEASY_TESTS_TEST_H_
+#define GLANCEASY_TESTS_TEST_H_
 
-namespace zgltest {
+namespace glanceasytest {
 
 using TestFunction = void (*)();
 
@@ -37,25 +37,25 @@ struct Registrar {
   }
 };
 
-}  // namespace zgltest
+}  // namespace glanceasytest
 
 #define TEST(Name)                                           \
   static void Name();                                        \
-  static ::zgltest::Registrar Name##_registrar(#Name, Name); \
+  static ::glanceasytest::Registrar Name##_registrar(#Name, Name); \
   static void Name()
 
 #define EXPECT_TRUE(condition) \
-  ::zgltest::ExpectTrue((condition), #condition, __FILE__, __LINE__)
+  ::glanceasytest::ExpectTrue((condition), #condition, __FILE__, __LINE__)
 
 #define EXPECT_FALSE(condition) \
-  ::zgltest::ExpectTrue(!(condition), "!(" #condition ")", __FILE__, __LINE__)
+  ::glanceasytest::ExpectTrue(!(condition), "!(" #condition ")", __FILE__, __LINE__)
 
 #define EXPECT_EQ(actual, expected)                                  \
-  ::zgltest::ExpectEqual((long long)(actual), (long long)(expected), \
+  ::glanceasytest::ExpectEqual((long long)(actual), (long long)(expected), \
                          #actual " == " #expected, __FILE__, __LINE__)
 
 #define EXPECT_NEAR(actual, expected, tolerance)           \
-  ::zgltest::ExpectNear((actual), (expected), (tolerance), \
+  ::glanceasytest::ExpectNear((actual), (expected), (tolerance), \
                         #actual " ~ " #expected, __FILE__, __LINE__)
 
-#endif  // ZGL_TESTS_ZGL_TEST_H_
+#endif  // GLANCEASY_TESTS_TEST_H_

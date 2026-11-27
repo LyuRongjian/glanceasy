@@ -1,10 +1,10 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -53,7 +53,7 @@ bool CentreIsRed() {
 }  // namespace
 
 TEST(DrawArraysRejectsNegativeArguments) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glDrawArrays(GL_TRIANGLES, -1, 3);
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
   glDrawArrays(GL_TRIANGLES, 0, -1);
@@ -62,11 +62,11 @@ TEST(DrawArraysRejectsNegativeArguments) {
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
   glDrawArraysInstanced(GL_TRIANGLES, 0, 3, -1);
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DrawElementsValidatesTypesAndPointers) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const GLuint program = BuildProgram();
   PrepareDraw(program);
   const unsigned short indices[3] = {0, 1, 2};
@@ -124,11 +124,11 @@ TEST(DrawElementsValidatesTypesAndPointers) {
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
   glDeleteBuffers(1, &element_buffer);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(InstancedArraysMultiplyGeometry) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const GLuint program = BuildProgram();
   PrepareDraw(program);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -136,5 +136,5 @@ TEST(InstancedArraysMultiplyGeometry) {
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   EXPECT_TRUE(CentreIsRed());
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

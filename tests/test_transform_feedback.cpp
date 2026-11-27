@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include <string>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -81,7 +81,7 @@ void ReadBuffer(GLenum target, GLuint buffer, size_t size, void* out) {
 }  // namespace
 
 TEST(TransformFeedbackCapturesInterleavedVaryings) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* varyings[] = {"v_id", "v_pair"};
   const GLuint program =
       LinkProgram(kVertex, kFragment, 2, varyings, GL_INTERLEAVED_ATTRIBS);
@@ -123,11 +123,11 @@ TEST(TransformFeedbackCapturesInterleavedVaryings) {
   glDeleteBuffers(1, &buffer);
   glDeleteTransformFeedbacks(1, &tf);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TransformFeedbackSeparateAttribsPauseAndResume) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* varyings[] = {"v_id", "v_pair"};
   const GLuint program =
       LinkProgram(kVertex, kFragment, 2, varyings, GL_SEPARATE_ATTRIBS);
@@ -190,11 +190,11 @@ TEST(TransformFeedbackSeparateAttribsPauseAndResume) {
   glDeleteBuffers(1, &pair_buffer);
   glDeleteTransformFeedbacks(1, &tf);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TransformFeedbackDrawReplaysCapturedVertexCount) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* varyings[] = {"v_id", "v_pair"};
   const GLuint program =
       LinkProgram(kVertex, kFragment, 2, varyings, GL_INTERLEAVED_ATTRIBS);
@@ -227,11 +227,11 @@ TEST(TransformFeedbackDrawReplaysCapturedVertexCount) {
   glDeleteBuffers(1, &buffer);
   glDeleteTransformFeedbacks(1, &tf);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TransformFeedbackVaryingReflectionAndLinkFailure) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* varyings[] = {"v_id", "v_pair"};
   const GLuint program =
       LinkProgram(kVertex, kFragment, 2, varyings, GL_INTERLEAVED_ATTRIBS);
@@ -263,5 +263,5 @@ TEST(TransformFeedbackVaryingReflectionAndLinkFailure) {
   glBeginTransformFeedback(GL_POINTS);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,9 @@
 #include <vector>
 
 #include "GLES3/gl32.h"
-#include "zgl/zgl.h"
+#include "glanceasy/glanceasy.h"
 
-namespace zglvis {
+namespace glanceasyvis {
 
 // Builds a program from a vertex and fragment shader and binds the supplied
 // attribute names to fixed locations. Returns 0 on failure.
@@ -44,6 +44,6 @@ bool ColourIsDark(const unsigned char rgba[4]);
 // A small full-screen triangle used by background and shading passes.
 void DrawFullscreenTriangle();
 
-}  // namespace zglvis
+}  // namespace glanceasyvis
 
 #endif  // ZCAT_GLES_TESTS_VISUAL_VISUAL_COMMON_H_

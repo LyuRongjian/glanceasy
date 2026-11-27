@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace zgl {
+namespace glanceasy {
 namespace glsl {
 
 namespace {
@@ -369,7 +369,7 @@ std::string ResolveDefined(const std::string& expr,
         }
       }
       if (operand.empty() || (parenthesised && !closed)) {
-        out += "__zgl_invalid_defined_operand__";
+        out += "__glanceasy_invalid_defined_operand__";
       } else {
         out += IsPreprocessorDefined(macros, operand) ? "1" : "0";
       }
@@ -701,7 +701,7 @@ std::string Preprocess(const std::string& source) {
       if (directive == "version") {
         const std::string version = Trim(line.substr(arg));
         if (saw_statement || (version != "300 es" && version != "100")) {
-          out += "__zgl_invalid_version_directive__\n";
+          out += "__glanceasy_invalid_version_directive__\n";
         } else {
           version_seen = true;
           out += line;
@@ -749,12 +749,12 @@ std::string Preprocess(const std::string& source) {
             argument.find("*/") == std::string::npos)
           valid = false;
         if (!valid)
-          out += "__zgl_invalid_extension_directive__\n";
+          out += "__glanceasy_invalid_extension_directive__\n";
         else
           out += line;
         saw_statement = true;
       } else if (directive == "error") {
-        out += "__zgl_error_directive__\n";
+        out += "__glanceasy_error_directive__\n";
         saw_statement = true;
       } else if (directive == "pragma") {
         out += line;
@@ -793,7 +793,7 @@ std::string Preprocess(const std::string& source) {
             valid_line = false;
         }
         if (!valid_line) {
-          out += "__zgl_invalid_line_directive__\n";
+          out += "__glanceasy_invalid_line_directive__\n";
         } else {
           logical_line = value - 1;
           if (file >= 0)
@@ -843,12 +843,12 @@ std::string Preprocess(const std::string& source) {
               (existing->second.function_like != macro.function_like ||
                existing->second.params != macro.params ||
                existing->second.body != macro.body)) {
-            out += "__zgl_invalid_macro_redefinition__\n";
+            out += "__glanceasy_invalid_macro_redefinition__\n";
           } else {
             macros[name] = macro;
           }
         } else {
-          out += "__zgl_invalid_define_directive__\n";
+          out += "__glanceasy_invalid_define_directive__\n";
         }
         saw_statement = true;
       } else if (directive == "undef" && active) {
@@ -864,7 +864,7 @@ std::string Preprocess(const std::string& source) {
         if (valid)
           macros.erase(argument);
         else
-          out += "__zgl_invalid_undef_directive__\n";
+          out += "__glanceasy_invalid_undef_directive__\n";
         saw_statement = true;
       } else if (directive == "ifdef" || directive == "ifndef") {
         Conditional c;
@@ -875,7 +875,7 @@ std::string Preprocess(const std::string& source) {
           if (!IsIdentChar(ch))
             valid = false;
         if (!valid)
-          out += "__zgl_invalid_conditional__\n";
+          out += "__glanceasy_invalid_conditional__\n";
         const bool defined = macros.count(argument) != 0;
         c.active = active && (directive == "ifdef" ? defined : !defined);
         c.taken = c.active;
@@ -886,7 +886,7 @@ std::string Preprocess(const std::string& source) {
         c.parent_active = active;
         long long value = 0;
         if (!EvaluateExpression(line.substr(arg), macros, &value))
-          out += "__zgl_invalid_conditional__\n";
+          out += "__glanceasy_invalid_conditional__\n";
         c.active = active && value != 0;
         c.taken = c.active;
         conditionals.push_back(c);
@@ -894,29 +894,29 @@ std::string Preprocess(const std::string& source) {
         if (!conditionals.empty()) {
           Conditional& c = conditionals.back();
           if (c.seen_else || !Trim(line.substr(arg)).empty())
-            out += "__zgl_invalid_conditional__\n";
+            out += "__glanceasy_invalid_conditional__\n";
           c.seen_else = true;
           c.active = c.parent_active && !c.taken;
           c.taken = c.taken || c.active;
         } else {
-          out += "__zgl_invalid_conditional__\n";
+          out += "__glanceasy_invalid_conditional__\n";
         }
       } else if (directive == "endif") {
         if (conditionals.empty() || !Trim(line.substr(arg)).empty()) {
-          out += "__zgl_invalid_conditional__\n";
+          out += "__glanceasy_invalid_conditional__\n";
         } else {
           conditionals.pop_back();
         }
       } else if (directive == "elif") {
         if (conditionals.empty()) {
-          out += "__zgl_invalid_conditional__\n";
+          out += "__glanceasy_invalid_conditional__\n";
         } else {
           Conditional& c = conditionals.back();
           long long value = 0;
           if (!EvaluateExpression(line.substr(arg), macros, &value))
-            out += "__zgl_invalid_conditional__\n";
+            out += "__glanceasy_invalid_conditional__\n";
           if (c.seen_else)
-            out += "__zgl_invalid_conditional__\n";
+            out += "__glanceasy_invalid_conditional__\n";
           c.active = c.parent_active && !c.taken && value != 0;
           c.taken = c.taken || c.active;
         }
@@ -927,7 +927,7 @@ std::string Preprocess(const std::string& source) {
           directive != "if" && directive != "else" && directive != "endif" &&
           directive != "elif" && directive != "extension" &&
           directive != "error" && directive != "pragma" && !directive.empty()) {
-        out += "__zgl_unknown_directive__\n";
+        out += "__glanceasy_unknown_directive__\n";
       }
       out += '\n';
     } else if (active) {
@@ -950,7 +950,7 @@ std::string Preprocess(const std::string& source) {
   }
   flush_code();
   if (!conditionals.empty())
-    out += "__zgl_unterminated_conditional__\n";
+    out += "__glanceasy_unterminated_conditional__\n";
   return out;
 }
 
@@ -1151,4 +1151,4 @@ Token Lexer::Next() {
 }
 
 }  // namespace glsl
-}  // namespace zgl
+}  // namespace glanceasy

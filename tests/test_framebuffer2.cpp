@@ -1,10 +1,10 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -81,7 +81,7 @@ GLuint AttachDepthStencilRenderbuffer(GLuint width, GLuint height) {
 }  // namespace
 
 TEST(BlitCopiesDepthAndStencilPayloads) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   const GLuint program = MakeProgram();
   PrepareDraw(program);
 
@@ -148,11 +148,11 @@ TEST(BlitCopiesDepthAndStencilPayloads) {
   glDeleteFramebuffers(1, &destination);
   glDeleteFramebuffers(1, &source);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ClearBufferCommandsValidateAttachmentNames) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint framebuffer = 0;
   glGenFramebuffers(1, &framebuffer);
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -185,11 +185,11 @@ TEST(ClearBufferCommandsValidateAttachmentNames) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDeleteTextures(1, &colour);
   glDeleteFramebuffers(1, &framebuffer);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(InvalidateValidatesAttachments) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint framebuffer = 0;
   glGenFramebuffers(1, &framebuffer);
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -222,11 +222,11 @@ TEST(InvalidateValidatesAttachments) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDeleteTextures(1, &colour);
   glDeleteFramebuffers(1, &framebuffer);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(RenderbufferStorageValidation) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint renderbuffer = 0;
   glGenRenderbuffers(1, &renderbuffer);
   glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
@@ -252,11 +252,11 @@ TEST(RenderbufferStorageValidation) {
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteRenderbuffers(1, &renderbuffer);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(FragmentShaderWritesTwoDrawBuffers) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   GLuint textures[2] = {};
   glGenTextures(2, textures);
   for (int i = 0; i < 2; ++i) {
@@ -333,12 +333,12 @@ TEST(FragmentShaderWritesTwoDrawBuffers) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteTextures(2, textures);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 
 TEST(LegacyFragDataWritesTwoDrawBuffers) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   GLuint textures[2] = {};
   glGenTextures(2, textures);
   for (int i = 0; i < 2; ++i) {
@@ -408,11 +408,11 @@ TEST(LegacyFragDataWritesTwoDrawBuffers) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteTextures(2, textures);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DrawBufferTableMapsOutputOne) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   GLuint textures[2] = {};
   glGenTextures(2, textures);
   for (int i = 0; i < 2; ++i) {
@@ -480,5 +480,5 @@ TEST(DrawBufferTableMapsOutputOne) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteTextures(2, textures);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

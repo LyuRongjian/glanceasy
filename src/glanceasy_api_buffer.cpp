@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "GLES3/gl32.h"
-#include "src/zgl_api_common.h"
+#include "src/glanceasy_api_common.h"
 
-namespace zgl {
+namespace glanceasy {
 namespace {
 
 VertexArray* ActiveVertexArray(Context* context) {
@@ -123,7 +123,7 @@ void SetAttributePointer(GLuint index,
     return;
   }
   VertexAttribute& attribute = array->attributes[index];
-  if (getenv("ZGL_DEBUG_VIEWPORT") && index == 1 && pointer) {
+  if (getenv("GLANCEASY_DEBUG_VIEWPORT") && index == 1 && pointer) {
     const float* values = static_cast<const float*>(pointer);
     fprintf(stderr, "[attribptr] %u %.3f %.3f %.3f %.3f %.3f %.3f\n", index,
             values[0], values[1], values[2], values[3], values[4], values[5]);
@@ -145,14 +145,14 @@ void SetAttributePointer(GLuint index,
 }
 
 }  // namespace
-}  // namespace zgl
+}  // namespace glanceasy
 
 extern "C" {
 
 // ---- Buffer objects -------------------------------------------------------
 
 void glGenBuffers(GLsizei n, GLuint* buffers) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -166,7 +166,7 @@ void glGenBuffers(GLsizei n, GLuint* buffers) {
 }
 
 void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -181,7 +181,7 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
       continue;
     // A deleted buffer stays alive while a vertex array or transform feedback
     // object still references it.  Its data remains readable by draws.
-    if (zgl::Buffer* object = context->buffers.Get(name))
+    if (glanceasy::Buffer* object = context->buffers.Get(name))
       object->delete_status = true;
     if (context->state.array_buffer == name)
       context->state.array_buffer = 0;
@@ -201,15 +201,15 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
       context->state.pixel_pack_buffer = 0;
     if (context->state.pixel_unpack_buffer == name)
       context->state.pixel_unpack_buffer = 0;
-    for (int i = 0; i < zgl::kMaxUniformBufferBindings; ++i) {
+    for (int i = 0; i < glanceasy::kMaxUniformBufferBindings; ++i) {
       if (context->state.uniform_buffers[i].buffer == name)
-        context->state.uniform_buffers[i] = zgl::IndexedBufferBinding();
+        context->state.uniform_buffers[i] = glanceasy::IndexedBufferBinding();
     }
     // Deleting a buffer does not break a transform-feedback attachment: the
     // container keeps the name, but must no longer write into storage that a
     // later glGenBuffers may recycle for a different object.
-    auto mark_deleted = [name](zgl::TransformFeedback& feedback) {
-      for (int i = 0; i < zgl::kMaxTransformFeedbackBuffers; ++i) {
+    auto mark_deleted = [name](glanceasy::TransformFeedback& feedback) {
+      for (int i = 0; i < glanceasy::kMaxTransformFeedbackBuffers; ++i) {
         if (feedback.buffers[i].buffer == name)
           feedback.buffers[i].attachment_deleted = true;
       }
@@ -220,18 +220,18 @@ void glDeleteBuffers(GLsizei n, const GLuint* buffers) {
 }
 
 GLboolean glIsBuffer(GLuint buffer) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || buffer == 0)
     return GL_FALSE;
-  const zgl::Buffer* object = context->buffers.Get(buffer);
+  const glanceasy::Buffer* object = context->buffers.Get(buffer);
   return object && !object->delete_status ? GL_TRUE : GL_FALSE;
 }
 
 void glBindBuffer(GLenum target, GLuint buffer) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::ValidBufferTarget(target)) {
+  if (!glanceasy::ValidBufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -241,7 +241,7 @@ void glBindBuffer(GLenum target, GLuint buffer) {
     context->state.array_buffer = buffer;
   } else if (target == GL_ELEMENT_ARRAY_BUFFER) {
     context->state.element_buffer = buffer;
-    zgl::VertexArray* array = zgl::ActiveVertexArray(context);
+    glanceasy::VertexArray* array = glanceasy::ActiveVertexArray(context);
     if (array)
       array->element_buffer = buffer;
   } else if (target == GL_COPY_READ_BUFFER) {
@@ -263,10 +263,10 @@ void glBufferData(GLenum target,
                   GLsizeiptr size,
                   const void* data,
                   GLenum usage) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::ValidBufferTarget(target)) {
+  if (!glanceasy::ValidBufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -289,7 +289,7 @@ void glBufferData(GLenum target,
       context->SetError(GL_INVALID_ENUM);
       return;
   }
-  zgl::Buffer* buffer = zgl::BoundBuffer(context, target);
+  glanceasy::Buffer* buffer = glanceasy::BoundBuffer(context, target);
   if (!buffer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -305,10 +305,10 @@ void glBufferSubData(GLenum target,
                      GLintptr offset,
                      GLsizeiptr size,
                      const void* data) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::ValidBufferTarget(target)) {
+  if (!glanceasy::ValidBufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -316,7 +316,7 @@ void glBufferSubData(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::Buffer* buffer = zgl::BoundBuffer(context, target);
+  glanceasy::Buffer* buffer = glanceasy::BoundBuffer(context, target);
   if (!buffer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -340,11 +340,11 @@ void glCopyBufferSubData(GLenum read_target,
                          GLintptr read_offset,
                          GLintptr write_offset,
                          GLsizeiptr size) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::Buffer* source = zgl::BoundBuffer(context, read_target);
-  zgl::Buffer* destination = zgl::BoundBuffer(context, write_target);
+  glanceasy::Buffer* source = glanceasy::BoundBuffer(context, read_target);
+  glanceasy::Buffer* destination = glanceasy::BoundBuffer(context, write_target);
   if (!source || !destination) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -379,10 +379,10 @@ void* glMapBufferRange(GLenum target,
                        GLsizeiptr length,
                        GLbitfield access) {
   (void)access;
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return nullptr;
-  zgl::Buffer* buffer = zgl::BoundBuffer(context, target);
+  glanceasy::Buffer* buffer = glanceasy::BoundBuffer(context, target);
   if (!buffer) {
     context->SetError(GL_INVALID_OPERATION);
     return nullptr;
@@ -428,10 +428,10 @@ void* glMapBufferRange(GLenum target,
 }
 
 GLboolean glUnmapBuffer(GLenum target) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return GL_FALSE;
-  zgl::Buffer* buffer = zgl::BoundBuffer(context, target);
+  glanceasy::Buffer* buffer = glanceasy::BoundBuffer(context, target);
   if (!buffer || !buffer->mapped) {
     context->SetError(GL_INVALID_OPERATION);
     return GL_FALSE;
@@ -446,14 +446,14 @@ GLboolean glUnmapBuffer(GLenum target) {
 void glFlushMappedBufferRange(GLenum target,
                               GLintptr offset,
                               GLsizeiptr length) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::ValidBufferTarget(target)) {
+  if (!glanceasy::ValidBufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::Buffer* buffer = zgl::BoundBuffer(context, target);
+  glanceasy::Buffer* buffer = glanceasy::BoundBuffer(context, target);
   if (!buffer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -474,14 +474,14 @@ void glFlushMappedBufferRange(GLenum target,
 }
 
 void glGetBufferParameteriv(GLenum target, GLenum pname, GLint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
-  if (!zgl::ValidBufferTarget(target)) {
+  if (!glanceasy::ValidBufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::Buffer* buffer = zgl::BoundBuffer(context, target);
+  glanceasy::Buffer* buffer = glanceasy::BoundBuffer(context, target);
   if (!buffer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -512,10 +512,10 @@ void glGetBufferParameteriv(GLenum target, GLenum pname, GLint* params) {
 }
 
 void glGetBufferPointerv(GLenum target, GLenum pname, void** params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
-  if (!zgl::ValidBufferTarget(target)) {
+  if (!glanceasy::ValidBufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -523,7 +523,7 @@ void glGetBufferPointerv(GLenum target, GLenum pname, void** params) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::Buffer* buffer = zgl::BoundBuffer(context, target);
+  glanceasy::Buffer* buffer = glanceasy::BoundBuffer(context, target);
   if (!buffer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -534,7 +534,7 @@ void glGetBufferPointerv(GLenum target, GLenum pname, void** params) {
 // ---- Vertex array objects -------------------------------------------------
 
 void glGenVertexArrays(GLsizei n, GLuint* arrays) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -548,7 +548,7 @@ void glGenVertexArrays(GLsizei n, GLuint* arrays) {
 }
 
 void glDeleteVertexArrays(GLsizei n, const GLuint* arrays) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -565,14 +565,14 @@ void glDeleteVertexArrays(GLsizei n, const GLuint* arrays) {
 }
 
 GLboolean glIsVertexArray(GLuint array) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || array == 0)
     return GL_FALSE;
   return context->vertex_arrays.Get(array) ? GL_TRUE : GL_FALSE;
 }
 
 void glBindVertexArray(GLuint array) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (array != 0 && !context->vertex_arrays.GetOrCreateReserved(array)) {
@@ -580,34 +580,34 @@ void glBindVertexArray(GLuint array) {
     return;
   }
   context->state.vertex_array = array;
-  zgl::VertexArray* active = zgl::ActiveVertexArray(context);
+  glanceasy::VertexArray* active = glanceasy::ActiveVertexArray(context);
   context->state.element_buffer = active ? active->element_buffer : 0;
 }
 
 // ---- Vertex attributes ----------------------------------------------------
 
 void glEnableVertexAttribArray(GLuint index) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxVertexAttribs)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::VertexArray* array = zgl::ActiveVertexArray(context);
+  glanceasy::VertexArray* array = glanceasy::ActiveVertexArray(context);
   if (array)
     array->attributes[index].enabled = true;
 }
 
 void glDisableVertexAttribArray(GLuint index) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxVertexAttribs)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::VertexArray* array = zgl::ActiveVertexArray(context);
+  glanceasy::VertexArray* array = glanceasy::ActiveVertexArray(context);
   if (array)
     array->attributes[index].enabled = false;
 }
@@ -618,7 +618,7 @@ void glVertexAttribPointer(GLuint index,
                            GLboolean normalized,
                            GLsizei stride,
                            const void* pointer) {
-  zgl::SetAttributePointer(index, size, type, normalized, stride, pointer,
+  glanceasy::SetAttributePointer(index, size, type, normalized, stride, pointer,
                            GL_FALSE);
 }
 
@@ -627,19 +627,19 @@ void glVertexAttribIPointer(GLuint index,
                             GLenum type,
                             GLsizei stride,
                             const void* pointer) {
-  zgl::SetAttributePointer(index, size, type, GL_FALSE, stride, pointer,
+  glanceasy::SetAttributePointer(index, size, type, GL_FALSE, stride, pointer,
                            GL_TRUE);
 }
 
 void glVertexAttribDivisor(GLuint index, GLuint divisor) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxVertexAttribs)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::VertexArray* array = zgl::ActiveVertexArray(context);
+  glanceasy::VertexArray* array = glanceasy::ActiveVertexArray(context);
   if (array)
     array->attributes[index].divisor = static_cast<int>(divisor);
 }
@@ -686,10 +686,10 @@ void glVertexAttrib3fv(GLuint index, const GLfloat* values) {
 }
 
 void glVertexAttrib4fv(GLuint index, const GLfloat* values) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !values)
     return;
-  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxVertexAttribs)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -702,10 +702,10 @@ void glVertexAttrib4fv(GLuint index, const GLfloat* values) {
 }
 
 void glVertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint w) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxVertexAttribs)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -724,10 +724,10 @@ void glVertexAttribI4iv(GLuint index, const GLint* values) {
 }
 
 void glVertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z, GLuint w) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxVertexAttribs)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -741,19 +741,19 @@ void glVertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z, GLuint w) {
 }
 
 void glGetVertexAttribiv(GLuint index, GLenum pname, GLint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
-  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxVertexAttribs)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  const zgl::VertexArray* array = zgl::ActiveVertexArray(context);
+  const glanceasy::VertexArray* array = glanceasy::ActiveVertexArray(context);
   if (!array) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  const zgl::VertexAttribute& attribute = array->attributes[index];
+  const glanceasy::VertexAttribute& attribute = array->attributes[index];
   switch (pname) {
     case GL_VERTEX_ATTRIB_ARRAY_ENABLED:
       params[0] = attribute.enabled ? GL_TRUE : GL_FALSE;
@@ -810,10 +810,10 @@ void glGetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params) {
 }
 
 void glGetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
-  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxVertexAttribs)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -828,10 +828,10 @@ void glGetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) {
 }
 
 void glGetVertexAttribPointerv(GLuint index, GLenum pname, void** pointer) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !pointer)
     return;
-  if (index >= static_cast<GLuint>(zgl::kMaxVertexAttribs)) {
+  if (index >= static_cast<GLuint>(glanceasy::kMaxVertexAttribs)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -839,12 +839,12 @@ void glGetVertexAttribPointerv(GLuint index, GLenum pname, void** pointer) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  const zgl::VertexArray* array = zgl::ActiveVertexArray(context);
+  const glanceasy::VertexArray* array = glanceasy::ActiveVertexArray(context);
   if (!array) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  const zgl::VertexAttribute& attribute = array->attributes[index];
+  const glanceasy::VertexAttribute& attribute = array->attributes[index];
   *pointer = attribute.buffer
                  ? reinterpret_cast<void*>(
                        static_cast<intptr_t>(attribute.offset))

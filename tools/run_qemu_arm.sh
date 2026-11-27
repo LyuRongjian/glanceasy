@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+# Copyright 2026 The Glanceasy Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -8,7 +8,7 @@
 # expected to come from tools/build_luckfox_arm.sh.
 #
 # Static bionic binaries built with the Android NDK need a 32-byte aligned TLS
-# segment, which the NDK linker does not always provide.  Set ZGL_PATCH_TLS=1
+# segment, which the NDK linker does not always provide.  Set GLANCEASY_PATCH_TLS=1
 # for those binaries; the Luckfox uClibc toolchain does not need the patch.
 #
 # Usage: tools/run_qemu_arm.sh <executable> [arguments...]
@@ -38,7 +38,7 @@ if [[ ! -x "$qemu" ]]; then
   exit 1
 fi
 
-if [[ "${ZGL_PATCH_TLS:-0}" == "1" ]]; then
+if [[ "${GLANCEASY_PATCH_TLS:-0}" == "1" ]]; then
   python3 "$repo_root/tools/fix_tls_align.py" "$binary"
 fi
 

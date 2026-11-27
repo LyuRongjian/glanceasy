@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 
 #include <vector>
 
-#include "tests/zgl_test.h"
+#include "tests/glanceasy_test.h"
 
-namespace zgltest {
+namespace glanceasytest {
 
 namespace {
 
@@ -76,7 +76,7 @@ bool ExpectNear(double actual,
 }
 
 int RunAllTests() {
-  const char* filter = getenv("ZGL_TEST_FILTER");
+  const char* filter = getenv("GLANCEASY_TEST_FILTER");
   for (const TestCase& test : Registry()) {
     if (filter && *filter && strstr(test.name, filter) == nullptr)
       continue;
@@ -92,8 +92,8 @@ int RunAllTests() {
   return FailureCount();
 }
 
-}  // namespace zgltest
+}  // namespace glanceasytest
 
 int main() {
-  return zgltest::RunAllTests();
+  return glanceasytest::RunAllTests();
 }

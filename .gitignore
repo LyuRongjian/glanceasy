@@ -17,7 +17,7 @@ build-host/
 build-host-*/
 visual-out/
 *.ppm
-zgl_cube.ppm
+glanceasy_cube.ppm
 build-win/
 *.exe
 *.pdb

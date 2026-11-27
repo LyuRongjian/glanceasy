@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+# Copyright 2026 The Glanceasy Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -20,11 +20,11 @@ build_dir="${1:-${repo_root}/out/coverage}"
 
 cmake -S "${repo_root}" -B "${build_dir}" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
-  -DZGL_COVERAGE=ON \
-  -DZGL_BUILD_TESTS=ON > /dev/null
+  -DGLANCEASY_COVERAGE=ON \
+  -DGLANCEASY_BUILD_TESTS=ON > /dev/null
 cmake --build "${build_dir}" > /dev/null
 
-"${build_dir}/zgl_unittests"
+"${build_dir}/glanceasy_unittests"
 
 report_dir="${build_dir}/coverage"
 rm -rf "${report_dir}"
@@ -35,7 +35,7 @@ summary="${report_dir}/summary.txt"
 total_lines=0
 total_hit=0
 
-for gcda in $(find "${build_dir}/CMakeFiles/zcat_gles.dir" -name '*.gcda' | sort); do
+for gcda in $(find "${build_dir}/CMakeFiles/glanceasy.dir" -name '*.gcda' | sort); do
   object_dir="$(dirname "${gcda}")"
   base="$(basename "${gcda}" .gcda)"
   raw="$(cd "${object_dir}" && gcov -b -c "${base}.gcda" 2>/dev/null)"

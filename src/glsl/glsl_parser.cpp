@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <cstring>
 #include <utility>
 
-namespace zgl {
+namespace glanceasy {
 namespace glsl {
 
 namespace {
@@ -109,10 +109,10 @@ const BuiltinVarEntry kBuiltinVars[] = {
     {"gl_FragData", BuiltinId::kFragData,
      Type::Array(Type::Vec(4), kMaxFragmentOutputs), false},
     {"gl_FragDepth", BuiltinId::kFragDepth, Type::Float(), false},
-    {"__zgl_frag_output_0", BuiltinId::kFragOutput0, Type::Vec(4), false},
-    {"__zgl_frag_output_1", BuiltinId::kFragOutput1, Type::Vec(4), false},
-    {"__zgl_frag_output_2", BuiltinId::kFragOutput2, Type::Vec(4), false},
-    {"__zgl_frag_output_3", BuiltinId::kFragOutput3, Type::Vec(4), false},
+    {"__glanceasy_frag_output_0", BuiltinId::kFragOutput0, Type::Vec(4), false},
+    {"__glanceasy_frag_output_1", BuiltinId::kFragOutput1, Type::Vec(4), false},
+    {"__glanceasy_frag_output_2", BuiltinId::kFragOutput2, Type::Vec(4), false},
+    {"__glanceasy_frag_output_3", BuiltinId::kFragOutput3, Type::Vec(4), false},
     {"gl_DepthRange", BuiltinId::kDepthRange, Type::Vec(3), true},
 };
 
@@ -2917,7 +2917,7 @@ ExprPtr Parser::ParseVariable(const std::string& name, int line) {
     expr->builtin = BuiltinId::kDepthRange;
     expr->index = EnsureBuiltin(BuiltinId::kDepthRange);
     expr->type = Type::Vec(3);
-    if (getenv("ZGL_DEBUG_DR"))
+    if (getenv("GLANCEASY_DEBUG_DR"))
       fprintf(stderr, "[dr] parse depth range slot=%d\n", expr->index);
     if (ast_)
       ast_->uses_depth_range = true;
@@ -3057,7 +3057,7 @@ int Parser::EnsureBuiltin(BuiltinId id) {
   for (const BuiltinVarEntry& entry : kBuiltinVars) {
     if (entry.id != id)
       continue;
-    if (id == BuiltinId::kDepthRange && getenv("ZGL_DEBUG_DR"))
+    if (id == BuiltinId::kDepthRange && getenv("GLANCEASY_DEBUG_DR"))
       fprintf(stderr, "[dr] ensure idx=%d size=%d entry=%s\n", id_index,
               (int)ast_->builtin_slots.size(), entry.name);
     Variable variable;
@@ -3464,4 +3464,4 @@ std::unique_ptr<ShaderAst> Parser::Parse() {
 }
 
 }  // namespace glsl
-}  // namespace zgl
+}  // namespace glanceasy

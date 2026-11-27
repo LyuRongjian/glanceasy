@@ -1,12 +1,12 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdio.h>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -59,12 +59,12 @@ void ReadPixel(int x, int y, unsigned char rgba[4]) {
 
 }  // namespace
 
-// End-to-end scenario inherited from the original ZCat smoke test: vertex
+// End-to-end scenario inherited from the original Glanceasy smoke test: vertex
 // array object switching, matrix uniforms, a texture-backed framebuffer with a
 // renderbuffer depth attachment, gl_FragDepth late depth testing and point
 // sprites.
 TEST(SmokeVertexArraysFramebuffersAndDepth) {
-  EXPECT_EQ(zglCreateContext(160, 120), 1);
+  EXPECT_EQ(glanceasyCreateContext(160, 120), 1);
 
   const char* vertex_source =
       "attribute vec3 aPos;\n"
@@ -284,5 +284,5 @@ TEST(SmokeVertexArraysFramebuffersAndDepth) {
   glDeleteRenderbuffers(1, &renderbuffer);
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -100,7 +100,7 @@ int CountRedPixels(int width, int height, int threshold) {
 }  // namespace
 
 TEST(TriangleStripCoversQuad) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint program = LinkProgram(kPositionVertex, kSolidFragment, -1);
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
@@ -118,11 +118,11 @@ TEST(TriangleStripCoversQuad) {
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
 
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TriangleFanCoversQuad) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint program = LinkProgram(kPositionVertex, kSolidFragment, -1);
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
@@ -137,11 +137,11 @@ TEST(TriangleFanCoversQuad) {
 
   EXPECT_TRUE(CountRedPixels(64, 48, 200) > 2000);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(LineTopologiesDrawPixels) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint program = LinkProgram(kPositionVertex, kSolidFragment, -1);
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
@@ -171,11 +171,11 @@ TEST(LineTopologiesDrawPixels) {
   EXPECT_TRUE(loop_count > 60);
 
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(PrimitiveRestartSplitsLineStrip) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint program = LinkProgram(kPositionVertex, kSolidFragment, -1);
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
@@ -202,11 +202,11 @@ TEST(PrimitiveRestartSplitsLineStrip) {
 
   glDisable(GL_PRIMITIVE_RESTART_FIXED_INDEX);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(InstancedDrawAdvancesDivisor) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint program = LinkProgram(kInstancedVertex, kVaryingFragment, 2);
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -256,11 +256,11 @@ TEST(InstancedDrawAdvancesDivisor) {
 
   glDeleteBuffers(3, buffers);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(IndexedDrawsAcceptEveryIndexType) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint program = LinkProgram(kPositionVertex, kSolidFragment, -1);
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
@@ -300,11 +300,11 @@ TEST(IndexedDrawsAcceptEveryIndexType) {
 
   glDeleteBuffers(1, &element_buffer);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ClientSideArraysDrawWithoutBuffer) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint program = LinkProgram(kPositionVertex, kSolidFragment, -1);
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
@@ -318,5 +318,5 @@ TEST(ClientSideArraysDrawWithoutBuffer) {
 
   EXPECT_TRUE(CountRedPixels(64, 48, 200) > 3000);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

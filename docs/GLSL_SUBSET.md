@@ -1,6 +1,6 @@
 # The interpreted GLSL subset
 
-ZCat-GLES evaluates vertex and fragment shaders on the CPU. It is not a
+Glanceasy evaluates vertex and fragment shaders on the CPU. It is not a
 compiler: the lexer and parser build an AST, and the evaluator walks that AST
 for every vertex and every fragment. The subset is intentionally close to
 GLSL ES 1.00 with the ES 3.00 additions that the state machine already accepts.
@@ -110,7 +110,7 @@ Angle and exponential: `radians`, `degrees`, `sin`, `cos`, `tan`, `asin`,
 `acos`, `atan` (one and two arguments), `pow`, `exp`, `log`, `exp2`, `log2`,
 `sqrt`, `inversesqrt`.
 
-These are evaluated with the approximations in `src/zgl_fastmath.*` rather than
+These are evaluated with the approximations in `src/glanceasy_fastmath.*` rather than
 libm. The polynomial fits keep the error well under one 8-bit output LSB for
 the ranges exercised by the test and visual suites, and `sin` / `cos` process
 four components at a time with NEON on ARMv7. The exact integer, depth,

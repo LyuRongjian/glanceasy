@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,10 @@
 #include <vector>
 
 #include "GLES3/gl32.h"
-#include "src/zgl_api_common.h"
-#include "src/zgl_simd.h"
+#include "src/glanceasy_api_common.h"
+#include "src/glanceasy_simd.h"
 
-namespace zgl {
+namespace glanceasy {
 
 GLint RoundToInteger(float value) {
   return static_cast<GLint>(value >= 0.0f ? value + 0.5f : value - 0.5f);
@@ -500,39 +500,39 @@ bool GetIntegerValue(Context* context, GLenum pname, GLint* first, int* count) {
   }
 }
 
-}  // namespace zgl
+}  // namespace glanceasy
 
 extern "C" {
 
 GLenum glGetError(void) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   return context ? context->TakeError() : GL_NO_ERROR;
 }
 
 const GLubyte* glGetString(GLenum name) {
   switch (name) {
     case GL_VENDOR:
-      return reinterpret_cast<const GLubyte*>("ZCat-GLES");
+      return reinterpret_cast<const GLubyte*>("Glanceasy");
     case GL_RENDERER:
-      return reinterpret_cast<const GLubyte*>("ZCat CPU rasteriser");
+      return reinterpret_cast<const GLubyte*>("Glanceasy CPU rasteriser");
     case GL_VERSION:
-      return reinterpret_cast<const GLubyte*>("OpenGL ES 3.0 ZCat-GLES 0.1.0");
+      return reinterpret_cast<const GLubyte*>("OpenGL ES 3.0 Glanceasy 0.1.0");
     case GL_SHADING_LANGUAGE_VERSION:
       return reinterpret_cast<const GLubyte*>(
-          "OpenGL ES GLSL ES 3.00 ZCat-GLES");
+          "OpenGL ES GLSL ES 3.00 Glanceasy");
     case GL_EXTENSIONS:
       return reinterpret_cast<const GLubyte*>("");
     default:
       break;
   }
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (context)
     context->SetError(GL_INVALID_ENUM);
   return nullptr;
 }
 
 const GLubyte* glGetStringi(GLenum name, GLuint index) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return nullptr;
   if (name != GL_EXTENSIONS) {
@@ -548,7 +548,7 @@ const GLubyte* glGetStringi(GLenum name, GLuint index) {
 }
 
 void glGetIntegerv(GLenum pname, GLint* data) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !data)
     return;
   if (pname == GL_COMPRESSED_TEXTURE_FORMATS) {
@@ -565,7 +565,7 @@ void glGetIntegerv(GLenum pname, GLint* data) {
   }
   GLint first = 0;
   int count = 1;
-  if (!zgl::GetIntegerValue(context, pname, &first, &count)) {
+  if (!glanceasy::GetIntegerValue(context, pname, &first, &count)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -590,17 +590,17 @@ void glGetIntegerv(GLenum pname, GLint* data) {
   }
   if (pname == GL_COLOR_CLEAR_VALUE) {
     for (int i = 0; i < 4; ++i)
-      data[i] = zgl::ExpandFloatToInteger(context->state.clear_color[i]);
+      data[i] = glanceasy::ExpandFloatToInteger(context->state.clear_color[i]);
     return;
   }
   if (pname == GL_BLEND_COLOR) {
     for (int i = 0; i < 4; ++i)
-      data[i] = zgl::ExpandFloatToInteger(context->state.blend.color[i]);
+      data[i] = glanceasy::ExpandFloatToInteger(context->state.blend.color[i]);
     return;
   }
   if (pname == GL_DEPTH_RANGE) {
-    data[0] = zgl::ExpandFloatToInteger(context->state.depth.range_near);
-    data[1] = zgl::ExpandFloatToInteger(context->state.depth.range_far);
+    data[0] = glanceasy::ExpandFloatToInteger(context->state.depth.range_near);
+    data[1] = glanceasy::ExpandFloatToInteger(context->state.depth.range_far);
     return;
   }
   if (pname == GL_ALIASED_LINE_WIDTH_RANGE ||
@@ -617,15 +617,15 @@ void glGetIntegerv(GLenum pname, GLint* data) {
     return;
   }
   if (pname == GL_MAX_VIEWPORT_DIMS) {
-    data[0] = zgl::kMaxViewportSize;
-    data[1] = zgl::kMaxViewportSize;
+    data[0] = glanceasy::kMaxViewportSize;
+    data[1] = glanceasy::kMaxViewportSize;
     return;
   }
   data[0] = first;
 }
 
 void glGetFloatv(GLenum pname, GLfloat* data) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !data)
     return;
   switch (pname) {
@@ -675,7 +675,7 @@ void glGetFloatv(GLenum pname, GLfloat* data) {
   }
   GLint value = 0;
   int count = 1;
-  if (!zgl::GetIntegerValue(context, pname, &value, &count)) {
+  if (!glanceasy::GetIntegerValue(context, pname, &value, &count)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -692,7 +692,7 @@ void glGetFloatv(GLenum pname, GLfloat* data) {
 }
 
 void glGetBooleanv(GLenum pname, GLboolean* data) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !data)
     return;
   if (pname == GL_SAMPLE_COVERAGE_VALUE) {
@@ -702,7 +702,7 @@ void glGetBooleanv(GLenum pname, GLboolean* data) {
   }
   GLint value = 0;
   int count = 1;
-  if (!zgl::GetIntegerValue(context, pname, &value, &count)) {
+  if (!glanceasy::GetIntegerValue(context, pname, &value, &count)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -717,10 +717,10 @@ void glGetBooleanv(GLenum pname, GLboolean* data) {
 }
 
 void glEnable(GLenum cap) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::State& state = context->state;
+  glanceasy::State& state = context->state;
   switch (cap) {
     case GL_BLEND:
       state.blend.enabled = true;
@@ -763,10 +763,10 @@ void glEnable(GLenum cap) {
 }
 
 void glDisable(GLenum cap) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::State& state = context->state;
+  glanceasy::State& state = context->state;
   switch (cap) {
     case GL_BLEND:
       state.blend.enabled = false;
@@ -809,10 +809,10 @@ void glDisable(GLenum cap) {
 }
 
 GLboolean glIsEnabled(GLenum cap) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return GL_FALSE;
-  const zgl::State& state = context->state;
+  const glanceasy::State& state = context->state;
   switch (cap) {
     case GL_BLEND:
       return state.blend.enabled ? GL_TRUE : GL_FALSE;
@@ -843,35 +843,35 @@ GLboolean glIsEnabled(GLenum cap) {
 }
 
 void glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (width < 0 || height < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (width > zgl::kMaxViewportSize || height > zgl::kMaxViewportSize) {
+  if (width > glanceasy::kMaxViewportSize || height > glanceasy::kMaxViewportSize) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  context->state.viewport = zgl::Rect{x, y, width, height};
-  if (getenv("ZGL_DEBUG_VIEWPORT"))
+  context->state.viewport = glanceasy::Rect{x, y, width, height};
+  if (getenv("GLANCEASY_DEBUG_VIEWPORT"))
     fprintf(stderr, "[vp] %d %d %d %d\n", x, y, width, height);
 }
 
 void glScissor(GLint x, GLint y, GLsizei width, GLsizei height) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (width < 0 || height < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  context->state.scissor = zgl::Rect{x, y, width, height};
+  context->state.scissor = glanceasy::Rect{x, y, width, height};
 }
 
 void glDepthRange(GLfloat near_value, GLfloat far_value) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.depth.range_near = near_value;
@@ -883,7 +883,7 @@ void glDepthRangef(GLfloat near_value, GLfloat far_value) {
 }
 
 void glDepthFunc(GLenum func) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   switch (func) {
@@ -904,14 +904,14 @@ void glDepthFunc(GLenum func) {
 }
 
 void glDepthMask(GLboolean flag) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.depth.mask = flag != GL_FALSE;
 }
 
 void glClearColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.clear_color[0] = red;
@@ -921,23 +921,23 @@ void glClearColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
 }
 
 void glClearDepthf(GLfloat depth) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.clear_depth = depth;
 }
 
 void glClearStencil(GLint value) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.clear_stencil = value;
 }
 
 void glClear(GLbitfield mask) {
-  if (getenv("ZGL_DEBUG_ERROR"))
+  if (getenv("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr, "[glclear] mask=0x%x\n", static_cast<unsigned>(mask));
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (mask & ~(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
@@ -945,17 +945,17 @@ void glClear(GLbitfield mask) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::RenderTarget target = context->GetDrawTarget();
+  glanceasy::RenderTarget target = context->GetDrawTarget();
   if (!target.valid()) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
-  const zgl::State& state = context->state;
+  const glanceasy::State& state = context->state;
   if (state.rasterizer_discard)
     return;
-  zgl::Rect area{0, 0, target.width, target.height};
+  glanceasy::Rect area{0, 0, target.width, target.height};
   if (state.scissor_test) {
-    const zgl::Rect scissor{state.scissor.x,
+    const glanceasy::Rect scissor{state.scissor.x,
                             target.height - state.scissor.bottom(),
                             state.scissor.width, state.scissor.height};
     area = area.Intersect(scissor);
@@ -964,20 +964,20 @@ void glClear(GLbitfield mask) {
     return;
 
   if (mask & GL_COLOR_BUFFER_BIT) {
-    const zgl::Rgba color = zgl::Rgba{zgl::FloatToUnorm8(state.clear_color[0]),
-                                      zgl::FloatToUnorm8(state.clear_color[1]),
-                                      zgl::FloatToUnorm8(state.clear_color[2]),
-                                      zgl::FloatToUnorm8(state.clear_color[3])};
+    const glanceasy::Rgba color = glanceasy::Rgba{glanceasy::FloatToUnorm8(state.clear_color[0]),
+                                      glanceasy::FloatToUnorm8(state.clear_color[1]),
+                                      glanceasy::FloatToUnorm8(state.clear_color[2]),
+                                      glanceasy::FloatToUnorm8(state.clear_color[3])};
     const bool writes_all_channels =
         state.color_mask[0] && state.color_mask[1] && state.color_mask[2] &&
         state.color_mask[3];
     const uint32_t packed =
-        zgl::PackRgba(color.r, color.g, color.b, color.a);
+        glanceasy::PackRgba(color.r, color.g, color.b, color.a);
     for (int buffer_index = 0; buffer_index < target.draw_buffer_count;
          ++buffer_index) {
       const GLenum buffer = target.draw_buffers[buffer_index];
       if (buffer < GL_COLOR_ATTACHMENT0 ||
-          buffer >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments)
+          buffer >= GL_COLOR_ATTACHMENT0 + glanceasy::kMaxColorAttachments)
         continue;
       const int attachment = buffer - GL_COLOR_ATTACHMENT0;
       uint8_t* const color_buffer = target.colors[attachment];
@@ -985,10 +985,10 @@ void glClear(GLbitfield mask) {
         continue;
       uint32_t buffer_packed = packed;
       if (target.color_is_srgb[attachment]) {
-        const zgl::Rgba linear = zgl::UnpackRgba(packed);
-        buffer_packed = zgl::PackRgba(zgl::LinearToSrgb8(linear.r / 255.0f),
-                                      zgl::LinearToSrgb8(linear.g / 255.0f),
-                                      zgl::LinearToSrgb8(linear.b / 255.0f),
+        const glanceasy::Rgba linear = glanceasy::UnpackRgba(packed);
+        buffer_packed = glanceasy::PackRgba(glanceasy::LinearToSrgb8(linear.r / 255.0f),
+                                      glanceasy::LinearToSrgb8(linear.g / 255.0f),
+                                      glanceasy::LinearToSrgb8(linear.b / 255.0f),
                                       linear.a);
       }
       const int sample_planes = target.multisampled() ? target.samples : 1;
@@ -1001,7 +1001,7 @@ void glClear(GLbitfield mask) {
         for (int y = area.y; y < area.bottom(); ++y) {
           uint8_t* row =
               plane + static_cast<size_t>(y) * target.width * 4;
-          zgl::simd::FillRgba(
+          glanceasy::simd::FillRgba(
               row + static_cast<size_t>(area.x) * 4, area.width, buffer_packed);
         }
         continue;
@@ -1013,9 +1013,9 @@ void glClear(GLbitfield mask) {
           uint32_t previous;
           memcpy(&previous, row + static_cast<size_t>(x) * 4,
                  sizeof(previous));
-          const zgl::Rgba stored = zgl::UnpackRgba(previous);
+          const glanceasy::Rgba stored = glanceasy::UnpackRgba(previous);
           const uint32_t value =
-              zgl::PackRgba(state.color_mask[0] ? color.r : stored.r,
+              glanceasy::PackRgba(state.color_mask[0] ? color.r : stored.r,
                             state.color_mask[1] ? color.g : stored.g,
                             state.color_mask[2] ? color.b : stored.b,
                             state.color_mask[3] ? color.a : stored.a);
@@ -1036,7 +1036,7 @@ void glClear(GLbitfield mask) {
   }
   if ((mask & GL_DEPTH_BUFFER_BIT) && target.depth && state.depth.mask) {
     const uint16_t depth = static_cast<uint16_t>(
-        zgl::Clamp01(state.clear_depth) * 65535.0f + 0.5f);
+        glanceasy::Clamp01(state.clear_depth) * 65535.0f + 0.5f);
     const int sample_planes = target.multisampled() ? target.samples : 1;
     const size_t plane_texels =
         target.multisampled() ? target.sample_texels : 0;
@@ -1045,14 +1045,14 @@ void glClear(GLbitfield mask) {
           target.depth + static_cast<size_t>(sample) * plane_texels;
       for (int y = area.y; y < area.bottom(); ++y) {
         uint16_t* row = plane + static_cast<size_t>(y) * target.width;
-        zgl::simd::FillU16(row + area.x, area.width, depth);
+        glanceasy::simd::FillU16(row + area.x, area.width, depth);
       }
     }
     if (target.resolved_depth) {
       for (int y = area.y; y < area.bottom(); ++y) {
         uint16_t* row =
             target.resolved_depth + static_cast<size_t>(y) * target.width;
-        zgl::simd::FillU16(row + area.x, area.width, depth);
+        glanceasy::simd::FillU16(row + area.x, area.width, depth);
       }
     }
   }
@@ -1068,7 +1068,7 @@ void glClear(GLbitfield mask) {
       for (int y = area.y; y < area.bottom(); ++y) {
         uint8_t* row = plane + static_cast<size_t>(y) * target.width;
         if (write_mask == 0xFF) {
-          zgl::simd::FillU8(row + area.x, area.width, value);
+          glanceasy::simd::FillU8(row + area.x, area.width, value);
           continue;
         }
         for (int x = area.x; x < area.right(); ++x) {
@@ -1092,7 +1092,7 @@ void glColorMask(GLboolean red,
                  GLboolean green,
                  GLboolean blue,
                  GLboolean alpha) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.color_mask[0] = red != GL_FALSE;
@@ -1102,7 +1102,7 @@ void glColorMask(GLboolean red,
 }
 
 void glStencilMask(GLuint mask) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.stencil.write_mask = static_cast<int>(mask);
@@ -1113,12 +1113,12 @@ void glStencilMask(GLuint mask) {
 
 void glStencilMaskSeparate(GLenum face, GLuint mask) {
   if (face != GL_FRONT && face != GL_BACK && face != GL_FRONT_AND_BACK) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (context)
       context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (face == GL_FRONT || face == GL_FRONT_AND_BACK)
@@ -1131,7 +1131,7 @@ void glStencilMaskSeparate(GLenum face, GLuint mask) {
   }
 }
 
-static void SetStencilFunc(zgl::StencilFace* face,
+static void SetStencilFunc(glanceasy::StencilFace* face,
                            GLenum func,
                            GLint reference,
                            GLuint mask) {
@@ -1150,7 +1150,7 @@ void glStencilFuncSeparate(GLenum face,
                            GLenum func,
                            GLint reference,
                            GLuint mask) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   switch (func) {
@@ -1204,7 +1204,7 @@ void glStencilOpSeparate(GLenum face,
                          GLenum fail,
                          GLenum depth_fail,
                          GLenum pass) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (!ValidStencilOp(fail) || !ValidStencilOp(depth_fail) ||
@@ -1212,7 +1212,7 @@ void glStencilOpSeparate(GLenum face,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  const auto apply = [&](zgl::StencilFace* target) {
+  const auto apply = [&](glanceasy::StencilFace* target) {
     target->op_fail = fail;
     target->op_depth_fail = depth_fail;
     target->op_pass = pass;
@@ -1262,7 +1262,7 @@ void glBlendFuncSeparate(GLenum source_rgb,
                          GLenum destination_rgb,
                          GLenum source_alpha,
                          GLenum destination_alpha) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (!ValidBlendFactor(source_rgb) || !ValidBlendFactor(destination_rgb) ||
@@ -1270,7 +1270,7 @@ void glBlendFuncSeparate(GLenum source_rgb,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::BlendState& blend = context->state.blend;
+  glanceasy::BlendState& blend = context->state.blend;
   blend.src_rgb = source_rgb;
   blend.dst_rgb = destination_rgb;
   blend.src_alpha = source_alpha;
@@ -1282,7 +1282,7 @@ void glBlendEquation(GLenum mode) {
 }
 
 void glBlendEquationSeparate(GLenum mode_rgb, GLenum mode_alpha) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (!ValidBlendEquation(mode_rgb) || !ValidBlendEquation(mode_alpha)) {
@@ -1294,7 +1294,7 @@ void glBlendEquationSeparate(GLenum mode_rgb, GLenum mode_alpha) {
 }
 
 void glBlendColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.blend.color[0] = red;
@@ -1304,7 +1304,7 @@ void glBlendColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
 }
 
 void glCullFace(GLenum mode) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (mode != GL_FRONT && mode != GL_BACK && mode != GL_FRONT_AND_BACK) {
@@ -1315,7 +1315,7 @@ void glCullFace(GLenum mode) {
 }
 
 void glFrontFace(GLenum mode) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (mode != GL_CW && mode != GL_CCW) {
@@ -1326,7 +1326,7 @@ void glFrontFace(GLenum mode) {
 }
 
 void glPolygonOffset(GLfloat factor, GLfloat units) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.polygon_offset_factor = factor;
@@ -1334,7 +1334,7 @@ void glPolygonOffset(GLfloat factor, GLfloat units) {
 }
 
 void glLineWidth(GLfloat width) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (!(width > 0.0f)) {
@@ -1345,7 +1345,7 @@ void glLineWidth(GLfloat width) {
 }
 
 void glSampleCoverage(GLfloat value, GLboolean invert) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   context->state.sample_coverage_value =
@@ -1354,7 +1354,7 @@ void glSampleCoverage(GLfloat value, GLboolean invert) {
 }
 
 void glHint(GLenum target, GLenum mode) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (mode != GL_FASTEST && mode != GL_NICEST && mode != GL_DONT_CARE) {
@@ -1369,7 +1369,7 @@ void glHint(GLenum target, GLenum mode) {
       context->state.fragment_shader_derivative_hint = mode;
       return;
     default: {
-      zgl::Context* context = zgl::ApiContext();
+      glanceasy::Context* context = glanceasy::ApiContext();
       if (context)
         context->SetError(GL_INVALID_ENUM);
       return;
@@ -1378,10 +1378,10 @@ void glHint(GLenum target, GLenum mode) {
 }
 
 void glPixelStorei(GLenum pname, GLint param) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::PixelStoreState& store = context->state.pixel_store;
+  glanceasy::PixelStoreState& store = context->state.pixel_store;
   switch (pname) {
     case GL_PACK_ROW_LENGTH:
     case GL_UNPACK_ROW_LENGTH:
@@ -1449,7 +1449,7 @@ void glGetShaderPrecisionFormat(GLenum shader_type,
                                 GLint* range,
                                 GLint* precision) {
   if (shader_type != GL_VERTEX_SHADER && shader_type != GL_FRAGMENT_SHADER) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (context)
       context->SetError(GL_INVALID_ENUM);
     return;
@@ -1457,7 +1457,7 @@ void glGetShaderPrecisionFormat(GLenum shader_type,
   if (precision_type != GL_LOW_FLOAT && precision_type != GL_MEDIUM_FLOAT &&
       precision_type != GL_HIGH_FLOAT && precision_type != GL_LOW_INT &&
       precision_type != GL_MEDIUM_INT && precision_type != GL_HIGH_INT) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (context)
       context->SetError(GL_INVALID_ENUM);
     return;
@@ -1516,7 +1516,7 @@ void glFlush(void) {}
 // ---- Queries --------------------------------------------------------------
 
 void glGenQueries(GLsizei n, GLuint* ids) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -1530,7 +1530,7 @@ void glGenQueries(GLsizei n, GLuint* ids) {
 }
 
 void glDeleteQueries(GLsizei n, const GLuint* ids) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -1544,14 +1544,14 @@ void glDeleteQueries(GLsizei n, const GLuint* ids) {
 }
 
 GLboolean glIsQuery(GLuint id) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || id == 0)
     return GL_FALSE;
   return context->queries.Get(id) ? GL_TRUE : GL_FALSE;
 }
 
 void glBeginQuery(GLenum target, GLuint id) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (target != GL_ANY_SAMPLES_PASSED &&
@@ -1563,7 +1563,7 @@ void glBeginQuery(GLenum target, GLuint id) {
   const GLenum query_target =
       target == GL_ANY_SAMPLES_PASSED_CONSERVATIVE ? GL_ANY_SAMPLES_PASSED
                                                    : target;
-  zgl::Query* query = context->queries.GetOrCreateReserved(id);
+  glanceasy::Query* query = context->queries.GetOrCreateReserved(id);
   if (!query) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -1577,7 +1577,7 @@ void glBeginQuery(GLenum target, GLuint id) {
     return;
   }
   for (int name = 1; name <= context->queries.size(); ++name) {
-    const zgl::Query* active =
+    const glanceasy::Query* active =
         context->queries.Get(static_cast<GLuint>(name));
     if (active && active->active && active->target == query_target) {
       context->SetError(GL_INVALID_OPERATION);
@@ -1585,7 +1585,7 @@ void glBeginQuery(GLenum target, GLuint id) {
     }
   }
   if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
-    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+    glanceasy::TransformFeedback* feedback = glanceasy::CurrentTransformFeedback(context);
     query->start_primitives =
         feedback ? feedback->primitives_written : 0;
   }
@@ -1596,7 +1596,7 @@ void glBeginQuery(GLenum target, GLuint id) {
 }
 
 void glEndQuery(GLenum target) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   const GLenum query_target =
@@ -1610,9 +1610,9 @@ void glEndQuery(GLenum target) {
     return;
   }
   if (target == GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN) {
-    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+    glanceasy::TransformFeedback* feedback = glanceasy::CurrentTransformFeedback(context);
     for (int name = 1; name <= context->queries.size(); ++name) {
-      zgl::Query* query = context->queries.Get(static_cast<GLuint>(name));
+      glanceasy::Query* query = context->queries.Get(static_cast<GLuint>(name));
       if (query && query->active && query->target == target) {
         query->result = feedback ? feedback->primitives_written -
                                        query->start_primitives
@@ -1625,7 +1625,7 @@ void glEndQuery(GLenum target) {
     return;
   }
   for (int name = 1; name <= context->queries.size(); ++name) {
-    zgl::Query* query = context->queries.Get(static_cast<GLuint>(name));
+    glanceasy::Query* query = context->queries.Get(static_cast<GLuint>(name));
     if (query && query->active && query->target == target) {
       query->result =
           context->stats.fragments_written > query->start_fragments ? 1u : 0u;
@@ -1637,7 +1637,7 @@ void glEndQuery(GLenum target) {
 }
 
 void glGetQueryiv(GLenum target, GLenum pname, GLint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
   if (target != GL_ANY_SAMPLES_PASSED &&
@@ -1649,7 +1649,7 @@ void glGetQueryiv(GLenum target, GLenum pname, GLint* params) {
   if (pname == GL_CURRENT_QUERY) {
     params[0] = 0;
     for (int name = 1; name <= context->queries.size(); ++name) {
-      const zgl::Query* query = context->queries.Get(static_cast<GLuint>(name));
+      const glanceasy::Query* query = context->queries.Get(static_cast<GLuint>(name));
       if (query && query->active && query->target == target) {
         params[0] = name;
         break;
@@ -1661,10 +1661,10 @@ void glGetQueryiv(GLenum target, GLenum pname, GLint* params) {
 }
 
 void glGetQueryObjectuiv(GLuint id, GLenum pname, GLuint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
-  const zgl::Query* query = context->queries.Get(id);
+  const glanceasy::Query* query = context->queries.Get(id);
   if (!query) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -1689,11 +1689,11 @@ void glGetQueryObjectuiv(GLuint id, GLenum pname, GLuint* params) {
 // ---- Sync objects ---------------------------------------------------------
 
 namespace {
-std::vector<zgl::SyncObject*> g_sync_objects;
+std::vector<glanceasy::SyncObject*> g_sync_objects;
 }  // namespace
 
 GLsync glFenceSync(GLenum condition, GLbitfield flags) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return nullptr;
   if (condition != GL_SYNC_GPU_COMMANDS_COMPLETE) {
@@ -1704,21 +1704,21 @@ GLsync glFenceSync(GLenum condition, GLbitfield flags) {
     context->SetError(GL_INVALID_VALUE);
     return nullptr;
   }
-  zgl::SyncObject* sync = new zgl::SyncObject();
+  glanceasy::SyncObject* sync = new glanceasy::SyncObject();
   g_sync_objects.push_back(sync);
   return reinterpret_cast<GLsync>(sync);
 }
 
 GLboolean glIsSync(GLsync sync) {
-  for (const zgl::SyncObject* object : g_sync_objects) {
-    if (reinterpret_cast<GLsync>(const_cast<zgl::SyncObject*>(object)) == sync)
+  for (const glanceasy::SyncObject* object : g_sync_objects) {
+    if (reinterpret_cast<GLsync>(const_cast<glanceasy::SyncObject*>(object)) == sync)
       return GL_TRUE;
   }
   return GL_FALSE;
 }
 
 void glDeleteSync(GLsync sync) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (sync == nullptr)
     return;
   if (context && !glIsSync(sync)) {
@@ -1736,7 +1736,7 @@ void glDeleteSync(GLsync sync) {
 
 GLenum glClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout) {
   (void)timeout;
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!glIsSync(sync)) {
     if (context)
       context->SetError(GL_INVALID_VALUE);
@@ -1754,7 +1754,7 @@ GLenum glClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout) {
 
 void glWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout) {
   (void)timeout;
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!glIsSync(sync)) {
     if (context)
       context->SetError(GL_INVALID_VALUE);
@@ -1773,7 +1773,7 @@ void glGetSynciv(GLsync sync,
                  GLint* values) {
   (void)buf_size;
   if (!glIsSync(sync)) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (context)
       context->SetError(GL_INVALID_VALUE);
     return;
@@ -1796,7 +1796,7 @@ void glGetSynciv(GLsync sync,
       values[0] = 0;
       return;
     default: {
-      zgl::Context* context = zgl::ApiContext();
+      glanceasy::Context* context = glanceasy::ApiContext();
       if (context)
         context->SetError(GL_INVALID_ENUM);
       return;

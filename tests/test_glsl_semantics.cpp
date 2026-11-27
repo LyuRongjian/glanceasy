@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,8 +7,8 @@
 // discard and texture lookups.
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -67,7 +67,7 @@ void ExpectPixel(const unsigned char rgba[4], float r, float g, float b) {
 }  // namespace
 
 TEST(ArithmeticOperatorsAndIncrements) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -90,11 +90,11 @@ TEST(ArithmeticOperatorsAndIncrements) {
   RenderAndRead(program, rgba);
   ExpectPixel(rgba, 1.0f, 1.666f / 2.0f, 6.0f / 8.0f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ControlFlowStatementsExecute) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -128,11 +128,11 @@ TEST(ControlFlowStatementsExecute) {
   RenderAndRead(program, rgba);
   ExpectPixel(rgba, 0.875f, 0.5f, 1.0f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TrigonometricAndExponentialBuiltins) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -154,11 +154,11 @@ TEST(TrigonometricAndExponentialBuiltins) {
   RenderAndRead(program, rgba);
   ExpectPixel(rgba, 0.0f, 1.0f, 1.0f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(VectorTrigonometricBuiltinsEvaluateAllLanes) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -172,11 +172,11 @@ TEST(VectorTrigonometricBuiltinsEvaluateAllLanes) {
   RenderAndRead(program, rgba);
   ExpectPixel(rgba, 0.0f, 1.0f, 0.5f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(CommonBuiltinsHandleEdgeCases) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -202,11 +202,11 @@ TEST(CommonBuiltinsHandleEdgeCases) {
   // (0.5 + 1 + 1) / 3.
   ExpectPixel(rgba, 0.59375f, 0.8333f, 0.0f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(GeometricBuiltinsProduceUnitResults) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -224,11 +224,11 @@ TEST(GeometricBuiltinsProduceUnitResults) {
   RenderAndRead(program, rgba);
   ExpectPixel(rgba, 0.6f, 1.0f, 1.0f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(MatrixBuiltinsAndColumnMajorStorage) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -247,11 +247,11 @@ TEST(MatrixBuiltinsAndColumnMajorStorage) {
   // v = (1, 2), transpose column 1 = (2, 4), matrixCompMult column 0 = (1, 4).
   ExpectPixel(rgba, 0.5f, 0.5f, 0.5f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(RelationalBuiltinsReturnBooleanVectors) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -272,11 +272,11 @@ TEST(RelationalBuiltinsReturnBooleanVectors) {
   ExpectPixel(rgba, 1.0f, 1.0f, 1.0f);
   EXPECT_EQ(rgba[3], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UserFunctionsKeepTheirOwnLocalFrame) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -295,11 +295,11 @@ TEST(UserFunctionsKeepTheirOwnLocalFrame) {
   RenderAndRead(program, rgba);
   ExpectPixel(rgba, 0.5f, 1.0f, 0.5f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DiscardLeavesTheFramebufferUntouched) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -320,11 +320,11 @@ TEST(DiscardLeavesTheFramebufferUntouched) {
   glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
   ExpectPixel(rgba, 0.0f, 1.0f, 0.0f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureBuiltinsSelectLevelsAndProject) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -386,5 +386,5 @@ TEST(TextureBuiltinsSelectLevelsAndProject) {
   ExpectPixel(rgba, 1.0f, 0.0f, 0.0f);
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

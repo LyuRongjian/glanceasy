@@ -1,13 +1,13 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_ZGL_TEXTURE_H_
-#define ZGL_SRC_ZGL_TEXTURE_H_
+#ifndef GLANCEASY_SRC_TEXTURE_H_
+#define GLANCEASY_SRC_TEXTURE_H_
 
-#include "src/zgl_context.h"
+#include "src/glanceasy_context.h"
 
-namespace zgl {
+namespace glanceasy {
 
 // Reduces a mipmapped filter to its base filter when the LOD happens to be
 // zero, which is the only case the CPU rasteriser resolves implicitly.
@@ -120,6 +120,6 @@ bool UploadTextureImageInteger(TextureImage* image,
 // Fills the mip chain below level 0 with box-filtered copies of level 0.
 void GenerateMipmap(Texture* texture);
 
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_ZGL_TEXTURE_H_
+#endif  // GLANCEASY_SRC_TEXTURE_H_

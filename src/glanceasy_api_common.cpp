@@ -1,15 +1,15 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/zgl_api_common.h"
+#include "src/glanceasy_api_common.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
-namespace zgl {
+namespace glanceasy {
 
 Context* ApiContext() {
   return CurrentContext();
@@ -49,7 +49,7 @@ void SetUniformFloats(GLint location,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (getenv("ZGL_DEBUG_UNI") && location >= 0 &&
+  if (getenv("GLANCEASY_DEBUG_UNI") && location >= 0 &&
       location < static_cast<int>(object->program->uniforms().size())) {
     static int uni_debug = 0;
     if (uni_debug < 60) {
@@ -66,7 +66,7 @@ void SetUniformFloats(GLint location,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (getenv("ZGL_DEBUG_UNI")) {
+  if (getenv("GLANCEASY_DEBUG_UNI")) {
     fprintf(stderr,
             "[uniset] loc=%d type=%s array=%d size=%d comps=%d count=%d\n",
             location, uniform_type->Name().c_str(),
@@ -215,4 +215,4 @@ int MipLevelCount(int width, int height) {
   return levels;
 }
 
-}  // namespace zgl
+}  // namespace glanceasy

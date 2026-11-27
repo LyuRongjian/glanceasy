@@ -1,10 +1,10 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -16,7 +16,7 @@ enum : int {
 }  // namespace
 
 TEST(TextureNamesFollowTheObjectLifecycle) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint textures[2] = {0, 0};
   glGenTextures(2, textures);
   EXPECT_TRUE(textures[0] != 0);
@@ -49,11 +49,11 @@ TEST(TextureNamesFollowTheObjectLifecycle) {
   glBindTexture(GL_TEXTURE_2D, texture);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureParametersValidateAndRoundTrip) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -116,11 +116,11 @@ TEST(TextureParametersValidateAndRoundTrip) {
   glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &min_filter_float);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TexSubImageValidatesEveryArgument) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -148,11 +148,11 @@ TEST(TexSubImageValidatesEveryArgument) {
                   nullptr);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TexSubImage3DUploadsEachSlice) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_3D, texture);
@@ -177,11 +177,11 @@ TEST(TexSubImage3DUploadsEachSlice) {
                   slice);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureStorageValidatesLevelsAndTargets) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -218,11 +218,11 @@ TEST(TextureStorageValidatesLevelsAndTargets) {
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glDeleteTextures(1, &texture);
   glDeleteTextures(1, &volume);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(CompressedFormatsDecodeAndRejectUnknownEncodings) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -237,11 +237,11 @@ TEST(CompressedFormatsDecodeAndRejectUnknownEncodings) {
   glCompressedTexImage2D(GL_TEXTURE_2D, 0, 0x83F0, 4, 4, 0, 8, block);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TexLevelQueriesReportFormatSizes) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint texture = 0;
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_2D, texture);
@@ -287,11 +287,11 @@ TEST(TexLevelQueriesReportFormatSizes) {
   glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_ALPHA_SIZE, &value);
   EXPECT_EQ(value, 8);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(SamplerObjectsStoreAndReportState) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint samples[2] = {0, 0};
   glGenSamplers(2, samples);
   EXPECT_TRUE(samples[0] != 0);
@@ -367,5 +367,5 @@ TEST(SamplerObjectsStoreAndReportState) {
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
   glDeleteSamplers(2, values);
   EXPECT_EQ(glIsSampler(samples[0]), GL_FALSE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -7,8 +7,8 @@
 // GL_INVALID_OPERATION or stay silent as a documented no-op.
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 // ES 3.1 entry points that the Khronos GLES3 headers used by this repository do
 // not declare but the library still exports as stubs.
@@ -33,7 +33,7 @@ enum : int {
 }  // namespace
 
 TEST(TransformFeedbackObjectsAndValidation) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint ids[2] = {7, 7};
   glGenTransformFeedbacks(2, ids);
   EXPECT_TRUE(ids[0] != 0);
@@ -75,11 +75,11 @@ TEST(TransformFeedbackObjectsAndValidation) {
 
   glDrawTransformFeedback(GL_TRIANGLES, 1);
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(IndexedBufferBindingsAndWideQueries) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint buffer = 0;
   glGenBuffers(1, &buffer);
   glBindBuffer(GL_ARRAY_BUFFER, buffer);
@@ -141,11 +141,11 @@ TEST(IndexedBufferBindingsAndWideQueries) {
   glGetVertexAttribIuiv(0, GL_VERTEX_ATTRIB_ARRAY_SIZE, nullptr);
 
   glDeleteBuffers(1, &buffer);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ComputeAndIndirectDrawsReportUnsupported) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glDispatchCompute(1, 1, 1);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glDispatchComputeIndirect(0);
@@ -163,11 +163,11 @@ TEST(ComputeAndIndirectDrawsReportUnsupported) {
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glShaderStorageBlockBinding(0, 0, 0);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformBlockAndProgramInterfaceQueriesReturnEmpty) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLsizei length = 8;
   GLchar name[8] = "garbage";
   glGetActiveUniformBlockName(0, 0, 8, &length, name);
@@ -220,11 +220,11 @@ TEST(UniformBlockAndProgramInterfaceQueriesReturnEmpty) {
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glProgramParameteri(0, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(MultisampleAndTextureViewEntryPointsAreStubs) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glTexStorage2DMultisample(GL_TEXTURE_2D, 4, GL_RGBA8, 8, 8, GL_TRUE);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glTexStorage3DMultisample(GL_TEXTURE_3D, 4, GL_RGBA8, 8, 8, 8, GL_TRUE);
@@ -259,11 +259,11 @@ TEST(MultisampleAndTextureViewEntryPointsAreStubs) {
   glPrimitiveBoundingBox(-1, -1, -1, 1, 1, 1, 1, 1);
   glBlendBarrier();
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(InternalFormatAndTexLevelQueries) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLint params[2] = {8, 8};
   glGetInternalformativ(GL_TEXTURE_2D, GL_RGBA8, GL_NUM_SAMPLE_COUNTS, 2,
                         params);
@@ -281,11 +281,11 @@ TEST(InternalFormatAndTexLevelQueries) {
   EXPECT_NEAR(width, 8.0f, 0.001f);
   glGetTexLevelParameterfv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, nullptr);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DebugOutputEntryPointsAreSilent) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glDebugMessageCallback(nullptr, nullptr);
   glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr,
                         GL_TRUE);
@@ -315,5 +315,5 @@ TEST(DebugOutputEntryPointsAreSilent) {
   EXPECT_TRUE(pointer == nullptr);
   glGetPointerv(static_cast<GLenum>(0x8093), nullptr);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

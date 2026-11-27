@@ -8,7 +8,7 @@
 一个独立的、纯 CPU 的 OpenGL ES 实现，面向 ARM32 Cortex-A SoC。
 
 Glanceasy 的每一次绘制都在软件中完成光栅化。它源自 WebGlance 浏览器原型中的
-ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、不依赖 EGL、不依赖
+Glanceasy 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、不依赖 EGL、不依赖
 平台窗口系统，也没有任何 x86 SSE 专用代码。库对外提供 Khronos GLES 2.0 / 3.0
 入口，自带 RGBA8 颜色缓冲、16 位深度缓冲和 8 位模板缓冲，渲染结果留在内存中，
 由集成方自行上屏或上传。
@@ -53,8 +53,8 @@ ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、�
 在宿主机上运行图库：
 
 ```sh
-cmake --build build --target zgl_visual_tests
-./build/zgl_visual_tests visual-out 640 480
+cmake --build build --target glanceasy_visual_tests
+./build/glanceasy_visual_tests visual-out 640 480
 ```
 
 第二个参数是输出目录，每个用例会在该目录写一个 PPM 文件。
@@ -80,7 +80,7 @@ cmake --build build --target zgl_visual_tests
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
-./build/zgl_unittests
+./build/glanceasy_unittests
 ```
 
 宿主机构建是开发配置，也用于 AddressSanitizer 与覆盖率运行：
@@ -90,7 +90,7 @@ cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
   -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
 cmake --build build-asan
-./build-asan/zgl_unittests
+./build-asan/glanceasy_unittests
 ```
 
 ARM32 目标在 Linux 上使用 Luckfox SDK 工具链与 qemu-user 验证，不以 Windows
@@ -128,11 +128,11 @@ ANDROID_NDK_ROOT=$HOME/android-ndk-r27c tools/build_android.sh
 
 `tools/run_qemu_arm.sh` 以 `qemu-arm-static -cpu cortex-a7` 运行任意 ARM32 ELF。
 Luckfox 的 uClibc 产物无需修补；Android NDK 的 bionic 产物需要 32 字节对齐的
-TLS 段，此时设置 `ZGL_PATCH_TLS=1`：
+TLS 段，此时设置 `GLANCEASY_PATCH_TLS=1`：
 
 ```sh
-tools/run_qemu_arm.sh build-rv1106/zgl_unittests
-tools/run_qemu_arm.sh build-rv1106/zgl_visual_tests visual-out 640 480
+tools/run_qemu_arm.sh build-rv1106/glanceasy_unittests
+tools/run_qemu_arm.sh build-rv1106/glanceasy_visual_tests visual-out 640 480
 ```
 
 `QEMU_ARM_STATIC` 可指定模拟器路径；未设置时从 `PATH` 中查找
@@ -145,9 +145,9 @@ tools/run_qemu_arm.sh build-rv1106/zgl_visual_tests visual-out 640 480
 渲染到离屏缓冲后写出二进制 PPM 文件：
 
 ```sh
-cmake --build build --target zgl_cube_demo
-./build/zgl_cube_demo cube.ppm 800 600
-tools/run_qemu_arm.sh build-rv1106/zgl_cube_demo cube.ppm 800 600
+cmake --build build --target glanceasy_cube_demo
+./build/glanceasy_cube_demo cube.ppm 800 600
+tools/run_qemu_arm.sh build-rv1106/glanceasy_cube_demo cube.ppm 800 600
 ```
 
 `docs/screenshot.png` 由第二条命令生成；在开发机上 qemu-user 耗时约 8 秒，这不
@@ -155,7 +155,7 @@ tools/run_qemu_arm.sh build-rv1106/zgl_cube_demo cube.ppm 800 600
 
 ## 测试与覆盖率
 
-单元测试通过仓库内的小型注册式框架（`tests/zgl_test.h`）组织，覆盖光栅化、
+单元测试通过仓库内的小型注册式框架（`tests/glanceasy_test.h`）组织，覆盖光栅化、
 纹理采样、GLSL 解释器、全部已实现的 GL 入口、状态机错误路径以及兼容桩。
 
 ```sh
@@ -185,7 +185,7 @@ gcov 数字，覆盖率只统计通过 API 测试执行到的库代码。
 | CTS | Khronos VK-GL-CTS `deqp-gles3`，FBO surface 256 x 256 |
 | 驱动构建 | Release（`-O3`），`-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard`，uClibc |
 | 运行时间 | 2026-11-26 11:42 至 2026-11-27 07:21（UTC+8） |
-| 驱动选项 | 默认帧缓冲按 FBO 0 暴露（`ZGL_FBO_SURFACE_AS_ZERO=1`），允许 harness 绑定默认帧缓冲 |
+| 驱动选项 | 默认帧缓冲按 FBO 0 暴露（`GLANCEASY_FBO_SURFACE_AS_ZERO=1`），允许 harness 绑定默认帧缓冲 |
 
 本地对 CTS harness 打了小补丁：harness 创建 surface FBO 后将其释放，
 `getDefaultFramebuffer()` 返回 0，attach 到默认帧缓冲前先绑定 0。补丁只改变
@@ -283,12 +283,12 @@ Host 构建的 API 测试集共 181 条，失败检查为 0。
 
 ```
 include/GLES2, GLES3, KHR     Khronos 原始头文件
-include/zgl/zgl.h              软件渲染器的公共 C API
+include/glanceasy/glanceasy.h              软件渲染器的公共 C API
 src/                           上下文、光栅化、纹理管线、绘制管线
-src/zgl_fastmath.*             标量着色器数学近似
-src/zgl_simd.*                 四 lane 点积/缩放与批量填充
+src/glanceasy_fastmath.*             标量着色器数学近似
+src/glanceasy_simd.*                 四 lane 点积/缩放与批量填充
 src/glsl/                      GLSL 子集的词法、语法与解释执行
-src/zgl_api_*.cpp              GLES 入口实现
+src/glanceasy_api_*.cpp              GLES 入口实现
 examples/                      独立渲染示例
 tests/                         单元测试与测试框架
 tests/visual/                  可视化回归用例与 PPM 写出
@@ -299,15 +299,15 @@ docs/                          GLSL 子集、移植说明与渲染截图
 ## 使用方式
 
 ```c
-#include "zgl/zgl.h"
+#include "glanceasy/glanceasy.h"
 
-zglCreateContext(320, 240);
+glanceasyCreateContext(320, 240);
 /* 之后正常调用 GLES 入口，需先包含 GLES3/gl32.h。 */
-zglDestroyContext();
+glanceasyDestroyContext();
 ```
 
-`include/zgl/zgl.h` 还提供 `zglGetPixels`、`zglGetPixels32`、`zglGetStats` 与
-`zglGetDiagnostics`，供集成方取回渲染结果、绘制统计或最近的着色器日志。
+`include/glanceasy/glanceasy.h` 还提供 `glanceasyGetPixels`、`glanceasyGetPixels32`、`glanceasyGetStats` 与
+`glanceasyGetDiagnostics`，供集成方取回渲染结果、绘制统计或最近的着色器日志。
 
 ## 已知限制
 

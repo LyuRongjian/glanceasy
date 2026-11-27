@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include <initializer_list>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -20,7 +20,7 @@ bool Contains(const char* haystack, const char* needle) {
 }  // namespace
 
 TEST(ContextStringsDescribeTheBackend) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vendor = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
   const char* renderer =
       reinterpret_cast<const char*>(glGetString(GL_RENDERER));
@@ -31,7 +31,7 @@ TEST(ContextStringsDescribeTheBackend) {
   EXPECT_TRUE(renderer != nullptr);
   EXPECT_TRUE(version != nullptr);
   EXPECT_TRUE(language != nullptr);
-  EXPECT_TRUE(Contains(vendor, "ZCat"));
+  EXPECT_TRUE(Contains(vendor, "Glanceasy"));
   EXPECT_TRUE(Contains(version, "OpenGL ES 3.0"));
   EXPECT_TRUE(Contains(language, "GLSL ES 3.00"));
   EXPECT_TRUE(glGetString(0x1234) == nullptr);
@@ -43,11 +43,11 @@ TEST(ContextStringsDescribeTheBackend) {
   EXPECT_TRUE(count >= 0);
   for (GLint i = 0; i < count; ++i)
     EXPECT_TRUE(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)) != nullptr);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ImplementationLimitsAreAdvertised) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   GLint value = 0;
   glGetIntegerv(GL_MAX_TEXTURE_SIZE, &value);
   EXPECT_EQ(value, 4096);
@@ -92,11 +92,11 @@ TEST(ImplementationLimitsAreAdvertised) {
   glGetFloatv(GL_DEPTH_RANGE, range);
   EXPECT_NEAR(range[0], 0.0f, 0.001f);
   EXPECT_NEAR(range[1], 1.0f, 0.001f);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(EnableDisableAndQueryCaps) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   EXPECT_FALSE(glIsEnabled(GL_BLEND));
   glEnable(GL_BLEND);
   EXPECT_TRUE(glIsEnabled(GL_BLEND));
@@ -127,11 +127,11 @@ TEST(EnableDisableAndQueryCaps) {
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   glIsEnabled(0x9999);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(BlendStateCanBeConfigured) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   GLint value = 0;
   glGetIntegerv(GL_BLEND_SRC_RGB, &value);
@@ -159,11 +159,11 @@ TEST(BlendStateCanBeConfigured) {
 
   glBlendFunc(GL_ONE, 0x1234);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DepthAndStencilStateRoundTrips) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glDepthFunc(GL_LEQUAL);
   GLint value = 0;
   glGetIntegerv(GL_DEPTH_FUNC, &value);
@@ -209,11 +209,11 @@ TEST(DepthAndStencilStateRoundTrips) {
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   glStencilOp(GL_KEEP, GL_KEEP, 0x1234);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ColourMaskAcceptsFourBooleans) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glColorMask(GL_TRUE, GL_FALSE, GL_TRUE, GL_FALSE);
   GLint mask[4] = {};
   glGetIntegerv(GL_COLOR_WRITEMASK, mask);
@@ -221,11 +221,11 @@ TEST(ColourMaskAcceptsFourBooleans) {
   EXPECT_EQ(mask[1], 0);
   EXPECT_EQ(mask[2], 1);
   EXPECT_EQ(mask[3], 0);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ViewportScissorAndCullState) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   glViewport(4, 6, 20, 30);
   GLint viewport[4] = {};
   glGetIntegerv(GL_VIEWPORT, viewport);
@@ -252,11 +252,11 @@ TEST(ViewportScissorAndCullState) {
 
   glViewport(0, 0, -10, 10);
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(PixelStoreStateIsTracked) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glPixelStorei(GL_PACK_ALIGNMENT, 8);
   GLint value = 0;
   glGetIntegerv(GL_PACK_ALIGNMENT, &value);
@@ -273,11 +273,11 @@ TEST(PixelStoreStateIsTracked) {
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
   glPixelStorei(0x1234, 1);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ClearValuesAndHintsSurviveStateChanges) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glClearColor(0.1f, 0.2f, 0.3f, 0.4f);
   GLfloat colour[4] = {};
   glGetFloatv(GL_COLOR_CLEAR_VALUE, colour);
@@ -299,11 +299,11 @@ TEST(ClearValuesAndHintsSurviveStateChanges) {
   glFlush();
   glFinish();
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ErrorFlagIsLatchedAndClearedByTheQuery) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
   glEnable(0x1234);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
@@ -313,11 +313,11 @@ TEST(ErrorFlagIsLatchedAndClearedByTheQuery) {
   glViewport(-1, 0, 4, 4);
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ClearHonoursTheColourMask) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
   glColorMask(GL_TRUE, GL_FALSE, GL_FALSE, GL_FALSE);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -327,11 +327,11 @@ TEST(ClearHonoursTheColourMask) {
   EXPECT_EQ(rgba[1], 0);
   EXPECT_EQ(rgba[3], 0);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ScissorClipsClearAndDraw) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
   glEnable(GL_SCISSOR_TEST);
@@ -349,11 +349,11 @@ TEST(ScissorClipsClearAndDraw) {
   EXPECT_EQ(inside[2], 0);
   EXPECT_EQ(outside[0], 0);
   EXPECT_EQ(outside[2], 255);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(CullingRemovesBackFacingTriangles) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
       "attribute vec2 a_pos;\n"
@@ -394,11 +394,11 @@ TEST(CullingRemovesBackFacingTriangles) {
   glReadPixels(16, 12, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, drawn);
   EXPECT_EQ(drawn[0], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(BlendingMixesFragmentsWithDestination) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
       "attribute vec2 a_pos;\n"
@@ -432,11 +432,11 @@ TEST(BlendingMixesFragmentsWithDestination) {
   EXPECT_TRUE(rgba[0] > 120 && rgba[0] < 135);
   EXPECT_TRUE(rgba[2] > 120 && rgba[2] < 135);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(StencilTestMasksFragments) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
       "attribute vec2 a_pos;\n"
@@ -476,11 +476,11 @@ TEST(StencilTestMasksFragments) {
   glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
   EXPECT_EQ(rgba[0], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DepthTestCanBeDisabledPerDraw) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
       "attribute vec3 a_pos;\n"
@@ -525,11 +525,11 @@ TEST(DepthTestCanBeDisabledPerDraw) {
   glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
   EXPECT_EQ(rgba[0], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(RasterizerDiscardSuppressesDrawing) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
       "attribute vec2 a_pos;\n"
@@ -565,11 +565,11 @@ TEST(RasterizerDiscardSuppressesDrawing) {
   glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
   EXPECT_EQ(rgba[0], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(PolygonOffsetShiftsDepth) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
       "attribute vec3 a_pos;\n"
@@ -610,11 +610,11 @@ TEST(PolygonOffsetShiftsDepth) {
   glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
   EXPECT_EQ(rgba[0], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(PointSizeAndLineWidthAreClamped) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glLineWidth(2.5f);
   GLfloat width = 0.0f;
   glGetFloatv(GL_LINE_WIDTH, &width);
@@ -623,11 +623,11 @@ TEST(PointSizeAndLineWidthAreClamped) {
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
   glLineWidth(0.0f);
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(SampleCoverageIsAcceptedAsNoOp) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glEnable(GL_SAMPLE_COVERAGE);
   glSampleCoverage(0.5f, GL_FALSE);
   GLfloat value = 0.0f;
@@ -638,5 +638,5 @@ TEST(SampleCoverageIsAcceptedAsNoOp) {
   EXPECT_EQ(invert, 0);
   glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
   EXPECT_TRUE(glIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE));
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

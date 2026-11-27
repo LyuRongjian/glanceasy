@@ -1,9 +1,9 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_GLSL_GLSL_PROGRAM_H_
-#define ZGL_SRC_GLSL_GLSL_PROGRAM_H_
+#ifndef GLANCEASY_SRC_GLSL_GLSL_PROGRAM_H_
+#define GLANCEASY_SRC_GLSL_GLSL_PROGRAM_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -16,7 +16,7 @@
 #include "src/glsl/glsl_ast.h"
 #include "src/glsl/glsl_types.h"
 
-namespace zgl {
+namespace glanceasy {
 namespace glsl {
 
 class ShaderJit;
@@ -264,7 +264,7 @@ class Program {
 
   // True when at least one stage was compiled to native code at link time.
   // The counterpart, whether a particular draw took the JIT path, is exposed
-  // through the process-wide ZglJitStats counters.
+  // through the process-wide GlanceasyJitStats counters.
   bool has_native_stage() const { return vertex_jit_ || fragment_jit_; }
 
   Value* uniform_value(int index) {
@@ -333,7 +333,7 @@ class Program {
 
   // Native versions of the stages.  Null means "use the AST evaluator", either
   // because the shader uses a construct the JIT does not cover or because the
-  // library was built with ZGL_ENABLE_JIT=0.
+  // library was built with GLANCEASY_ENABLE_JIT=0.
   std::unique_ptr<ShaderJit> vertex_jit_;
   std::unique_ptr<ShaderJit> fragment_jit_;
 
@@ -343,6 +343,6 @@ class Program {
 };
 
 }  // namespace glsl
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_GLSL_GLSL_PROGRAM_H_
+#endif  // GLANCEASY_SRC_GLSL_GLSL_PROGRAM_H_

@@ -1,16 +1,16 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_ZGL_COMMON_H_
-#define ZGL_SRC_ZGL_COMMON_H_
+#ifndef GLANCEASY_SRC_COMMON_H_
+#define GLANCEASY_SRC_COMMON_H_
 
 #include <stdint.h>
 
 #include <algorithm>
 #include <cmath>
 
-namespace zgl {
+namespace glanceasy {
 
 // ES 3.0 minimum limits.  The CPU backend advertises exactly these numbers
 // so that applications written against the minimum feature set are happy.
@@ -69,7 +69,7 @@ struct Rgba {
 
 // Native 32-bit packing: 0xAABBGGRR.  On a little endian target the byte
 // order in memory is R, G, B, A, which is what GL_RGBA/GL_UNSIGNED_BYTE
-// expects, so ReadPixels and zglGetPixels() need no conversion at all.
+// expects, so ReadPixels and glanceasyGetPixels() need no conversion at all.
 inline uint32_t PackRgba(const Rgba& c) {
   return (static_cast<uint32_t>(c.a) << 24) |
          (static_cast<uint32_t>(c.b) << 16) |
@@ -160,6 +160,6 @@ inline uint8_t RoundToUnorm8(float v) {
   return FloatToUnorm8(v);
 }
 
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_ZGL_COMMON_H_
+#endif  // GLANCEASY_SRC_COMMON_H_

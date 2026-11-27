@@ -1,8 +1,8 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/zgl_raster.h"
+#include "src/glanceasy_raster.h"
 
 #include <stddef.h>
 
@@ -10,7 +10,7 @@
 #include <cmath>
 #include <cstdio>
 
-namespace zgl {
+namespace glanceasy {
 
 namespace {
 
@@ -77,7 +77,7 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
   int x1 = std::min(clip_.right() - 1, static_cast<int>(std::ceil(max_x)));
   int y0 = std::max(clip_.y, static_cast<int>(std::floor(min_y)));
   int y1 = std::min(clip_.bottom() - 1, static_cast<int>(std::ceil(max_y)));
-  if (getenv("ZGL_DEBUG_RAST")) {
+  if (getenv("GLANCEASY_DEBUG_RAST")) {
     static int dbg = 0;
     if (dbg < 8) {
       fprintf(stderr, "[rast] bbox=%d,%d..%d,%d clip=%d,%d,%d,%d\n", x0, y0, x1,
@@ -428,4 +428,4 @@ void Rasterizer::DrawPoint(const RasterVertex& vertex,
   }
 }
 
-}  // namespace zgl
+}  // namespace glanceasy

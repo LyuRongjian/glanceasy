@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,10 @@
 #include <algorithm>
 
 #include "GLES3/gl32.h"
-#include "src/zgl_api_common.h"
-#include "src/zgl_simd.h"
+#include "src/glanceasy_api_common.h"
+#include "src/glanceasy_simd.h"
 
-namespace zgl {
+namespace glanceasy {
 namespace {
 
 // The CTS FBO surface is the first framebuffer allocated by the framework.
@@ -478,7 +478,7 @@ void ClearColourBuffer(Context* context, GLint drawbuffer, uint32_t packed) {
     return;
   }
   const GLenum buffer = target.draw_buffers[drawbuffer];
-  if (getenv("ZGL_DEBUG_BLIT"))
+  if (getenv("GLANCEASY_DEBUG_BLIT"))
     fprintf(stderr, "[clearbuf] fb=%u db=%d->%x\n", context->state.framebuffer,
             drawbuffer, static_cast<unsigned>(buffer));
   if (buffer == GL_NONE)
@@ -548,7 +548,7 @@ void ClearIntegerColourBuffer(Context* context,
     return;
   }
   const GLenum buffer = target.draw_buffers[drawbuffer];
-  if (getenv("ZGL_DEBUG_BLIT"))
+  if (getenv("GLANCEASY_DEBUG_BLIT"))
     fprintf(stderr, "[clearbuf] fb=%u db=%d->%x\n", context->state.framebuffer,
             drawbuffer, static_cast<unsigned>(buffer));
   if (buffer == GL_NONE)
@@ -650,14 +650,14 @@ bool InvalidateAccepted(Context* context,
 }
 
 }  // namespace
-}  // namespace zgl
+}  // namespace glanceasy
 
 extern "C" {
 
 // ---- Framebuffer objects --------------------------------------------------
 
 void glGenFramebuffers(GLsizei n, GLuint* framebuffers) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -668,7 +668,7 @@ void glGenFramebuffers(GLsizei n, GLuint* framebuffers) {
     return;
   for (GLsizei i = 0; i < n; ++i) {
     framebuffers[i] = context->framebuffers.Generate();
-    if (getenv("ZGL_DEBUG_FBO2"))
+    if (getenv("GLANCEASY_DEBUG_FBO2"))
       fprintf(stderr, "[fb2] gen=%u surface=%u cand=%u ctx=%p\n",
               framebuffers[i], context->state.surface_framebuffer,
               context->state.candidate_surface_framebuffer,
@@ -681,13 +681,13 @@ void glGenFramebuffers(GLsizei n, GLuint* framebuffers) {
     // FBO names 1..N belong to test cases.  Promotion would steal name 1
     // from tests that hard-code it (fbo.render et al).
     if (context->state.surface_framebuffer == 0 && i == 0 &&
-        getenv("ZGL_FBO_SURFACE_AS_ZERO") == nullptr)
+        getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") == nullptr)
       context->state.candidate_surface_framebuffer = framebuffers[i];
   }
 }
 
 void glDeleteFramebuffers(GLsizei n, const GLuint* framebuffers) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -698,7 +698,7 @@ void glDeleteFramebuffers(GLsizei n, const GLuint* framebuffers) {
     return;
   for (GLsizei i = 0; i < n; ++i) {
     context->framebuffers.Delete(framebuffers[i]);
-    if (getenv("ZGL_DEBUG_FBO2"))
+    if (getenv("GLANCEASY_DEBUG_FBO2"))
       fprintf(stderr, "[fb2] del=%u surface=%u ctx=%p\n", framebuffers[i],
               context->state.surface_framebuffer, static_cast<void*>(context));
     if (context->state.surface_framebuffer == framebuffers[i])
@@ -713,20 +713,20 @@ void glDeleteFramebuffers(GLsizei n, const GLuint* framebuffers) {
 }
 
 GLboolean glIsFramebuffer(GLuint framebuffer) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || framebuffer == 0)
     return GL_FALSE;
   return context->framebuffers.Get(framebuffer) ? GL_TRUE : GL_FALSE;
 }
 
 void glBindFramebuffer(GLenum target, GLuint framebuffer) {
-  if (getenv("ZGL_DEBUG_ERROR"))
+  if (getenv("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr, "[glbindfb] target=0x%x fb=%u\n",
             static_cast<unsigned>(target), framebuffer);
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::ValidFramebufferTarget(target)) {
+  if (!glanceasy::ValidFramebufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -743,17 +743,17 @@ void glFramebufferTexture2D(GLenum target,
                             GLenum textarget,
                             GLuint texture,
                             GLint level) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::ValidFramebufferTarget(target)) {
+  if (!glanceasy::ValidFramebufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
   const GLuint bound_framebuffer =
       target == GL_READ_FRAMEBUFFER ? context->state.read_framebuffer
                                     : context->state.framebuffer;
-  if (getenv("ZGL_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
+  if (getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
     // The zero default framebuffer never accepts attachment changes, even
     // detaching object 0 (GLES negative API cases check this).
     context->SetError(GL_INVALID_OPERATION);
@@ -768,14 +768,14 @@ void glFramebufferTexture2D(GLenum target,
       context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::Framebuffer* framebuffer = zgl::CurrentFramebuffer(context, target);
+  glanceasy::Framebuffer* framebuffer = glanceasy::CurrentFramebuffer(context, target);
   if (!framebuffer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::FramebufferAttachment* slot = nullptr;
+  glanceasy::FramebufferAttachment* slot = nullptr;
   if (attachment >= GL_COLOR_ATTACHMENT0 &&
-      attachment < GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments) {
+      attachment < GL_COLOR_ATTACHMENT0 + glanceasy::kMaxColorAttachments) {
     slot = &framebuffer->colors[attachment - GL_COLOR_ATTACHMENT0];
   } else if (attachment == GL_DEPTH_ATTACHMENT) {
     slot = &framebuffer->depth;
@@ -804,10 +804,10 @@ void glFramebufferTexture2D(GLenum target,
   }
   slot->retained_texture.reset();
   if (texture == 0) {
-    *slot = zgl::FramebufferAttachment();
+    *slot = glanceasy::FramebufferAttachment();
     return;
   }
-  zgl::Texture* object = context->textures.Get(texture);
+  glanceasy::Texture* object = context->textures.Get(texture);
   if (!object || object->delete_status) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -822,7 +822,7 @@ void glFramebufferTexture2D(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (level >= zgl::MipLevelCount(zgl::kMaxTextureSize, zgl::kMaxTextureSize)) {
+  if (level >= glanceasy::MipLevelCount(glanceasy::kMaxTextureSize, glanceasy::kMaxTextureSize)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -845,17 +845,17 @@ void glFramebufferTextureLayer(GLenum target,
                                GLuint texture,
                                GLint level,
                                GLint layer) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::ValidFramebufferTarget(target)) {
+  if (!glanceasy::ValidFramebufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
   const GLuint bound_framebuffer =
       target == GL_READ_FRAMEBUFFER ? context->state.read_framebuffer
                                     : context->state.framebuffer;
-  if (getenv("ZGL_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
+  if (getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
     // The zero default framebuffer never accepts attachment changes, even
     // detaching object 0 (GLES negative API cases check this).
     context->SetError(GL_INVALID_OPERATION);
@@ -870,14 +870,14 @@ void glFramebufferTextureLayer(GLenum target,
       context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::Framebuffer* framebuffer = zgl::CurrentFramebuffer(context, target);
+  glanceasy::Framebuffer* framebuffer = glanceasy::CurrentFramebuffer(context, target);
   if (!framebuffer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::FramebufferAttachment* slot = nullptr;
+  glanceasy::FramebufferAttachment* slot = nullptr;
   if (attachment >= GL_COLOR_ATTACHMENT0 &&
-      attachment < GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments) {
+      attachment < GL_COLOR_ATTACHMENT0 + glanceasy::kMaxColorAttachments) {
     slot = &framebuffer->colors[attachment - GL_COLOR_ATTACHMENT0];
   } else if (attachment == GL_DEPTH_ATTACHMENT) {
     slot = &framebuffer->depth;
@@ -900,7 +900,7 @@ void glFramebufferTextureLayer(GLenum target,
     slot->cube_face = 0;
     return;
   }
-  const zgl::Texture* bound = context->textures.Get(texture);
+  const glanceasy::Texture* bound = context->textures.Get(texture);
   if (!bound) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -920,7 +920,7 @@ void glFramebufferTextureLayer(GLenum target,
   slot->level = level;
   slot->layer = layer;
   slot->renderbuffer = 0;
-  if (zgl::Texture* object = context->textures.Get(texture))
+  if (glanceasy::Texture* object = context->textures.Get(texture))
     object->render_target_flip_y = true;
   if (attachment == GL_DEPTH_STENCIL_ATTACHMENT)
     framebuffer->stencil = *slot;
@@ -930,19 +930,19 @@ void glFramebufferRenderbuffer(GLenum target,
                                GLenum attachment,
                                GLenum renderbuffer_target,
                                GLuint renderbuffer) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::ValidFramebufferTarget(target)) {
+  if (!glanceasy::ValidFramebufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
   const GLuint bound_framebuffer =
       target == GL_READ_FRAMEBUFFER ? context->state.read_framebuffer
                                     : context->state.framebuffer;
-  if (getenv("ZGL_DEBUG_FBO2") && bound_framebuffer == 1)
+  if (getenv("GLANCEASY_DEBUG_FBO2") && bound_framebuffer == 1)
     fprintf(stderr, "[fb2] attachrb bound=1 rb=%u\n", renderbuffer);
-  if (getenv("ZGL_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
+  if (getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr && bound_framebuffer == 0) {
     // The zero default framebuffer never accepts attachment changes, even
     // detaching object 0 (GLES negative API cases check this).
     context->SetError(GL_INVALID_OPERATION);
@@ -954,14 +954,14 @@ void glFramebufferRenderbuffer(GLenum target,
       context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::Framebuffer* framebuffer = zgl::CurrentFramebuffer(context, target);
+  glanceasy::Framebuffer* framebuffer = glanceasy::CurrentFramebuffer(context, target);
   if (!framebuffer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::FramebufferAttachment* slot = nullptr;
+  glanceasy::FramebufferAttachment* slot = nullptr;
   if (attachment >= GL_COLOR_ATTACHMENT0 &&
-      attachment < GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments) {
+      attachment < GL_COLOR_ATTACHMENT0 + glanceasy::kMaxColorAttachments) {
     slot = &framebuffer->colors[attachment - GL_COLOR_ATTACHMENT0];
   } else if (attachment == GL_DEPTH_ATTACHMENT) {
     slot = &framebuffer->depth;
@@ -978,7 +978,7 @@ void glFramebufferRenderbuffer(GLenum target,
     return;
   }
   if (renderbuffer != 0) {
-    const zgl::Renderbuffer* object = context->renderbuffers.Get(renderbuffer);
+    const glanceasy::Renderbuffer* object = context->renderbuffers.Get(renderbuffer);
     if (!object || object->delete_status || object->generated_only) {
       context->SetError(GL_INVALID_OPERATION);
       return;
@@ -986,7 +986,7 @@ void glFramebufferRenderbuffer(GLenum target,
   }
   slot->retained_renderbuffer.reset();
   if (renderbuffer == 0) {
-    *slot = zgl::FramebufferAttachment();
+    *slot = glanceasy::FramebufferAttachment();
   } else {
     slot->renderbuffer = renderbuffer;
     slot->texture = 0;
@@ -997,20 +997,20 @@ void glFramebufferRenderbuffer(GLenum target,
 }
 
 GLenum glCheckFramebufferStatus(GLenum target) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return GL_FRAMEBUFFER_UNDEFINED;
-  if (!zgl::ValidFramebufferTarget(target)) {
+  if (!glanceasy::ValidFramebufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return 0;
   }
   if (target != GL_READ_FRAMEBUFFER && context->state.framebuffer == 0)
     return GL_FRAMEBUFFER_COMPLETE;
-  zgl::Framebuffer* framebuffer = zgl::CurrentFramebuffer(context, target);
+  glanceasy::Framebuffer* framebuffer = glanceasy::CurrentFramebuffer(context, target);
   if (!framebuffer)
     return GL_FRAMEBUFFER_COMPLETE;
-  const GLenum status = zgl::CheckCompleteness(context, *framebuffer);
-  if (getenv("ZGL_DEBUG_FBO2"))
+  const GLenum status = glanceasy::CheckCompleteness(context, *framebuffer);
+  if (getenv("GLANCEASY_DEBUG_FBO2"))
     fprintf(stderr, "[fb2] status=%x bound=%u cand=%u surf=%u\n",
             static_cast<unsigned>(status), context->state.framebuffer,
             context->state.candidate_surface_framebuffer,
@@ -1023,7 +1023,7 @@ GLenum glCheckFramebufferStatus(GLenum target) {
     context->state.surface_framebuffer =
         context->state.candidate_surface_framebuffer;
     context->state.candidate_surface_framebuffer = 0;
-    if (getenv("ZGL_DEBUG_FBO2"))
+    if (getenv("GLANCEASY_DEBUG_FBO2"))
       fprintf(stderr, "[fb2] promoted=%u\n",
               context->state.surface_framebuffer);
   }
@@ -1137,7 +1137,7 @@ void QuantizeColorFormat(uint8_t components[4], GLenum format) {
   }
 }
 
-void LoadNormalizedBlitTexel(const zgl::RenderTarget& source,
+void LoadNormalizedBlitTexel(const glanceasy::RenderTarget& source,
                              int x,
                              int y,
                              uint8_t components[4]) {
@@ -1145,7 +1145,7 @@ void LoadNormalizedBlitTexel(const zgl::RenderTarget& source,
       static_cast<size_t>(source.height - 1 - y) * source.width + x;
   uint32_t value;
   memcpy(&value, source.color + index * 4, sizeof(value));
-  const zgl::Rgba texel = zgl::UnpackRgba(value);
+  const glanceasy::Rgba texel = glanceasy::UnpackRgba(value);
   const uint8_t channels[4] = {texel.r, texel.g, texel.b, texel.a};
   components[0] = 0;
   components[1] = 0;
@@ -1159,14 +1159,14 @@ void LoadNormalizedBlitTexel(const zgl::RenderTarget& source,
   if (source.read_format == GL_SRGB8_ALPHA8) {
     for (int channel = 0; channel < 3; ++channel) {
       components[channel] = static_cast<uint8_t>(
-          zgl::SrgbToLinear(components[channel]) * 255.0f + 0.5f);
+          glanceasy::SrgbToLinear(components[channel]) * 255.0f + 0.5f);
     }
   }
 }
 
-bool HasColorStorage(const zgl::FramebufferAttachment* slot, GLenum format) {
+bool HasColorStorage(const glanceasy::FramebufferAttachment* slot, GLenum format) {
   if (slot->texture) {
-    const zgl::Texture* texture = zgl::ApiContext()->textures.Get(slot->texture);
+    const glanceasy::Texture* texture = glanceasy::ApiContext()->textures.Get(slot->texture);
     if (!texture)
       return false;
     int face = 0;
@@ -1174,13 +1174,13 @@ bool HasColorStorage(const zgl::FramebufferAttachment* slot, GLenum format) {
         slot->cube_face <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z) {
       face = static_cast<int>(slot->cube_face - GL_TEXTURE_CUBE_MAP_POSITIVE_X);
     }
-    const zgl::TextureImage* image = texture->image(slot->level, face);
+    const glanceasy::TextureImage* image = texture->image(slot->level, face);
     return image && image->width > 0 && image->height > 0 &&
            (!image->rgba.empty() || !image->integer_rgba.empty());
   }
   if (slot->renderbuffer) {
-    const zgl::Renderbuffer* renderbuffer =
-        zgl::ApiContext()->renderbuffers.Get(slot->renderbuffer);
+    const glanceasy::Renderbuffer* renderbuffer =
+        glanceasy::ApiContext()->renderbuffers.Get(slot->renderbuffer);
     if (!renderbuffer)
       return false;
     return renderbuffer->width > 0 && renderbuffer->height > 0 &&
@@ -1196,15 +1196,15 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
                                            GLenum attachment,
                                            GLenum pname,
                                            GLint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
-  if (!zgl::ValidFramebufferTarget(target)) {
+  if (!glanceasy::ValidFramebufferTarget(target)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::Framebuffer* framebuffer = zgl::CurrentFramebuffer(context, target);
-  const zgl::Framebuffer* surface_framebuffer =
+  glanceasy::Framebuffer* framebuffer = glanceasy::CurrentFramebuffer(context, target);
+  const glanceasy::Framebuffer* surface_framebuffer =
       context->framebuffers.Get(context->state.surface_framebuffer);
   if (!framebuffer || (surface_framebuffer && framebuffer == surface_framebuffer)) {
     // The default drawable exposes GL_BACK, GL_DEPTH and GL_STENCIL as
@@ -1252,17 +1252,17 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
         return;
     }
   }
-  const zgl::FramebufferAttachment* slot = nullptr;
+  const glanceasy::FramebufferAttachment* slot = nullptr;
   if (attachment >= GL_COLOR_ATTACHMENT0 &&
-      attachment < GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments) {
+      attachment < GL_COLOR_ATTACHMENT0 + glanceasy::kMaxColorAttachments) {
     slot = &framebuffer->colors[attachment - GL_COLOR_ATTACHMENT0];
   } else if (attachment == GL_DEPTH_ATTACHMENT) {
     slot = &framebuffer->depth;
   } else if (attachment == GL_STENCIL_ATTACHMENT) {
     slot = &framebuffer->stencil;
   } else if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
-    const zgl::FramebufferAttachment& depth = framebuffer->depth;
-    const zgl::FramebufferAttachment& stencil = framebuffer->stencil;
+    const glanceasy::FramebufferAttachment& depth = framebuffer->depth;
+    const glanceasy::FramebufferAttachment& stencil = framebuffer->stencil;
     if (depth.bound() && stencil.bound() &&
         (depth.texture != stencil.texture ||
          depth.renderbuffer != stencil.renderbuffer ||
@@ -1289,9 +1289,9 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  const GLenum format = bound ? zgl::AttachmentFormat(context, *slot) : 0;
-  const bool has_depth = bound && zgl::IsDepthFormat(format);
-  const bool has_stencil = bound && zgl::IsStencilFormat(format);
+  const GLenum format = bound ? glanceasy::AttachmentFormat(context, *slot) : 0;
+  const bool has_depth = bound && glanceasy::IsDepthFormat(format);
+  const bool has_stencil = bound && glanceasy::IsStencilFormat(format);
   const bool has_color = bound && !has_depth && !has_stencil;
   switch (pname) {
     case GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE:
@@ -1343,9 +1343,9 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
         params[0] = GL_UNSIGNED_INT;
       else if (has_color && !HasColorStorage(slot, format))
         params[0] = GL_NONE;
-      else if (zgl::IsSignedIntegerFormat(format))
+      else if (glanceasy::IsSignedIntegerFormat(format))
         params[0] = GL_INT;
-      else if (zgl::IsUnsignedIntegerFormat(format))
+      else if (glanceasy::IsUnsignedIntegerFormat(format))
         params[0] = GL_UNSIGNED_INT;
       else if (format == GL_RGBA16F || format == GL_RGBA32F ||
                format == GL_RGB16F || format == GL_RGB32F ||
@@ -1357,7 +1357,7 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
         params[0] = GL_UNSIGNED_NORMALIZED;
       return;
     case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING:
-      params[0] = bound && zgl::IsSrgbFormat(format) ? GL_SRGB : GL_LINEAR;
+      params[0] = bound && glanceasy::IsSrgbFormat(format) ? GL_SRGB : GL_LINEAR;
       return;
     default:
       context->SetError(GL_INVALID_ENUM);
@@ -1366,16 +1366,16 @@ void glGetFramebufferAttachmentParameteriv(GLenum target,
 }
 
 void glDrawBuffers(GLsizei n, const GLenum* buffers) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !buffers)
     return;
-  if (n < 0 || n > zgl::kMaxDrawBuffers) {
+  if (n < 0 || n > glanceasy::kMaxDrawBuffers) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
   if (context->state.framebuffer == 0 ||
-      zgl::IsPlatformFramebuffer(context, context->state.framebuffer)) {
-    if (getenv("ZGL_FBO_SURFACE_AS_ZERO") != nullptr &&
+      glanceasy::IsPlatformFramebuffer(context, context->state.framebuffer)) {
+    if (getenv("GLANCEASY_FBO_SURFACE_AS_ZERO") != nullptr &&
         context->state.framebuffer == 0) {
       // With an implicit zero default framebuffer only GL_BACK / GL_NONE
       // are legal; attachment enums are an INVALID_OPERATION.
@@ -1401,17 +1401,17 @@ void glDrawBuffers(GLsizei n, const GLenum* buffers) {
     // buffer is GL_NONE; the query state above still reports the requested
     // value, but rendering must target the real platform attachment.
     const GLenum internal_buffer = GL_COLOR_ATTACHMENT0;
-    zgl::Framebuffer* framebuffer = context->framebuffers.Get(
+    glanceasy::Framebuffer* framebuffer = context->framebuffers.Get(
         context->state.surface_framebuffer);
     if (framebuffer) {
       framebuffer->draw_buffers[0] = internal_buffer;
-      for (int i = 1; i < zgl::kMaxColorAttachments; ++i)
+      for (int i = 1; i < glanceasy::kMaxColorAttachments; ++i)
         framebuffer->draw_buffers[i] = GL_NONE;
       framebuffer->draw_buffer_count = 1;
     }
     return;
   }
-  zgl::Framebuffer* framebuffer =
+  glanceasy::Framebuffer* framebuffer =
       context->framebuffers.Get(context->state.framebuffer);
   if (!framebuffer) {
     context->SetError(GL_INVALID_OPERATION);
@@ -1425,60 +1425,60 @@ void glDrawBuffers(GLsizei n, const GLenum* buffers) {
     }
     if (value != GL_NONE &&
         (value < GL_COLOR_ATTACHMENT0 ||
-         value >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments)) {
+         value >= GL_COLOR_ATTACHMENT0 + glanceasy::kMaxColorAttachments)) {
       context->SetError(GL_INVALID_ENUM);
       return;
     }
   }
   for (GLsizei i = 0; i < n; ++i)
     framebuffer->draw_buffers[i] = buffers[i];
-  for (int i = n; i < zgl::kMaxColorAttachments; ++i)
+  for (int i = n; i < glanceasy::kMaxColorAttachments; ++i)
     framebuffer->draw_buffers[i] = GL_NONE;
   framebuffer->draw_buffer_count = n;
 }
 
 void glDrawBuffer(GLenum mode) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (context->state.framebuffer == 0 ||
-      zgl::IsPlatformFramebuffer(context, context->state.framebuffer)) {
+      glanceasy::IsPlatformFramebuffer(context, context->state.framebuffer)) {
     if (mode != GL_BACK && mode != GL_NONE && mode != GL_COLOR_ATTACHMENT0) {
       context->SetError(GL_INVALID_OPERATION);
       return;
     }
     context->state.default_draw_buffer =
         mode == GL_NONE ? GL_NONE : GL_BACK;
-    zgl::Framebuffer* framebuffer = context->framebuffers.Get(
+    glanceasy::Framebuffer* framebuffer = context->framebuffers.Get(
         context->state.surface_framebuffer);
     if (framebuffer)
       framebuffer->draw_buffers[0] = GL_COLOR_ATTACHMENT0;
     return;
   }
-  zgl::Framebuffer* framebuffer =
+  glanceasy::Framebuffer* framebuffer =
       context->framebuffers.Get(context->state.framebuffer);
   if (!framebuffer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
   framebuffer->draw_buffers[0] = mode;
-  for (int i = 1; i < zgl::kMaxColorAttachments; ++i)
+  for (int i = 1; i < glanceasy::kMaxColorAttachments; ++i)
     framebuffer->draw_buffers[i] = GL_NONE;
   framebuffer->draw_buffer_count = 1;
 }
 
 void glReadBuffer(GLenum mode) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (context->state.read_framebuffer == 0 ||
-      zgl::IsPlatformFramebuffer(context, context->state.read_framebuffer)) {
+      glanceasy::IsPlatformFramebuffer(context, context->state.read_framebuffer)) {
     if (mode != GL_BACK && mode != GL_NONE && mode != GL_COLOR_ATTACHMENT0) {
       context->SetError(GL_INVALID_OPERATION);
       return;
     }
     const GLenum internal_read = GL_COLOR_ATTACHMENT0;
-    zgl::Framebuffer* framebuffer = context->framebuffers.Get(
+    glanceasy::Framebuffer* framebuffer = context->framebuffers.Get(
         context->state.surface_framebuffer);
     if (framebuffer)
       framebuffer->read_buffer = internal_read;
@@ -1491,18 +1491,18 @@ void glReadBuffer(GLenum mode) {
     return;
   }
   if (mode != GL_NONE && mode != GL_BACK &&
-      mode >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments &&
+      mode >= GL_COLOR_ATTACHMENT0 + glanceasy::kMaxColorAttachments &&
       mode <= 0x8CFF) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
   if (mode != GL_NONE &&
       (mode < GL_COLOR_ATTACHMENT0 ||
-       mode >= GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments)) {
+       mode >= GL_COLOR_ATTACHMENT0 + glanceasy::kMaxColorAttachments)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::Framebuffer* framebuffer =
+  glanceasy::Framebuffer* framebuffer =
       context->framebuffers.Get(context->state.read_framebuffer);
   if (framebuffer)
     framebuffer->read_buffer = mode;
@@ -1511,7 +1511,7 @@ void glReadBuffer(GLenum mode) {
 // ---- Renderbuffer objects -------------------------------------------------
 
 void glGenRenderbuffers(GLsizei n, GLuint* renderbuffers) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -1522,14 +1522,14 @@ void glGenRenderbuffers(GLsizei n, GLuint* renderbuffers) {
     return;
   for (GLsizei i = 0; i < n; ++i) {
     renderbuffers[i] = context->renderbuffers.Generate();
-    zgl::Renderbuffer* object = context->renderbuffers.Get(renderbuffers[i]);
+    glanceasy::Renderbuffer* object = context->renderbuffers.Get(renderbuffers[i]);
     if (object)
       object->generated_only = true;
   }
 }
 
 void glDeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -1542,40 +1542,40 @@ void glDeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
     const GLuint name = renderbuffers[i];
     if (name == 0)
       continue;
-    if (getenv("ZGL_DEBUG_FBO2"))
+    if (getenv("GLANCEASY_DEBUG_FBO2"))
       fprintf(stderr, "[fb2] delrb=%u surface=%u\n", name,
               context->state.surface_framebuffer);
-    if (zgl::Renderbuffer* object = context->renderbuffers.Get(name))
+    if (glanceasy::Renderbuffer* object = context->renderbuffers.Get(name))
       object->delete_status = true;
     if (context->state.renderbuffer == name)
       context->state.renderbuffer = 0;
-    zgl::Framebuffer* bound =
-        zgl::CurrentFramebuffer(context, GL_FRAMEBUFFER);
-    zgl::Framebuffer* surface = context->framebuffers.Get(
+    glanceasy::Framebuffer* bound =
+        glanceasy::CurrentFramebuffer(context, GL_FRAMEBUFFER);
+    glanceasy::Framebuffer* surface = context->framebuffers.Get(
         context->state.surface_framebuffer);
-    zgl::Renderbuffer* deleted = context->renderbuffers.Get(name);
-    context->framebuffers.ForEach([&](zgl::Framebuffer& framebuffer) {
+    glanceasy::Renderbuffer* deleted = context->renderbuffers.Get(name);
+    context->framebuffers.ForEach([&](glanceasy::Framebuffer& framebuffer) {
       const bool platform_owned = &framebuffer == surface;
-      for (int j = 0; j < zgl::kMaxColorAttachments; ++j) {
-        zgl::FramebufferAttachment& slot = framebuffer.colors[j];
+      for (int j = 0; j < glanceasy::kMaxColorAttachments; ++j) {
+        glanceasy::FramebufferAttachment& slot = framebuffer.colors[j];
         if (slot.renderbuffer != name)
           continue;
         if (&framebuffer == bound && !platform_owned) {
-          slot = zgl::FramebufferAttachment();
+          slot = glanceasy::FramebufferAttachment();
         } else if (deleted && !slot.retained_renderbuffer) {
           slot.retained_renderbuffer =
-              std::make_shared<const zgl::Renderbuffer>(*deleted);
+              std::make_shared<const glanceasy::Renderbuffer>(*deleted);
         }
       }
-      for (zgl::FramebufferAttachment* slot : {&framebuffer.depth,
+      for (glanceasy::FramebufferAttachment* slot : {&framebuffer.depth,
                                                 &framebuffer.stencil}) {
         if (slot->renderbuffer != name)
           continue;
         if (&framebuffer == bound && !platform_owned) {
-          *slot = zgl::FramebufferAttachment();
+          *slot = glanceasy::FramebufferAttachment();
         } else if (deleted && !slot->retained_renderbuffer) {
           slot->retained_renderbuffer =
-              std::make_shared<const zgl::Renderbuffer>(*deleted);
+              std::make_shared<const glanceasy::Renderbuffer>(*deleted);
         }
       }
     });
@@ -1583,15 +1583,15 @@ void glDeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
 }
 
 GLboolean glIsRenderbuffer(GLuint renderbuffer) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || renderbuffer == 0)
     return GL_FALSE;
-  const zgl::Renderbuffer* object = context->renderbuffers.Get(renderbuffer);
+  const glanceasy::Renderbuffer* object = context->renderbuffers.Get(renderbuffer);
   return object && !object->delete_status ? GL_TRUE : GL_FALSE;
 }
 
 void glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (target != GL_RENDERBUFFER) {
@@ -1599,22 +1599,22 @@ void glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
     return;
   }
   if (renderbuffer != 0) {
-    zgl::Renderbuffer* object =
+    glanceasy::Renderbuffer* object =
         context->renderbuffers.GetOrCreate(renderbuffer);
     if (object && object->delete_status) {
-      zgl::Framebuffer* framebuffer =
+      glanceasy::Framebuffer* framebuffer =
           context->framebuffers.Get(context->state.framebuffer);
       if (framebuffer) {
-        for (int i = 0; i < zgl::kMaxColorAttachments; ++i) {
+        for (int i = 0; i < glanceasy::kMaxColorAttachments; ++i) {
           if (framebuffer->colors[i].renderbuffer == renderbuffer)
-            framebuffer->colors[i] = zgl::FramebufferAttachment();
+            framebuffer->colors[i] = glanceasy::FramebufferAttachment();
         }
         if (framebuffer->depth.renderbuffer == renderbuffer)
-          framebuffer->depth = zgl::FramebufferAttachment();
+          framebuffer->depth = glanceasy::FramebufferAttachment();
         if (framebuffer->stencil.renderbuffer == renderbuffer)
-          framebuffer->stencil = zgl::FramebufferAttachment();
+          framebuffer->stencil = glanceasy::FramebufferAttachment();
       }
-      *object = zgl::Renderbuffer();
+      *object = glanceasy::Renderbuffer();
     }
     if (object)
       object->generated_only = false;
@@ -1673,7 +1673,7 @@ bool RenderbufferFormatSupported(GLenum internal_format) {
   }
 }
 
-void AllocateRenderbufferStorage(zgl::Renderbuffer* renderbuffer,
+void AllocateRenderbufferStorage(glanceasy::Renderbuffer* renderbuffer,
                                  int samples,
                                  GLenum internal_format,
                                  int width,
@@ -1682,7 +1682,7 @@ void AllocateRenderbufferStorage(zgl::Renderbuffer* renderbuffer,
   renderbuffer->height = height;
   renderbuffer->samples = samples;
   renderbuffer->format = internal_format;
-  zgl::TextureImage& image = renderbuffer->image;
+  glanceasy::TextureImage& image = renderbuffer->image;
   image.width = width;
   image.height = height;
   image.depth = 1;
@@ -1723,15 +1723,15 @@ void AllocateRenderbufferStorage(zgl::Renderbuffer* renderbuffer,
       }
       break;
     default:
-      if (zgl::IsSignedIntegerFormat(internal_format) ||
-          zgl::IsUnsignedIntegerFormat(internal_format)) {
+      if (glanceasy::IsSignedIntegerFormat(internal_format) ||
+          glanceasy::IsUnsignedIntegerFormat(internal_format)) {
         image.integer_rgba.assign(texels * 4, 0u);
         if (image.samples > 1)
           image.sample_integer_rgba.assign(sample_texels * 4, 0u);
       } else {
-        image.rgba.assign(texels, zgl::PackRgba(0, 0, 0, 0));
+        image.rgba.assign(texels, glanceasy::PackRgba(0, 0, 0, 0));
         if (image.samples > 1)
-          image.sample_rgba.assign(sample_texels, zgl::PackRgba(0, 0, 0, 0));
+          image.sample_rgba.assign(sample_texels, glanceasy::PackRgba(0, 0, 0, 0));
       }
       break;
   }
@@ -1751,14 +1751,14 @@ void glRenderbufferStorageMultisample(GLenum target,
                                       GLenum internal_format,
                                       GLsizei width,
                                       GLsizei height) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (target != GL_RENDERBUFFER) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::Renderbuffer* renderbuffer =
+  glanceasy::Renderbuffer* renderbuffer =
       context->renderbuffers.Get(context->state.renderbuffer);
   if (!renderbuffer) {
     context->SetError(GL_INVALID_OPERATION);
@@ -1768,12 +1768,12 @@ void glRenderbufferStorageMultisample(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (samples > zgl::kMaxSamples) {
+  if (samples > glanceasy::kMaxSamples) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (width < 0 || height < 0 || width > zgl::kMaxRenderbufferSize ||
-      height > zgl::kMaxRenderbufferSize) {
+  if (width < 0 || height < 0 || width > glanceasy::kMaxRenderbufferSize ||
+      height > glanceasy::kMaxRenderbufferSize) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -1786,14 +1786,14 @@ void glRenderbufferStorageMultisample(GLenum target,
 }
 
 void glGetRenderbufferParameteriv(GLenum target, GLenum pname, GLint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
   if (target != GL_RENDERBUFFER) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  const zgl::Renderbuffer* renderbuffer =
+  const glanceasy::Renderbuffer* renderbuffer =
       context->renderbuffers.Get(context->state.renderbuffer);
   if (!renderbuffer) {
     context->SetError(GL_INVALID_OPERATION);
@@ -1913,8 +1913,8 @@ void glReadPixels(GLint x,
                   GLenum format,
                   GLenum type,
                   void* pixels) {
-  zgl::Context* context = zgl::ApiContext();
-  if (getenv("ZGL_DEBUG_ERROR"))
+  glanceasy::Context* context = glanceasy::ApiContext();
+  if (getenv("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr,
             "[glreadpixels-entry] pixels=%p pbo=%u fmt=0x%x type=0x%x %dx%d\n",
             pixels, context ? context->state.pixel_pack_buffer : 0,
@@ -2022,8 +2022,8 @@ void glReadPixels(GLint x,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  const zgl::RenderTarget target = context->GetReadTarget();
-  if (getenv("ZGL_DEBUG_ERROR")) {
+  const glanceasy::RenderTarget target = context->GetReadTarget();
+  if (getenv("GLANCEASY_DEBUG_ERROR")) {
     const unsigned* words = reinterpret_cast<const unsigned*>(target.color);
     fprintf(stderr,
             "[glreadpixels] readfb=%u %dx%d int=%d fmt=0x%x cb=%d rc=%d hasA=%d w0=%u w1=%u\n",
@@ -2043,8 +2043,8 @@ void glReadPixels(GLint x,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  const zgl::PixelStoreState& store = context->state.pixel_store;
-  const size_t bytes = zgl::PixelBytes(format, type);
+  const glanceasy::PixelStoreState& store = context->state.pixel_store;
+  const size_t bytes = glanceasy::PixelBytes(format, type);
   const GLint row_pixels =
       store.pack_row_length > 0 ? store.pack_row_length : width;
   const size_t alignment = static_cast<size_t>(store.pack_alignment);
@@ -2053,7 +2053,7 @@ void glReadPixels(GLint x,
       alignment;
   uint8_t* base = static_cast<uint8_t*>(pixels);
   if (context->state.pixel_pack_buffer != 0) {
-    zgl::Buffer* buffer =
+    glanceasy::Buffer* buffer =
         context->buffers.Get(context->state.pixel_pack_buffer);
     if (!buffer || buffer->mapped) {
       context->SetError(GL_INVALID_OPERATION);
@@ -2133,7 +2133,7 @@ void glReadPixels(GLint x,
                                       GL_COLOR_ATTACHMENT0))
                 : 0;
         const uint32_t* raw_source = reinterpret_cast<const uint32_t*>(source);
-        zgl::WriteIntegerPixel(raw_source, format, type,
+        glanceasy::WriteIntegerPixel(raw_source, format, type,
                               target.color_integer_bits[source_attachment],
                               target.color_is_unsigned[source_attachment], out);
         GLuint* components = reinterpret_cast<GLuint*>(out);
@@ -2145,7 +2145,7 @@ void glReadPixels(GLint x,
              ++channel)
           components[channel] = channel == 3 ? 1u : 0u;
       } else {
-        zgl::WritePixel(source, format, type, out);
+        glanceasy::WritePixel(source, format, type, out);
         if (format == GL_RGBA || format == GL_RGB ||
             format == GL_RG || format == GL_RED) {
           int output_channels = format == GL_RGBA   ? 4
@@ -2171,7 +2171,7 @@ void glBlitFramebuffer(GLint src_x0,
                        GLint dst_y1,
                        GLbitfield mask,
                        GLenum filter) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (filter != GL_NEAREST && filter != GL_LINEAR) {
@@ -2183,9 +2183,9 @@ void glBlitFramebuffer(GLint src_x0,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::RenderTarget source = context->GetReadTarget();
-  zgl::RenderTarget destination = context->GetDrawTarget();
-  if (getenv("ZGL_DEBUG_BLIT"))
+  glanceasy::RenderTarget source = context->GetReadTarget();
+  glanceasy::RenderTarget destination = context->GetDrawTarget();
+  if (getenv("GLANCEASY_DEBUG_BLIT"))
     fprintf(stderr,
             "[blit] readfb=%u drawfb=%u src=%p dst=%p srcsz=%dx%d dstsz=%dx%d "
             "rect=%d,%d..%d,%d -> %d,%d..%d,%d mask=%x filter=%x\n",
@@ -2198,9 +2198,9 @@ void glBlitFramebuffer(GLint src_x0,
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
-  const zgl::Framebuffer* source_framebuffer =
+  const glanceasy::Framebuffer* source_framebuffer =
       context->framebuffers.Get(context->state.read_framebuffer);
-  const zgl::Framebuffer* destination_framebuffer =
+  const glanceasy::Framebuffer* destination_framebuffer =
       context->framebuffers.Get(context->state.framebuffer);
   const auto normalized_format = [](GLenum format) {
     if (format == 0 || format == GL_SRGB8_ALPHA8)
@@ -2211,8 +2211,8 @@ void glBlitFramebuffer(GLint src_x0,
   if (source_framebuffer &&
       source_framebuffer->read_buffer >= GL_COLOR_ATTACHMENT0 &&
       source_framebuffer->read_buffer <
-          GL_COLOR_ATTACHMENT0 + zgl::kMaxColorAttachments) {
-    source_color_format = zgl::AttachmentFormat(
+          GL_COLOR_ATTACHMENT0 + glanceasy::kMaxColorAttachments) {
+    source_color_format = glanceasy::AttachmentFormat(
         context,
         source_framebuffer
             ->colors[source_framebuffer->read_buffer - GL_COLOR_ATTACHMENT0]);
@@ -2220,22 +2220,22 @@ void glBlitFramebuffer(GLint src_x0,
   GLenum destination_color_format = GL_RGBA8;
   if (destination_framebuffer)
     destination_color_format =
-        zgl::AttachmentFormat(context, destination_framebuffer->colors[0]);
+        glanceasy::AttachmentFormat(context, destination_framebuffer->colors[0]);
   const GLenum source_depth_format =
       source_framebuffer
-          ? zgl::AttachmentFormat(context, source_framebuffer->depth)
+          ? glanceasy::AttachmentFormat(context, source_framebuffer->depth)
           : GL_DEPTH_COMPONENT16;
   const GLenum destination_depth_format =
       destination_framebuffer
-          ? zgl::AttachmentFormat(context, destination_framebuffer->depth)
+          ? glanceasy::AttachmentFormat(context, destination_framebuffer->depth)
           : GL_DEPTH_COMPONENT16;
   const GLenum source_stencil_format =
       source_framebuffer
-          ? zgl::AttachmentFormat(context, source_framebuffer->stencil)
+          ? glanceasy::AttachmentFormat(context, source_framebuffer->stencil)
           : GL_STENCIL_INDEX8;
   const GLenum destination_stencil_format =
       destination_framebuffer
-          ? zgl::AttachmentFormat(context, destination_framebuffer->stencil)
+          ? glanceasy::AttachmentFormat(context, destination_framebuffer->stencil)
           : GL_STENCIL_INDEX8;
   const bool blits_depth =
       (mask & (GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)) != 0;
@@ -2281,7 +2281,7 @@ void glBlitFramebuffer(GLint src_x0,
     return;
   }
   const bool scissor_test = context->state.scissor_test;
-  const zgl::Rect& scissor = context->state.scissor;
+  const glanceasy::Rect& scissor = context->state.scissor;
   const bool mirror_src_x = src_x1 < src_x0;
   const bool mirror_src_y = src_y1 < src_y0;
   const bool mirror_dst_x = dst_x1 < dst_x0;
@@ -2347,7 +2347,7 @@ void glBlitFramebuffer(GLint src_x0,
               if (channel < source.read_channels) {
                 const uint32_t raw = incoming[channel];
                 const int source_bits =
-                    zgl::FormatIntegerBits(source.read_format, channel);
+                    glanceasy::FormatIntegerBits(source.read_format, channel);
                 if (source_bits < 32) {
                   const uint32_t mask = (1u << source_bits) - 1u;
                   const uint32_t field = raw & mask;
@@ -2364,7 +2364,7 @@ void glBlitFramebuffer(GLint src_x0,
               }
               if (!destination.color_is_unsigned[0] && channel < 4)
                 value = static_cast<int32_t>(static_cast<uint32_t>(value));
-              const int bits = zgl::FormatIntegerBits(
+              const int bits = glanceasy::FormatIntegerBits(
                   destination.color_format[0], channel);
               if (bits < 32) {
                 const int64_t minimum =
@@ -2452,7 +2452,7 @@ void glBlitFramebuffer(GLint src_x0,
             uint32_t existing;
             memcpy(&existing, destination.color + destination_index * 4,
                    sizeof(existing));
-            const zgl::Rgba previous = zgl::UnpackRgba(existing);
+            const glanceasy::Rgba previous = glanceasy::UnpackRgba(existing);
             uint8_t components[4];
             if (filter == GL_LINEAR) {
               float sample_x =
@@ -2506,7 +2506,7 @@ void glBlitFramebuffer(GLint src_x0,
                   destination.color_format[0] == GL_SRGB8_ALPHA8;
               if (destination_srgb) {
                 for (int channel = 0; channel < 3; ++channel) {
-                  components[channel] = zgl::LinearToSrgb8(
+                  components[channel] = glanceasy::LinearToSrgb8(
                       components[channel] / 255.0f);
                 }
               }
@@ -2517,7 +2517,7 @@ void glBlitFramebuffer(GLint src_x0,
                   static_cast<size_t>(source_offset_x);
               uint32_t value;
               memcpy(&value, source.color + source_index * 4, sizeof(value));
-              const zgl::Rgba incoming = zgl::UnpackRgba(value);
+              const glanceasy::Rgba incoming = glanceasy::UnpackRgba(value);
               const uint8_t source_channels[4] = {
                   incoming.r, incoming.g, incoming.b, incoming.a};
               components[0] = 0;
@@ -2537,9 +2537,9 @@ void glBlitFramebuffer(GLint src_x0,
                 for (int channel = 0; channel < 3; ++channel) {
                   components[channel] = source_srgb
                       ? static_cast<uint8_t>(
-                            zgl::SrgbToLinear(components[channel]) * 255.0f +
+                            glanceasy::SrgbToLinear(components[channel]) * 255.0f +
                             0.5f)
-                      : zgl::LinearToSrgb8(components[channel] / 255.0f);
+                      : glanceasy::LinearToSrgb8(components[channel] / 255.0f);
                 }
               }
             }
@@ -2554,7 +2554,7 @@ void glBlitFramebuffer(GLint src_x0,
             merged[3] =
                 context->state.color_mask[3] ? components[3] : previous.a;
             const uint32_t packed =
-                zgl::PackRgba(merged[0], merged[1], merged[2], merged[3]);
+                glanceasy::PackRgba(merged[0], merged[1], merged[2], merged[3]);
             memcpy(destination.color + destination_index * 4, &packed,
                    sizeof(packed));
           }
@@ -2563,7 +2563,7 @@ void glBlitFramebuffer(GLint src_x0,
       }
     }
   }
-  if (getenv("ZGL_DEBUG_BLIT") && (mask & GL_COLOR_BUFFER_BIT) &&
+  if (getenv("GLANCEASY_DEBUG_BLIT") && (mask & GL_COLOR_BUFFER_BIT) &&
       destination.color) {
     auto pixel = [&](int x, int y) {
       uint32_t value = 0;
@@ -2652,25 +2652,25 @@ void glBlitFramebuffer(GLint src_x0,
 }
 
 void glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint* value) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !value)
     return;
   if (context->state.rasterizer_discard)
     return;
   if (buffer == GL_COLOR) {
-    if (zgl::DrawBufferIsInteger(context, drawbuffer)) {
+    if (glanceasy::DrawBufferIsInteger(context, drawbuffer)) {
       const uint32_t values[4] = {
           static_cast<uint32_t>(value[0]), static_cast<uint32_t>(value[1]),
           static_cast<uint32_t>(value[2]), static_cast<uint32_t>(value[3])};
-      zgl::ClearIntegerColourBuffer(context, drawbuffer, values);
+      glanceasy::ClearIntegerColourBuffer(context, drawbuffer, values);
       return;
     }
-    const zgl::Rgba color =
-        zgl::Rgba{static_cast<uint8_t>(zgl::ClampInt(value[0], 0, 255)),
-                  static_cast<uint8_t>(zgl::ClampInt(value[1], 0, 255)),
-                  static_cast<uint8_t>(zgl::ClampInt(value[2], 0, 255)),
-                  static_cast<uint8_t>(zgl::ClampInt(value[3], 0, 255))};
-    zgl::ClearColourBuffer(context, drawbuffer, zgl::PackRgba(color));
+    const glanceasy::Rgba color =
+        glanceasy::Rgba{static_cast<uint8_t>(glanceasy::ClampInt(value[0], 0, 255)),
+                  static_cast<uint8_t>(glanceasy::ClampInt(value[1], 0, 255)),
+                  static_cast<uint8_t>(glanceasy::ClampInt(value[2], 0, 255)),
+                  static_cast<uint8_t>(glanceasy::ClampInt(value[3], 0, 255))};
+    glanceasy::ClearColourBuffer(context, drawbuffer, glanceasy::PackRgba(color));
     return;
   }
   if (buffer == GL_STENCIL) {
@@ -2678,13 +2678,13 @@ void glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint* value) {
       context->SetError(GL_INVALID_VALUE);
       return;
     }
-    zgl::RenderTarget target = context->GetDrawTarget();
+    glanceasy::RenderTarget target = context->GetDrawTarget();
     if (target.valid() && target.stencil) {
       const size_t texels = static_cast<size_t>(target.width) * target.height;
       const int planes = target.multisampled() ? target.samples : 1;
-      zgl::Rect area{0, 0, target.width, target.height};
+      glanceasy::Rect area{0, 0, target.width, target.height};
       if (context->state.scissor_test) {
-        const zgl::Rect scissor{context->state.scissor.x,
+        const glanceasy::Rect scissor{context->state.scissor.x,
                                 target.height - context->state.scissor.bottom(),
                                 context->state.scissor.width,
                                 context->state.scissor.height};
@@ -2714,44 +2714,44 @@ void glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint* value) {
 }
 
 void glClearBufferuiv(GLenum buffer, GLint drawbuffer, const GLuint* value) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !value)
     return;
   if (context->state.rasterizer_discard)
     return;
   if (buffer == GL_COLOR) {
-    if (zgl::DrawBufferIsInteger(context, drawbuffer)) {
+    if (glanceasy::DrawBufferIsInteger(context, drawbuffer)) {
       const uint32_t values[4] = {value[0], value[1], value[2], value[3]};
-      zgl::ClearIntegerColourBuffer(context, drawbuffer, values);
+      glanceasy::ClearIntegerColourBuffer(context, drawbuffer, values);
       return;
     }
-    const zgl::Rgba color = zgl::Rgba{
-        static_cast<uint8_t>(zgl::ClampInt(static_cast<int>(value[0]), 0, 255)),
-        static_cast<uint8_t>(zgl::ClampInt(static_cast<int>(value[1]), 0, 255)),
-        static_cast<uint8_t>(zgl::ClampInt(static_cast<int>(value[2]), 0, 255)),
+    const glanceasy::Rgba color = glanceasy::Rgba{
+        static_cast<uint8_t>(glanceasy::ClampInt(static_cast<int>(value[0]), 0, 255)),
+        static_cast<uint8_t>(glanceasy::ClampInt(static_cast<int>(value[1]), 0, 255)),
+        static_cast<uint8_t>(glanceasy::ClampInt(static_cast<int>(value[2]), 0, 255)),
         static_cast<uint8_t>(
-            zgl::ClampInt(static_cast<int>(value[3]), 0, 255))};
-    zgl::ClearColourBuffer(context, drawbuffer, zgl::PackRgba(color));
+            glanceasy::ClampInt(static_cast<int>(value[3]), 0, 255))};
+    glanceasy::ClearColourBuffer(context, drawbuffer, glanceasy::PackRgba(color));
     return;
   }
   context->SetError(GL_INVALID_ENUM);
 }
 
 void glClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat* value) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !value)
     return;
   if (context->state.rasterizer_discard)
     return;
   if (buffer == GL_COLOR) {
-    if (drawbuffer < 0 || drawbuffer >= zgl::kMaxDrawBuffers) {
+    if (drawbuffer < 0 || drawbuffer >= glanceasy::kMaxDrawBuffers) {
       context->SetError(GL_INVALID_VALUE);
       return;
     }
-    const zgl::Rgba color =
-        zgl::Rgba{zgl::FloatToUnorm8(value[0]), zgl::FloatToUnorm8(value[1]),
-                  zgl::FloatToUnorm8(value[2]), zgl::FloatToUnorm8(value[3])};
-    zgl::ClearColourBuffer(context, drawbuffer, zgl::PackRgba(color));
+    const glanceasy::Rgba color =
+        glanceasy::Rgba{glanceasy::FloatToUnorm8(value[0]), glanceasy::FloatToUnorm8(value[1]),
+                  glanceasy::FloatToUnorm8(value[2]), glanceasy::FloatToUnorm8(value[3])};
+    glanceasy::ClearColourBuffer(context, drawbuffer, glanceasy::PackRgba(color));
     return;
   }
   if (buffer == GL_STENCIL || buffer == GL_DEPTH_STENCIL) {
@@ -2763,15 +2763,15 @@ void glClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat* value) {
       context->SetError(GL_INVALID_VALUE);
       return;
     }
-    zgl::RenderTarget target = context->GetDrawTarget();
+    glanceasy::RenderTarget target = context->GetDrawTarget();
     if (target.valid() && target.depth) {
       const uint16_t depth =
-          static_cast<uint16_t>(zgl::Clamp01(value[0]) * 65535.0f + 0.5f);
+          static_cast<uint16_t>(glanceasy::Clamp01(value[0]) * 65535.0f + 0.5f);
       const size_t texels = static_cast<size_t>(target.width) * target.height;
       const int planes = target.multisampled() ? target.samples : 1;
-      zgl::Rect area{0, 0, target.width, target.height};
+      glanceasy::Rect area{0, 0, target.width, target.height};
       if (context->state.scissor_test) {
-        const zgl::Rect scissor{context->state.scissor.x,
+        const glanceasy::Rect scissor{context->state.scissor.x,
                                 target.height - context->state.scissor.bottom(),
                                 context->state.scissor.width,
                                 context->state.scissor.height};
@@ -2804,7 +2804,7 @@ void glClearBufferfi(GLenum buffer,
                      GLint drawbuffer,
                      GLfloat depth,
                      GLint stencil) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (context->state.rasterizer_discard)
@@ -2814,16 +2814,16 @@ void glClearBufferfi(GLenum buffer,
                                                  : GL_INVALID_ENUM);
     return;
   }
-  zgl::RenderTarget target = context->GetDrawTarget();
+  glanceasy::RenderTarget target = context->GetDrawTarget();
   if (!target.valid()) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
   const size_t texels = static_cast<size_t>(target.width) * target.height;
   const int planes = target.multisampled() ? target.samples : 1;
-  zgl::Rect area{0, 0, target.width, target.height};
+  glanceasy::Rect area{0, 0, target.width, target.height};
   if (context->state.scissor_test) {
-    const zgl::Rect scissor{context->state.scissor.x,
+    const glanceasy::Rect scissor{context->state.scissor.x,
                             target.height - context->state.scissor.bottom(),
                             context->state.scissor.width,
                             context->state.scissor.height};
@@ -2833,7 +2833,7 @@ void glClearBufferfi(GLenum buffer,
     return;
   if (target.depth) {
     const uint16_t clear_depth =
-        static_cast<uint16_t>(zgl::Clamp01(depth) * 65535.0f + 0.5f);
+        static_cast<uint16_t>(glanceasy::Clamp01(depth) * 65535.0f + 0.5f);
     for (int sample = 0; sample < planes; ++sample) {
       uint16_t* plane = target.depth + static_cast<size_t>(sample) * texels;
       for (int y = area.y; y < area.bottom(); ++y)
@@ -2872,10 +2872,10 @@ void glClearBufferfi(GLenum buffer,
 void glInvalidateFramebuffer(GLenum target,
                              GLsizei num_attachments,
                              const GLenum* attachments) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::InvalidateAccepted(context, target, num_attachments, attachments);
+  glanceasy::InvalidateAccepted(context, target, num_attachments, attachments);
 }
 
 void glInvalidateSubFramebuffer(GLenum target,
@@ -2885,10 +2885,10 @@ void glInvalidateSubFramebuffer(GLenum target,
                                 GLint y,
                                 GLsizei width,
                                 GLsizei height) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::InvalidateAccepted(context, target, num_attachments, attachments))
+  if (!glanceasy::InvalidateAccepted(context, target, num_attachments, attachments))
     return;
   if (width < 0 || height < 0) {
     context->SetError(GL_INVALID_VALUE);

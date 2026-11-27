@@ -1,12 +1,12 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -59,7 +59,7 @@ bool Linked(GLuint program) {
 }  // namespace
 
 TEST(UniformBlockWithoutInstanceExposesMemberNames) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   const char* fragment =
       "#version 300 es\n"
       "precision mediump float;\n"
@@ -82,11 +82,11 @@ TEST(UniformBlockWithoutInstanceExposesMemberNames) {
 
   glDeleteBuffers(1, &buffer);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformBlockFeedsAnInstanceMember) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   const char* fragment =
       "#version 300 es\n"
       "precision mediump float;\n"
@@ -112,11 +112,11 @@ TEST(UniformBlockFeedsAnInstanceMember) {
   EXPECT_EQ(glGetUniformLocation(program, "color"), -1);
   glDeleteBuffers(1, &buffer);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformBlockReflectionUsesStd140Offsets) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 300 es\n"
       "precision mediump float;\n"
@@ -177,11 +177,11 @@ TEST(UniformBlockReflectionUsesStd140Offsets) {
   EXPECT_EQ(strides[3], 16);
 
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformBlockBindingPointsAndSharedStages) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   const char* vertex =
       "#version 300 es\n"
       "in vec2 a_pos;\n"
@@ -218,11 +218,11 @@ TEST(UniformBlockBindingPointsAndSharedStages) {
 
   glDeleteBuffers(1, &buffer);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformBlockRangeBindingSkipsThePrefix) {
-  EXPECT_EQ(zglCreateContext(64, 64), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 64), 1);
   const char* fragment =
       "#version 300 es\n"
       "precision mediump float;\n"
@@ -246,11 +246,11 @@ TEST(UniformBlockRangeBindingSkipsThePrefix) {
 
   glDeleteBuffers(1, &buffer);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformBlockLayoutMismatchFailsToLink) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 300 es\n"
       "in vec2 a_pos;\n"
@@ -265,5 +265,5 @@ TEST(UniformBlockLayoutMismatchFailsToLink) {
   const GLuint program = LinkProgram(vertex, fragment);
   EXPECT_FALSE(Linked(program));
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

@@ -1,15 +1,15 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_GLSL_GLSL_LEXER_H_
-#define ZGL_SRC_GLSL_GLSL_LEXER_H_
+#ifndef GLANCEASY_SRC_GLSL_GLSL_LEXER_H_
+#define GLANCEASY_SRC_GLSL_GLSL_LEXER_H_
 
 #include <stdint.h>
 
 #include <string>
 
-namespace zgl {
+namespace glanceasy {
 namespace glsl {
 
 struct Token {
@@ -66,6 +66,6 @@ class Lexer {
 };
 
 }  // namespace glsl
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_GLSL_GLSL_LEXER_H_
+#endif  // GLANCEASY_SRC_GLSL_GLSL_LEXER_H_

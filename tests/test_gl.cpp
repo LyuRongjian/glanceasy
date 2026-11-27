@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #include "GLES3/gl32.h"
 #include "src/glsl/glsl_parser.h"
 #include "src/glsl/glsl_program.h"
-#include "src/zgl_common.h"
-#include "src/zgl_raster.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "src/glanceasy_common.h"
+#include "src/glanceasy_raster.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -74,28 +74,28 @@ const float kFullscreenQuad[] = {
 }  // namespace
 
 TEST(RasterizerCoversTriangle) {
-  class CountingSink : public zgl::FragmentSink {
+  class CountingSink : public glanceasy::FragmentSink {
    public:
-    void Shade(const zgl::Fragment& fragment) override {
+    void Shade(const glanceasy::Fragment& fragment) override {
       (void)fragment;
       count++;
     }
     int count = 0;
   } sink;
 
-  zgl::Rasterizer rasterizer;
-  rasterizer.SetClip(zgl::Rect{0, 0, 64, 48});
-  zgl::RasterVertex a{0.0f, 48.0f, 0.0f, 1.0f};
-  zgl::RasterVertex b{128.0f, 48.0f, 0.0f, 1.0f};
-  zgl::RasterVertex c{0.0f, -48.0f, 0.0f, 1.0f};
+  glanceasy::Rasterizer rasterizer;
+  rasterizer.SetClip(glanceasy::Rect{0, 0, 64, 48});
+  glanceasy::RasterVertex a{0.0f, 48.0f, 0.0f, 1.0f};
+  glanceasy::RasterVertex b{128.0f, 48.0f, 0.0f, 1.0f};
+  glanceasy::RasterVertex c{0.0f, -48.0f, 0.0f, 1.0f};
   rasterizer.DrawTriangle(a, b, c, 0, 1, 2, &sink);
   EXPECT_TRUE(sink.count > 3000);
 }
 
 TEST(ContextAndClear) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
-  EXPECT_EQ(zglGetWidth(), 64);
-  EXPECT_EQ(zglGetHeight(), 48);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyGetWidth(), 64);
+  EXPECT_EQ(glanceasyGetHeight(), 48);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
   unsigned char rgba[4] = {};
@@ -105,12 +105,12 @@ TEST(ContextAndClear) {
   EXPECT_EQ(rgba[2], 255);
   EXPECT_EQ(rgba[3], 255);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
-  EXPECT_EQ(zglContextReady(), 0);
+  glanceasyDestroyContext();
+  EXPECT_EQ(glanceasyContextReady(), 0);
 }
 
 TEST(DrawFullscreenTriangle) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
@@ -134,16 +134,16 @@ TEST(DrawFullscreenTriangle) {
   EXPECT_EQ(rgba[0], 255);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
 
-  ZglStats stats = {};
-  zglGetStats(&stats);
+  GlanceasyStats stats = {};
+  glanceasyGetStats(&stats);
   EXPECT_EQ(stats.draw_calls, 1);
 
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(FragmentDepthDecidesVisibility) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClearDepthf(1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -192,11 +192,11 @@ TEST(FragmentDepthDecidesVisibility) {
   EXPECT_EQ(rgba[1], 255);
 
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(PointSpriteUsesPointSizeAndCoord) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
@@ -235,11 +235,11 @@ TEST(PointSpriteUsesPointSizeAndCoord) {
   EXPECT_EQ(rgba[1], 0);
 
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(FramebufferObjectWithRenderbuffer) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   GLuint framebuffer = 0;
   GLuint renderbuffer = 0;
   glGenFramebuffers(1, &framebuffer);
@@ -265,11 +265,11 @@ TEST(FramebufferObjectWithRenderbuffer) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteRenderbuffers(1, &renderbuffer);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureSamplingUsesNearestNeighbour) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const unsigned char texels[16] = {255, 0, 0,   255, 0,   255, 0,   255,
                                     0,   0, 255, 255, 255, 255, 255, 255};
   GLuint texture = 0;
@@ -312,14 +312,14 @@ TEST(TextureSamplingUsesNearestNeighbour) {
 
   glDeleteTextures(1, &texture);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 // Regression test for a type predicate bug: every vector type used to report
 // is_scalar() == true, so constructors such as vec4(x, y, 0.0, 1.0) only
 // produced their first component and nothing was rasterised.
 TEST(InterpreterWritesAllPositionComponents) {
-  using namespace zgl::glsl;
+  using namespace glanceasy::glsl;
   const char* vertex_source =
       "attribute vec2 a_position;\n"
       "void main() { gl_Position = vec4(a_position, 0.0, 1.0); }\n";
@@ -338,7 +338,7 @@ TEST(InterpreterWritesAllPositionComponents) {
       program.Link(vertex_ast.get(), fragment_ast.get(), {}, {}, {}, false,
                    &log));
 
-  float attributes[zgl::kMaxVertexAttribs * 4] = {-1.0f, -1.0f};
+  float attributes[glanceasy::kMaxVertexAttribs * 4] = {-1.0f, -1.0f};
   VertexInput input;
   input.attributes = attributes;
   float position[4] = {};

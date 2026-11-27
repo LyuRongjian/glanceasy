@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 #include <stdint.h>
 
 #include "GLES3/gl32.h"
-#include "src/zgl_api_common.h"
-#include "src/zgl_draw.h"
+#include "src/glanceasy_api_common.h"
+#include "src/glanceasy_draw.h"
 
-namespace zgl {
+namespace glanceasy {
 namespace {
 
 bool ValidIndexType(GLenum type) {
@@ -55,7 +55,7 @@ GLuint MaxIndexValue(GLenum type) {
 // supplied client memory is used directly.
 const void* ElementPointer(Context* context, const void* indices) {
   if (context->state.element_buffer == 0) {
-    zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context);
+    glanceasy::TransformFeedback* feedback = glanceasy::CurrentTransformFeedback(context);
     if (feedback && feedback->active && !feedback->paused)
       return nullptr;
     return indices;
@@ -70,45 +70,45 @@ const void* ElementPointer(Context* context, const void* indices) {
 }
 
 }  // namespace
-}  // namespace zgl
+}  // namespace glanceasy
 
 extern "C" {
 
 void glDrawArrays(GLenum mode, GLint first, GLsizei count) {
-  if (getenv("ZGL_DEBUG_ERROR"))
+  if (getenv("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr, "[gldrawarrays] first=%d count=%d\n", first, count);
   if (first < 0 || count < 0) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (context)
       context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::Draw(mode, first, count, GL_NONE, nullptr, 1);
+  glanceasy::Draw(mode, first, count, GL_NONE, nullptr, 1);
 }
 
 void glDrawElements(GLenum mode,
                     GLsizei count,
                     GLenum type,
                     const void* indices) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::CheckDrawPreamble(context, mode))
+  if (!glanceasy::CheckDrawPreamble(context, mode))
     return;
   if (count < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!zgl::ValidIndexType(type)) {
+  if (!glanceasy::ValidIndexType(type)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  const void* pointer = zgl::ElementPointer(context, indices);
+  const void* pointer = glanceasy::ElementPointer(context, indices);
   if (!pointer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::Draw(mode, 0, count, type, pointer, 1);
+  glanceasy::Draw(mode, 0, count, type, pointer, 1);
 }
 
 void glDrawArraysInstanced(GLenum mode,
@@ -116,12 +116,12 @@ void glDrawArraysInstanced(GLenum mode,
                            GLsizei count,
                            GLsizei instance_count) {
   if (first < 0 || count < 0 || instance_count < 0) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (context)
       context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::Draw(mode, first, count, GL_NONE, nullptr, instance_count);
+  glanceasy::Draw(mode, first, count, GL_NONE, nullptr, instance_count);
 }
 
 void glDrawElementsInstanced(GLenum mode,
@@ -129,25 +129,25 @@ void glDrawElementsInstanced(GLenum mode,
                              GLenum type,
                              const void* indices,
                              GLsizei instance_count) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (!zgl::CheckDrawPreamble(context, mode))
+  if (!glanceasy::CheckDrawPreamble(context, mode))
     return;
   if (count < 0 || instance_count < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!zgl::ValidIndexType(type)) {
+  if (!glanceasy::ValidIndexType(type)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  const void* pointer = zgl::ElementPointer(context, indices);
+  const void* pointer = glanceasy::ElementPointer(context, indices);
   if (!pointer) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  zgl::Draw(mode, 0, count, type, pointer, instance_count);
+  glanceasy::Draw(mode, 0, count, type, pointer, instance_count);
 }
 
 void glDrawRangeElements(GLenum mode,
@@ -156,9 +156,9 @@ void glDrawRangeElements(GLenum mode,
                          GLsizei count,
                          GLenum type,
                          const void* indices) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (context) {
-    if (start > end || end > zgl::MaxIndexValue(type)) {
+    if (start > end || end > glanceasy::MaxIndexValue(type)) {
       context->SetError(GL_INVALID_VALUE);
       return;
     }

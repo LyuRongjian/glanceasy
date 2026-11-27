@@ -1,8 +1,8 @@
-﻿// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+﻿// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/zgl_draw.h"
+#include "src/glanceasy_draw.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -15,11 +15,11 @@
 #include <vector>
 
 #include "src/glsl/glsl_program.h"
-#include "src/zgl_context.h"
-#include "src/zgl_raster.h"
-#include "src/zgl_texture.h"
+#include "src/glanceasy_context.h"
+#include "src/glanceasy_raster.h"
+#include "src/glanceasy_texture.h"
 
-namespace zgl {
+namespace glanceasy {
 
 namespace {
 
@@ -583,7 +583,7 @@ void Pipeline::Run(GLenum mode,
                    GLsizei instance_count) {
   if (!Prepare())
     return;
-  if (getenv("ZGL_DEBUG_ERROR"))
+  if (getenv("GLANCEASY_DEBUG_ERROR"))
     fprintf(stderr,
             "[draw] %dx%d vp=%d,%d,%d,%d scissor=%d empty=%d count=%d "
             "instances=%d prog=%u vf=%d\n",
@@ -592,7 +592,7 @@ void Pipeline::Run(GLenum mode,
             state().viewport.height, state().scissor_test ? 1 : 0,
             empty_clip_ ? 1 : 0, count, instance_count,
             static_cast<unsigned>(state().program), varying_floats_);
-  zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context_);
+  glanceasy::TransformFeedback* feedback = glanceasy::CurrentTransformFeedback(context_);
   const bool capture =
       feedback && feedback->active && !feedback->paused;
   if (capture && !PrimitiveModeCompatible(mode, feedback->primitive_mode)) {
@@ -870,7 +870,7 @@ bool Pipeline::Prepare() {
     size_t available = buffer->data.size() - binding.offset;
     if (binding.size < available)
       available = binding.size;
-    if (getenv("ZGL_DEBUG_UBO")) {
+    if (getenv("GLANCEASY_DEBUG_UBO")) {
       fprintf(stderr, "DRAW block=%s bp=%d id=%u off=%zu size=%zu bytes=%zu\n",
               program_->uniform_blocks()[i].name.c_str(), binding_point,
               binding.buffer, static_cast<size_t>(binding.offset),
@@ -914,7 +914,7 @@ bool Pipeline::Prepare() {
     clip = clip.Intersect(scissor);
   }
   empty_clip_ = clip.IsEmpty();
-  if (getenv("ZGL_DEBUG_VIEWPORT")) {
+  if (getenv("GLANCEASY_DEBUG_VIEWPORT")) {
     for (int i = 0; i < 2; ++i) {
       const VertexAttribute& a = vertex_array_->attributes[i];
       fprintf(stderr, "[attribstate] %d en=%d size=%d stride=%d ptr=%p buf=%u\n",
@@ -1104,7 +1104,7 @@ void Pipeline::CaptureVertex(GLuint index, int instance) {
 void Pipeline::WriteTransformFeedback(const float* varyings,
                                       const float* position,
                                       float point_size) {
-  zgl::TransformFeedback* feedback = zgl::CurrentTransformFeedback(context_);
+  glanceasy::TransformFeedback* feedback = glanceasy::CurrentTransformFeedback(context_);
   if (!feedback || !feedback->active || feedback->paused)
     return;
   const auto& outputs = program_->transform_feedback_varyings();
@@ -1125,13 +1125,13 @@ void Pipeline::WriteTransformFeedback(const float* varyings,
     if (!separate)
       record_offset += bytes;
     if (buffer_index < 0 ||
-        buffer_index >= zgl::kMaxTransformFeedbackBuffers) {
+        buffer_index >= glanceasy::kMaxTransformFeedbackBuffers) {
       continue;
     }
-    const zgl::IndexedBufferBinding& binding = feedback->buffers[buffer_index];
+    const glanceasy::IndexedBufferBinding& binding = feedback->buffers[buffer_index];
     if (binding.attachment_deleted)
       continue;
-    zgl::Buffer* buffer = context_->buffers.Get(binding.buffer);
+    glanceasy::Buffer* buffer = context_->buffers.Get(binding.buffer);
     if (!buffer)
       continue;
     size_t cursor = feedback->cursors[buffer_index];
@@ -1160,7 +1160,7 @@ void Pipeline::WriteTransformFeedback(const float* varyings,
     for (const auto& output : outputs) {
       const int buffer_index = output.buffer_index;
       if (buffer_index >= 0 &&
-          buffer_index < zgl::kMaxTransformFeedbackBuffers) {
+          buffer_index < glanceasy::kMaxTransformFeedbackBuffers) {
         feedback->cursors[buffer_index] +=
             static_cast<size_t>(output.components) * sizeof(float);
       }
@@ -1201,7 +1201,7 @@ void Pipeline::EmitPoint(GLuint index, int instance) {
   current_front_ = true;
   polygon_ = false;
   depth_offset_ = 0.0f;
-  if (getenv("ZGL_DEBUG_POINT"))
+  if (getenv("GLANCEASY_DEBUG_POINT"))
     fprintf(stderr, "[pt] center=%.2f,%.2f size=%.2f\n", screen.x, screen.y, size);
   rasterizer_.DrawPoint(screen, 0, size, this);
 }
@@ -1430,7 +1430,7 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
         return true;
     return false;
   };
-  if (getenv("ZGL_DEBUG_DER")) {
+  if (getenv("GLANCEASY_DEBUG_DER")) {
     static int interp_dbg = 0;
     if (interp_dbg < 4) {
       fprintf(stderr, "[interp] bary=%.3f,%.3f,%.3f db=%.4f,%.4f v0=%.3f v1=%.3f v2=%.3f\n",
@@ -1439,14 +1439,14 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
       ++interp_dbg;
     }
   }
-  if (getenv("ZGL_DEBUG_FLAT")) {
+  if (getenv("GLANCEASY_DEBUG_FLAT")) {
     fprintf(stderr, "interp prov=%d ranges=%zu bary=%.3f,%.3f,%.3f verts=%d,%d,%d flat0=%d val=%.2f provval=%.2f\n",
             provoking_index, flat_varying_ranges_.size(), bary0, bary1, bary2,
             fragment.vertex[0], fragment.vertex[1], fragment.vertex[2],
             flat_varying_ranges_.empty() ? -1 : is_flat(0),
             out[0], provoking[0]);
   }
-  if (getenv("ZGL_DEBUG_CUBE") && varying_floats_ >= 3) {
+  if (getenv("GLANCEASY_DEBUG_CUBE") && varying_floats_ >= 3) {
     static int cdbg = 0;
     if (cdbg++ < 4)
       fprintf(stderr,
@@ -1480,7 +1480,7 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
                            vertex1[i] * (bary1 - b1dy) +
                            vertex2[i] * (1.0f - bary0 + b0dy - bary1 + b1dy);
     }
-    if (getenv("ZGL_DEBUG_VAR")) {
+    if (getenv("GLANCEASY_DEBUG_VAR")) {
       static int vdbg = 0;
       if (vdbg++ < 2) {
         fprintf(stderr, "[var] n=%d bary=(%.4f,%.4f,%.4f) db=(%.4f,%.4f)\n",
@@ -1491,7 +1491,7 @@ void Pipeline::Interpolate(const Fragment& fragment, float* out) const {
                   varying_dx_values_[i], varying_dy_values_[i]);
       }
     }
-    if (getenv("ZGL_DEBUG_DER")) {
+    if (getenv("GLANCEASY_DEBUG_DER")) {
       static int adbg = 0;
       if (adbg < 3) {
         fprintf(stderr, "[interp-aff] out0=%.4f dx0=%.4f dy0=%.4f\n", out[0],
@@ -1598,7 +1598,7 @@ void Pipeline::Shade(const Fragment& fragment) {
   }
 
   Interpolate(fragment, varying_values_.data());
-  if (getenv("ZGL_DEBUG_VIEWPORT") && varying_floats_ >= 2) {
+  if (getenv("GLANCEASY_DEBUG_VIEWPORT") && varying_floats_ >= 2) {
     static int fv_debug[8] = {};
     const unsigned program = static_cast<unsigned>(context_->state.program);
     if (program < 8 && fv_debug[program] < 3) {
@@ -1752,7 +1752,7 @@ void Pipeline::StoreFragmentColor(size_t pixel,
   uint8_t* const destination = target_.colors[attachment];
   if (!destination)
     return;
-  if (getenv("ZGL_DEBUG_INT") && !target_.color_is_integer[attachment]) {
+  if (getenv("GLANCEASY_DEBUG_INT") && !target_.color_is_integer[attachment]) {
     static int fb_debug = 0;
     if (fb_debug < 12 && (fb_debug < 3 || pixel % 4096 == 0)) {
       fprintf(stderr, "[fbstore] pix=%zu base=%d color=%.4f %.4f %.4f %.4f dst=%p\n",
@@ -1784,7 +1784,7 @@ void Pipeline::StoreFragmentColor(size_t pixel,
     }
     uint32_t* const integer_destination =
         target_.integer_colors[attachment];
-    if (getenv("ZGL_DEBUG_INT") && integer_destination) {
+    if (getenv("GLANCEASY_DEBUG_INT") && integer_destination) {
       static int int_debug = 0;
       if (int_debug < 6) {
         fprintf(stderr, "[intstore] pix=%zu base=%d ints=%u,%u,%u,%u dst=%p\n",
@@ -1806,7 +1806,7 @@ void Pipeline::StoreFragmentColor(size_t pixel,
     memcpy(integer_destination + pixel * 4, values, sizeof(values));
     return;
   }
-  if (getenv("ZGL_DEBUG_RAST")) {
+  if (getenv("GLANCEASY_DEBUG_RAST")) {
     static int bdbg = 0;
     if (bdbg < 4) {
       fprintf(stderr, "[blend] enabled=%d src=%x dst=%x\n",
@@ -1865,7 +1865,7 @@ void Pipeline::StoreFragmentColor(size_t pixel,
   }
   uint8_t bytes[4];
   const bool srgb = target_.color_is_srgb[attachment];
-  if (getenv("ZGL_DEBUG_SRGB")) {
+  if (getenv("GLANCEASY_DEBUG_SRGB")) {
     static int dbg = 0;
     if (dbg++ < 4)
       fprintf(stderr, "[store] attach=%d srgb=%d color=%.4f %.4f %.4f\n",
@@ -2030,7 +2030,7 @@ void Pipeline::Fetch2DArray(int unit,
   const int level = ClampInt(lod, 0, 30);
   const TextureImage* image =
       texture->image(level + std::max(0, texture->base_level), 0);
-  if (getenv("ZGL_DEBUG_TEX"))
+  if (getenv("GLANCEASY_DEBUG_TEX"))
     fprintf(stderr,
             "[fetch2da] unit=%d x=%d y=%d layer=%d lod=%d depth=%d levels=%d "
             "img=%dx%dx%d base=%d\n",
@@ -2054,7 +2054,7 @@ void Pipeline::Fetch2DArray(int unit,
 namespace {
 
 void MaskSampledAlpha(GLenum internal_format, float out[4]) {
-  if (getenv("ZGL_DEBUG_ALPHA"))
+  if (getenv("GLANCEASY_DEBUG_ALPHA"))
     fprintf(stderr, "[alpha] %x %d %g %g %g %g", internal_format, FormatColorChannels(internal_format), out[0], out[1], out[2], out[3]);
   // Legacy single-channel formats keep their non-color channels explicit.
   if (internal_format == GL_ALPHA) {
@@ -2106,7 +2106,7 @@ void Pipeline::Sample2D(int unit,
     wrap_s = sampler->wrap_s;
     wrap_t = sampler->wrap_t;
   }
-  if (getenv("ZGL_DEBUG_VIEWPORT") &&
+  if (getenv("GLANCEASY_DEBUG_VIEWPORT") &&
       (unit != 0 || (u < 0.01f && v > 0.97f))) {
     static int sd = 0;
     if (sd < 200) {
@@ -2156,7 +2156,7 @@ float CompareDepth(float reference, float depth, GLenum func) {
       pass = true;
       break;
   }
-  if (getenv("ZGL_CMP_INVERT"))
+  if (getenv("GLANCEASY_CMP_INVERT"))
     pass = !pass;
   return pass ? 1.0f : 0.0f;
 }
@@ -2274,12 +2274,12 @@ void Pipeline::Sample2DArrayShadow(int unit,
   }
   float depth[4];
   float layer_arg = layer;
-  if (const char* off = getenv("ZGL_LAYER_OFF"))
+  if (const char* off = getenv("GLANCEASY_LAYER_OFF"))
     layer_arg += static_cast<float>(atof(off));
-  const bool swap_uv = getenv("ZGL_SHADOW_SWAP") != nullptr;
-  const float su = getenv("ZGL_SHADOW_FLIP_S") ? 1.0f - (swap_uv ? v : u)
+  const bool swap_uv = getenv("GLANCEASY_SHADOW_SWAP") != nullptr;
+  const float su = getenv("GLANCEASY_SHADOW_FLIP_S") ? 1.0f - (swap_uv ? v : u)
                                                : (swap_uv ? v : u);
-  const float sv = getenv("ZGL_SHADOW_FLIP_T") ? 1.0f - (swap_uv ? u : v)
+  const float sv = getenv("GLANCEASY_SHADOW_FLIP_T") ? 1.0f - (swap_uv ? u : v)
                                                : (swap_uv ? u : v);
   const GLenum active_filter =
       lod_bias <= 0.0f ? mag_filter : min_filter;
@@ -2320,7 +2320,7 @@ void Pipeline::Sample2DArrayShadow(int unit,
     out[0] = CompareDepth(ref, depth[0], compare_func);
   }
 
-  if (getenv("ZGL_DEBUG_TEXARR")) {
+  if (getenv("GLANCEASY_DEBUG_TEXARR")) {
     static int cdbg = 0;
     if (cdbg++ < 5)
       fprintf(stderr, "[cmp] func=%x ref=%.4f depth=%.4f out=%.1f\n",
@@ -2521,4 +2521,4 @@ void Draw(GLenum mode,
   pipeline.Resolve();
 }
 
-}  // namespace zgl
+}  // namespace glanceasy

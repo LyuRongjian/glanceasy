@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include <string.h>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -63,7 +63,7 @@ bool LinkSucceeded(GLuint program) {
 }  // namespace
 
 TEST(ArithmeticAndSwizzlesDriveColour) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -86,11 +86,11 @@ TEST(ArithmeticAndSwizzlesDriveColour) {
   EXPECT_NEAR(static_cast<float>(rgba[1]) / 255.0f, 0.4f, 0.02f);
   EXPECT_EQ(rgba[2], 0);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(LoopsAndBranchesExecute) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -115,11 +115,11 @@ TEST(LoopsAndBranchesExecute) {
   EXPECT_EQ(rgba[0], 255);
   EXPECT_EQ(rgba[2], 0);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DoWhileBreakAndContinueWork) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -143,11 +143,11 @@ TEST(DoWhileBreakAndContinueWork) {
   // The loop adds 0.25 for i equal to 1 and 3, then breaks at i == 4.
   EXPECT_EQ(rgba[1], 128);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UserFunctionsAreCallableButNotRecursive) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -177,11 +177,11 @@ TEST(UserFunctionsAreCallableButNotRecursive) {
   EXPECT_TRUE(log_length > 0);
   glDeleteProgram(program);
   glDeleteProgram(broken);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(BuiltinMathFunctionsComputeExpectedValues) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -205,11 +205,11 @@ TEST(BuiltinMathFunctionsComputeExpectedValues) {
   EXPECT_EQ(rgba[1], 128);
   EXPECT_EQ(rgba[2], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DiscardLeavesExistingPixels) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -231,11 +231,11 @@ TEST(DiscardLeavesExistingPixels) {
   EXPECT_EQ(discarded[2], 255);
   EXPECT_EQ(kept[0], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(MatrixUniformMovesTheTriangle) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 100\n"
       "attribute vec2 a_pos;\n"
@@ -280,11 +280,11 @@ TEST(MatrixUniformMovesTheTriangle) {
   EXPECT_EQ(left[2], 255);
   EXPECT_EQ(right[0], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(TextureSamplingWorksInsideShader) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const unsigned char texels[16] = {
       255, 0, 0,   255, 0,   255, 0, 255,  // Row 0: red, green.
       0,   0, 255, 255, 255, 255, 0, 255   // Row 1: blue, yellow.
@@ -320,11 +320,11 @@ TEST(TextureSamplingWorksInsideShader) {
   EXPECT_EQ(top_right[1], 255);
   glDeleteProgram(program);
   glDeleteTextures(1, &texture);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(Version300ShadersAcceptInAndOutDeclarations) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 300 es\n"
       "in vec2 a_pos;\n"
@@ -344,11 +344,11 @@ TEST(Version300ShadersAcceptInAndOutDeclarations) {
   ReadCentre(rgba);
   EXPECT_NEAR(static_cast<float>(rgba[0]) / 255.0f, 0.49f, 0.05f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(VectorRelationalFunctionsProduceBooleans) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -371,11 +371,11 @@ TEST(VectorRelationalFunctionsProduceBooleans) {
   EXPECT_EQ(rgba[1], 0);
   EXPECT_EQ(rgba[2], 0);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(MatrixHelpersAndTransposeAreSupported) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -399,11 +399,11 @@ TEST(MatrixHelpersAndTransposeAreSupported) {
   EXPECT_EQ(rgba[1], 128);
   EXPECT_EQ(rgba[2], 0);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(GeometryFunctionsHandleDegenerateInput) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 100\n"
       "precision mediump float;\n"
@@ -422,11 +422,11 @@ TEST(GeometryFunctionsHandleDegenerateInput) {
   ReadCentre(rgba);
   EXPECT_EQ(rgba[2], 255);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UnsupportedConstructsFailToCompile) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* constructs[] = {
       // Unknown builtins must be rejected.
       "#version 100\nprecision mediump float;\n"
@@ -443,11 +443,11 @@ TEST(UnsupportedConstructsFailToCompile) {
     glDeleteShader(shader);
   }
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ArrayAndStructTypesEvaluate) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* fragment =
       "#version 300 es\n"
       "precision mediump float;\n"
@@ -477,11 +477,11 @@ TEST(ArrayAndStructTypesEvaluate) {
   EXPECT_NEAR(static_cast<float>(rgba[1]) / 255.0f, 0.25f, 0.01f);
   EXPECT_NEAR(static_cast<float>(rgba[2]) / 255.0f, 0.30f, 0.01f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(UniformBlockArraysOfStructures) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   const char* vertex =
       "#version 300 es\n"
       "in vec2 a_pos;\n"
@@ -533,5 +533,5 @@ TEST(UniformBlockArraysOfStructures) {
   EXPECT_NEAR(static_cast<float>(rgba[2]) / 255.0f, 0.5f, 0.01f);
   glDeleteBuffers(1, &buffer);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

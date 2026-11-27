@@ -1,26 +1,26 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "GLES3/gl32.h"
 #include "src/glsl/glsl_types.h"
-#include "tests/zgl_test.h"
+#include "tests/glanceasy_test.h"
 
-using zgl::glsl::BaseType;
-using zgl::glsl::Component;
-using zgl::glsl::Convert;
-using zgl::glsl::IsTrue;
-using zgl::glsl::MakeBool;
-using zgl::glsl::MakeBVec;
-using zgl::glsl::MakeFloat;
-using zgl::glsl::MakeInt;
-using zgl::glsl::MakeIVec;
-using zgl::glsl::MakeMat;
-using zgl::glsl::MakeSampler;
-using zgl::glsl::MakeVec;
-using zgl::glsl::SetComponent;
-using zgl::glsl::Type;
-using zgl::glsl::Value;
+using glanceasy::glsl::BaseType;
+using glanceasy::glsl::Component;
+using glanceasy::glsl::Convert;
+using glanceasy::glsl::IsTrue;
+using glanceasy::glsl::MakeBool;
+using glanceasy::glsl::MakeBVec;
+using glanceasy::glsl::MakeFloat;
+using glanceasy::glsl::MakeInt;
+using glanceasy::glsl::MakeIVec;
+using glanceasy::glsl::MakeMat;
+using glanceasy::glsl::MakeSampler;
+using glanceasy::glsl::MakeVec;
+using glanceasy::glsl::SetComponent;
+using glanceasy::glsl::Type;
+using glanceasy::glsl::Value;
 
 TEST(TypeNamesCoverEveryShape) {
   EXPECT_TRUE(Type::Void().Name() == "void");

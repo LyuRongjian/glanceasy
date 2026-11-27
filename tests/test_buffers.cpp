@@ -1,12 +1,12 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string.h>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -20,7 +20,7 @@ void DrainErrors() {
 }  // namespace
 
 TEST(BufferObjectsStoreAndQueryData) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
 
   GLuint buffer = 0;
   glGenBuffers(1, &buffer);
@@ -72,11 +72,11 @@ TEST(BufferObjectsStoreAndQueryData) {
   glDeleteBuffers(1, &copy_target);
   glDeleteBuffers(1, &buffer);
   EXPECT_EQ(glIsBuffer(buffer), GL_FALSE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(BufferObjectsRejectInvalidArguments) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
 
   // No buffer is bound.
   glBufferData(GL_ARRAY_BUFFER, 16, nullptr, GL_STATIC_DRAW);
@@ -124,11 +124,11 @@ TEST(BufferObjectsRejectInvalidArguments) {
   glFlushMappedBufferRange(GL_ARRAY_BUFFER, 0, 4);
 
   glDeleteBuffers(1, &buffer);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(MappedBuffersExposeSingleMapping) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   GLuint buffer = 0;
   glGenBuffers(1, &buffer);
   glBindBuffer(GL_ARRAY_BUFFER, buffer);
@@ -161,11 +161,11 @@ TEST(MappedBuffersExposeSingleMapping) {
   EXPECT_EQ(glUnmapBuffer(GL_ARRAY_BUFFER), GL_TRUE);
 
   glDeleteBuffers(1, &buffer);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(VertexArrayObjectsCaptureAttributeState) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
 
   GLuint vertex_array = 0;
   glGenVertexArrays(1, &vertex_array);
@@ -221,11 +221,11 @@ TEST(VertexArrayObjectsCaptureAttributeState) {
   glDeleteVertexArrays(1, &vertex_array);
   EXPECT_EQ(glIsVertexArray(vertex_array), GL_FALSE);
   glDeleteBuffers(1, &buffer);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(VertexArrayObjectsRejectInvalidNames) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   glBindVertexArray(1234);
   EXPECT_EQ(glGetError(), GL_INVALID_OPERATION);
   glVertexAttribPointer(16, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
@@ -239,11 +239,11 @@ TEST(VertexArrayObjectsRejectInvalidNames) {
   GLuint missing = 0;
   glDeleteVertexArrays(1, &missing);
   EXPECT_EQ(glGetError(), GL_NO_ERROR);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ElementArrayBufferFollowsVertexArray) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
 
   GLuint vertex_array = 0;
   glGenVertexArrays(1, &vertex_array);
@@ -270,5 +270,5 @@ TEST(ElementArrayBufferFollowsVertexArray) {
   glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &binding);
   EXPECT_EQ(binding, 0);
   glDeleteVertexArrays(1, &vertex_array);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -12,16 +12,16 @@
 #include <algorithm>
 
 #include "GLES3/gl32.h"
-#include "src/zgl_api_common.h"
-#include "src/zgl_context.h"
-#include "src/zgl_texture_compressed.h"
+#include "src/glanceasy_api_common.h"
+#include "src/glanceasy_context.h"
+#include "src/glanceasy_texture_compressed.h"
 
 namespace {
 
-zgl::Texture* Bound3DTexture(zgl::Context* context, GLenum target) {
+glanceasy::Texture* Bound3DTexture(glanceasy::Context* context, GLenum target) {
   const int unit = static_cast<int>(context->state.active_texture) -
                    static_cast<int>(GL_TEXTURE0);
-  if (unit < 0 || unit >= zgl::kMaxCombinedTextureUnits)
+  if (unit < 0 || unit >= glanceasy::kMaxCombinedTextureUnits)
     return nullptr;
   if (target == GL_TEXTURE_3D)
     return context->textures.Get(context->state.textures_3d[unit]);
@@ -30,10 +30,10 @@ zgl::Texture* Bound3DTexture(zgl::Context* context, GLenum target) {
   return nullptr;
 }
 
-bool CheckUnpackBuffer(zgl::Context* context, GLsizei size) {
+bool CheckUnpackBuffer(glanceasy::Context* context, GLsizei size) {
   if (context->state.pixel_unpack_buffer == 0)
     return true;
-  zgl::Buffer* buffer = context->buffers.Get(context->state.pixel_unpack_buffer);
+  glanceasy::Buffer* buffer = context->buffers.Get(context->state.pixel_unpack_buffer);
   if (!buffer || buffer->mapped ||
       static_cast<size_t>(std::max(0, size)) > buffer->data.size()) {
     context->SetError(GL_INVALID_OPERATION);
@@ -46,7 +46,7 @@ int RequiredCompressedBytes(GLenum format,
                             GLsizei width,
                             GLsizei height,
                             GLsizei depth) {
-  const int block = zgl::CompressedBlockBytes(format);
+  const int block = glanceasy::CompressedBlockBytes(format);
   if (block <= 0)
     return 0;
   return ((width + 3) / 4) * ((height + 3) / 4) * std::max(1, depth) * block;
@@ -65,7 +65,7 @@ void glCompressedTexImage3D(GLenum target,
                             GLint border,
                             GLsizei image_size,
                             const void* data) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY) {
@@ -78,19 +78,19 @@ void glCompressedTexImage3D(GLenum target,
     return;
   }
   const int max_width =
-      target == GL_TEXTURE_3D ? zgl::kMax3DTextureSize : zgl::kMaxTextureSize;
+      target == GL_TEXTURE_3D ? glanceasy::kMax3DTextureSize : glanceasy::kMaxTextureSize;
   const int max_height = max_width;
   const int max_depth =
-      target == GL_TEXTURE_3D ? zgl::kMax3DTextureSize : 256;
+      target == GL_TEXTURE_3D ? glanceasy::kMax3DTextureSize : 256;
   if (width > max_width || height > max_height || depth > max_depth) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (zgl::CompressedBlockBytes(internal_format) <= 0) {
+  if (glanceasy::CompressedBlockBytes(internal_format) <= 0) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (level >= zgl::MipLevelCount(max_width, max_height)) {
+  if (level >= glanceasy::MipLevelCount(max_width, max_height)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -102,7 +102,7 @@ void glCompressedTexImage3D(GLenum target,
   }
   if (!CheckUnpackBuffer(context, image_size))
     return;
-  zgl::Texture* texture = Bound3DTexture(context, target);
+  glanceasy::Texture* texture = Bound3DTexture(context, target);
   if (!texture) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -131,7 +131,7 @@ void glCompressedTexSubImage3D(GLenum target,
                                GLenum format,
                                GLsizei image_size,
                                const void* data) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY) {
@@ -144,12 +144,12 @@ void glCompressedTexSubImage3D(GLenum target,
     return;
   }
   const int max_width =
-      target == GL_TEXTURE_3D ? zgl::kMax3DTextureSize : zgl::kMaxTextureSize;
-  if (level >= zgl::MipLevelCount(max_width, max_width)) {
+      target == GL_TEXTURE_3D ? glanceasy::kMax3DTextureSize : glanceasy::kMaxTextureSize;
+  if (level >= glanceasy::MipLevelCount(max_width, max_width)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::Texture* texture = Bound3DTexture(context, target);
+  glanceasy::Texture* texture = Bound3DTexture(context, target);
   if (!texture) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -194,7 +194,7 @@ void glCopyTexSubImage3D(GLenum target,
                          GLint y,
                          GLsizei width,
                          GLsizei height) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY) {
@@ -206,7 +206,7 @@ void glCopyTexSubImage3D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::RenderTarget source = context->GetReadTarget();
+  glanceasy::RenderTarget source = context->GetReadTarget();
   if (!source.valid() || !source.color) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
@@ -215,7 +215,7 @@ void glCopyTexSubImage3D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::Texture* texture = Bound3DTexture(context, target);
+  glanceasy::Texture* texture = Bound3DTexture(context, target);
   if (!texture) {
     context->SetError(GL_INVALID_OPERATION);
     return;

@@ -1,9 +1,9 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_GLSL_GLSL_JIT_H_
-#define ZGL_SRC_GLSL_GLSL_JIT_H_
+#ifndef GLANCEASY_SRC_GLSL_GLSL_JIT_H_
+#define GLANCEASY_SRC_GLSL_GLSL_JIT_H_
 
 #include <memory>
 #include <string>
@@ -12,7 +12,7 @@
 #include "src/glsl/glsl_program.h"
 #include "src/glsl/glsl_types.h"
 
-namespace zgl {
+namespace glanceasy {
 namespace glsl {
 
 // Pointers and scalars that a compiled shader needs while it runs.  Built-in
@@ -54,6 +54,6 @@ class ShaderJit {
 };
 
 }  // namespace glsl
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_GLSL_GLSL_JIT_H_
+#endif  // GLANCEASY_SRC_GLSL_GLSL_JIT_H_

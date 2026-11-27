@@ -1,8 +1,8 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/zgl_fastmath.h"
+#include "src/glanceasy_fastmath.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -14,7 +14,7 @@
 #include <arm_neon.h>
 #endif
 
-namespace zgl {
+namespace glanceasy {
 namespace fastmath {
 
 namespace {
@@ -331,4 +331,4 @@ void Cos4(const float in[4], float out[4]) {
 }
 
 }  // namespace fastmath
-}  // namespace zgl
+}  // namespace glanceasy

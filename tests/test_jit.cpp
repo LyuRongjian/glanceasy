@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,15 @@
 #include <string.h>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
-#if defined(ZGL_ENABLE_JIT)
+#if defined(GLANCEASY_ENABLE_JIT)
 
 namespace {
 
 bool JitDisabled() {
-  const char* value = getenv("ZGL_DISABLE_JIT");
+  const char* value = getenv("GLANCEASY_DISABLE_JIT");
   return value && *value && strcmp(value, "0") != 0;
 }
 
@@ -57,8 +57,8 @@ void DrawFullscreen(GLuint program) {
 }  // namespace
 
 TEST(SljitCompilesAndDispatchesArithmeticShader) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
-  zglResetJitStats();
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
+  glanceasyResetJitStats();
 
   const char* fragment =
       "#version 100\n"
@@ -74,9 +74,9 @@ TEST(SljitCompilesAndDispatchesArithmeticShader) {
   glGetProgramiv(program, GL_LINK_STATUS, &linked);
   EXPECT_TRUE(linked == GL_TRUE);
 
-  ZglJitStats stats = {};
+  GlanceasyJitStats stats = {};
   if (!JitDisabled()) {
-    zglGetJitStats(&stats);
+    glanceasyGetJitStats(&stats);
     EXPECT_TRUE(stats.stages_compiled >= 2);
     EXPECT_EQ(stats.fallback_stages, 0);
   }
@@ -92,16 +92,16 @@ TEST(SljitCompilesAndDispatchesArithmeticShader) {
   EXPECT_EQ(rgba[2], 0);
 
   if (!JitDisabled()) {
-    zglGetJitStats(&stats);
+    glanceasyGetJitStats(&stats);
     EXPECT_TRUE(stats.dispatches > 0);
   }
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(SljitFallsBackForLoopingShader) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
-  zglResetJitStats();
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
+  glanceasyResetJitStats();
 
   const char* fragment =
       "#version 100\n"
@@ -116,8 +116,8 @@ TEST(SljitFallsBackForLoopingShader) {
   glGetProgramiv(program, GL_LINK_STATUS, &linked);
   EXPECT_TRUE(linked == GL_TRUE);
 
-  ZglJitStats stats = {};
-  zglGetJitStats(&stats);
+  GlanceasyJitStats stats = {};
+  glanceasyGetJitStats(&stats);
   if (JitDisabled()) {
     EXPECT_EQ(stats.stages_compiled, 0);
     EXPECT_TRUE(stats.fallback_stages >= 2);
@@ -133,14 +133,14 @@ TEST(SljitFallsBackForLoopingShader) {
   glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
   EXPECT_NEAR(static_cast<float>(rgba[0]) / 255.0f, 1.0f, 0.02f);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
-#endif  // ZGL_ENABLE_JIT
+#endif  // GLANCEASY_ENABLE_JIT
 
 TEST(SljitCompilesMultipleFragmentOutputs) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
-  zglResetJitStats();
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
+  glanceasyResetJitStats();
 
   const char* vertex =
       "#version 300 es\n"
@@ -162,9 +162,9 @@ TEST(SljitCompilesMultipleFragmentOutputs) {
   EXPECT_EQ(glGetFragDataLocation(program, "colour0"), 0);
   EXPECT_EQ(glGetFragDataLocation(program, "colour1"), 1);
 
-  ZglJitStats stats = {};
+  GlanceasyJitStats stats = {};
   if (!JitDisabled()) {
-    zglGetJitStats(&stats);
+    glanceasyGetJitStats(&stats);
     EXPECT_TRUE(stats.stages_compiled >= 2);
     EXPECT_EQ(stats.fallback_stages, 0);
   }
@@ -179,9 +179,9 @@ TEST(SljitCompilesMultipleFragmentOutputs) {
   EXPECT_EQ(rgba[2], 0);
 
   if (!JitDisabled()) {
-    zglGetJitStats(&stats);
+    glanceasyGetJitStats(&stats);
     EXPECT_TRUE(stats.dispatches > 0);
   }
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

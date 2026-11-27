@@ -7,7 +7,7 @@
 
 A standalone, CPU-only implementation of OpenGL ES for ARM32 Cortex-A SoCs.
 
-Glanceasy rasterises every draw call in software. It is derived from the ZCat
+Glanceasy rasterises every draw call in software. It is derived from the Glanceasy
 software painter that shipped inside the WebGlance browser prototype, but the
 GLES front end has been rewritten from scratch: no GPU driver, no EGL, no
 platform window system, and no x86-specific code. The library exposes the
@@ -60,8 +60,8 @@ code instead of captured as images.
 Running the gallery on the host:
 
 ```sh
-cmake --build build --target zgl_visual_tests
-./build/zgl_visual_tests visual-out 640 480
+cmake --build build --target glanceasy_visual_tests
+./build/glanceasy_visual_tests visual-out 640 480
 ```
 
 The second argument is the output directory; one PPM per case is written there.
@@ -87,7 +87,7 @@ The second argument is the output directory; one PPM per case is written there.
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
-./build/zgl_unittests
+./build/glanceasy_unittests
 ```
 
 The host build is the development configuration and is also used for the
@@ -98,7 +98,7 @@ cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
   -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
 cmake --build build-asan
-./build-asan/zgl_unittests
+./build-asan/glanceasy_unittests
 ```
 
 The ARM32 target is validated on Linux with the Luckfox SDK toolchain and
@@ -137,11 +137,11 @@ any x86 SSE code.
 
 `tools/run_qemu_arm.sh` runs any ARM32 ELF with `qemu-arm-static -cpu cortex-a7`.
 The Luckfox uClibc binaries need no patching. Android NDK bionic binaries need
-a 32-byte aligned TLS segment, so pass `ZGL_PATCH_TLS=1` for those:
+a 32-byte aligned TLS segment, so pass `GLANCEASY_PATCH_TLS=1` for those:
 
 ```sh
-tools/run_qemu_arm.sh build-rv1106/zgl_unittests
-tools/run_qemu_arm.sh build-rv1106/zgl_visual_tests visual-out 640 480
+tools/run_qemu_arm.sh build-rv1106/glanceasy_unittests
+tools/run_qemu_arm.sh build-rv1106/glanceasy_visual_tests visual-out 640 480
 ```
 
 `QEMU_ARM_STATIC` selects the emulator; otherwise `qemu-arm-static` is looked up
@@ -154,9 +154,9 @@ user-mode emulator is what this suite is verified against.
 an offscreen buffer and writes a binary PPM file. It uses only the public API:
 
 ```sh
-cmake --build build --target zgl_cube_demo
-./build/zgl_cube_demo cube.ppm 800 600
-tools/run_qemu_arm.sh build-rv1106/zgl_cube_demo cube.ppm 800 600
+cmake --build build --target glanceasy_cube_demo
+./build/glanceasy_cube_demo cube.ppm 800 600
+tools/run_qemu_arm.sh build-rv1106/glanceasy_cube_demo cube.ppm 800 600
 ```
 
 The second command is the one that produced `docs/screenshot.png`; it took about
@@ -166,7 +166,7 @@ about native RV1106 performance.
 ## Testing and coverage
 
 The unit tests are registered through a small in-tree harness
-(`tests/zgl_test.h`) and cover the rasteriser, texture sampling, the GLSL
+(`tests/glanceasy_test.h`) and cover the rasteriser, texture sampling, the GLSL
 interpreter, every implemented GL entry point, the error paths of the state
 machine and the compatibility stubs.
 
@@ -200,7 +200,7 @@ the ARM32 build of Glanceasy.
 | CTS | Khronos VK-GL-CTS `deqp-gles3`, FBO surface 256 x 256 |
 | Driver build | Release (`-O3`), `-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard`, uClibc |
 | Run window | 2026-11-26 11:42 to 2026-11-27 07:21 (UTC+8) |
-| Driver options | default framebuffer exposed as FBO 0 (`ZGL_FBO_SURFACE_AS_ZERO=1`); harness allowed to bind the default framebuffer |
+| Driver options | default framebuffer exposed as FBO 0 (`GLANCEASY_FBO_SURFACE_AS_ZERO=1`); harness allowed to bind the default framebuffer |
 
 The CTS harness carries a small local patch so that the default framebuffer is
 addressed as FBO 0 (the surface FBO created by the harness is released after
@@ -303,12 +303,12 @@ On the host build the API suite runs 181 cases with zero failed checks.
 
 ```
 include/GLES2, GLES3, KHR     Khronos headers (unmodified)
-include/zgl/zgl.h              Public C API of the software renderer
+include/glanceasy/glanceasy.h              Public C API of the software renderer
 src/                           Context, rasteriser, texture pipeline, draw pipeline
-src/zgl_fastmath.*             Scalar shader math approximations
-src/zgl_simd.*                 Four-lane dot/scale and bulk fill helpers
+src/glanceasy_fastmath.*             Scalar shader math approximations
+src/glanceasy_simd.*                 Four-lane dot/scale and bulk fill helpers
 src/glsl/                      Lexer, parser and interpreter for the GLSL subset
-src/zgl_api_*.cpp              GLES entry points
+src/glanceasy_api_*.cpp              GLES entry points
 examples/                      Standalone rendering demo
 tests/                         Unit tests and the test harness
 tests/visual/                  Visual regression cases and the PPM writer
@@ -319,15 +319,15 @@ docs/                          GLSL subset, porting notes and rendered screensho
 ## Using the library
 
 ```c
-#include "zgl/zgl.h"
+#include "glanceasy/glanceasy.h"
 
-zglCreateContext(320, 240);
+glanceasyCreateContext(320, 240);
 /* Call the GLES entry points as usual.  Include GLES3/gl32.h first. */
-zglDestroyContext();
+glanceasyDestroyContext();
 ```
 
-`include/zgl/zgl.h` also exposes `zglGetPixels`, `zglGetPixels32`,
-`zglGetStats` and `zglGetDiagnostics` for embedders that need the rendered
+`include/glanceasy/glanceasy.h` also exposes `glanceasyGetPixels`, `glanceasyGetPixels32`,
+`glanceasyGetStats` and `glanceasyGetDiagnostics` for embedders that need the rendered
 image, draw statistics or the last shader log.
 
 ## Known limitations

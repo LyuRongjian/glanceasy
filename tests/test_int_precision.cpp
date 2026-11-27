@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 #include "src/glsl/glsl_parser.h"
 #include "src/glsl/glsl_program.h"
 #include "src/glsl/glsl_types.h"
-#include "tests/zgl_test.h"
+#include "tests/glanceasy_test.h"
 
 #include "GLES3/gl32.h"
-#include "zgl/zgl.h"
+#include "glanceasy/glanceasy.h"
 
 #define ASSERT_TRUE(condition)     \
   do {                             \
@@ -84,12 +84,12 @@ const char* kArrayFragmentSource =
     "  o_color = ivec4(out0, 0);\n"
     "}\n";
 
-zgl::glsl::Program* LinkProgram(const char* vertex_source,
+glanceasy::glsl::Program* LinkProgram(const char* vertex_source,
                                 const char* fragment_source,
-                                std::unique_ptr<zgl::glsl::ShaderAst>* vertex,
-                                std::unique_ptr<zgl::glsl::ShaderAst>* fragment,
-                                std::unique_ptr<zgl::glsl::Program>* program) {
-  using namespace zgl::glsl;
+                                std::unique_ptr<glanceasy::glsl::ShaderAst>* vertex,
+                                std::unique_ptr<glanceasy::glsl::ShaderAst>* fragment,
+                                std::unique_ptr<glanceasy::glsl::Program>* program) {
+  using namespace glanceasy::glsl;
   Parser vertex_parser(Stage::kVertex, vertex_source);
   *vertex = vertex_parser.Parse();
   if (!*vertex)
@@ -106,13 +106,13 @@ zgl::glsl::Program* LinkProgram(const char* vertex_source,
   return program->get();
 }
 
-bool RunFragmentWithAttributes(zgl::glsl::Program* program,
+bool RunFragmentWithAttributes(glanceasy::glsl::Program* program,
                                uint32_t in0_x,
                                uint32_t in0_y,
                                uint32_t in0_z,
                                uint32_t in1,
-                               zgl::glsl::FragmentOutput* output) {
-  using namespace zgl::glsl;
+                               glanceasy::glsl::FragmentOutput* output) {
+  using namespace glanceasy::glsl;
   float attributes[12] = {};
   uint32_t attribute_int[12] = {};
   const int position_location = program->AttributeLocation("a_position");
@@ -155,10 +155,10 @@ bool RunFragmentWithAttributes(zgl::glsl::Program* program,
 }  // namespace
 
 TEST(HighpIntegerAddKeepsThirtyTwoBitValues) {
-  std::unique_ptr<zgl::glsl::ShaderAst> vertex;
-  std::unique_ptr<zgl::glsl::ShaderAst> fragment;
-  std::unique_ptr<zgl::glsl::Program> program;
-  zgl::glsl::Program* linked = LinkProgram(kVertexSource, kAddFragmentSource,
+  std::unique_ptr<glanceasy::glsl::ShaderAst> vertex;
+  std::unique_ptr<glanceasy::glsl::ShaderAst> fragment;
+  std::unique_ptr<glanceasy::glsl::Program> program;
+  glanceasy::glsl::Program* linked = LinkProgram(kVertexSource, kAddFragmentSource,
                                           &vertex, &fragment, &program);
   ASSERT_TRUE(linked != nullptr);
 
@@ -169,13 +169,13 @@ TEST(HighpIntegerAddKeepsThirtyTwoBitValues) {
       {0xC4653600u, 0x3B9ACA00u},
   };
   for (const auto& value : values) {
-    zgl::glsl::FragmentOutput output;
+    glanceasy::glsl::FragmentOutput output;
     ASSERT_TRUE(RunFragmentWithAttributes(linked, 0, 0, value[0], value[1],
                                          &output));
     const uint32_t expected_sum =
         static_cast<uint32_t>(static_cast<int32_t>(value[0]) +
                               static_cast<int32_t>(value[1]));
-    EXPECT_EQ(output.color_base[0], zgl::glsl::BaseType::kInt);
+    EXPECT_EQ(output.color_base[0], glanceasy::glsl::BaseType::kInt);
     EXPECT_EQ(output.color_int[0][0], value[0]);
     EXPECT_EQ(output.color_int[0][1], value[1]);
     EXPECT_EQ(output.color_int[0][2], expected_sum);
@@ -183,10 +183,10 @@ TEST(HighpIntegerAddKeepsThirtyTwoBitValues) {
 }
 
 TEST(IntegerAddFloatOutputMatchesReferenceFormula) {
-  std::unique_ptr<zgl::glsl::ShaderAst> vertex;
-  std::unique_ptr<zgl::glsl::ShaderAst> fragment;
-  std::unique_ptr<zgl::glsl::Program> program;
-  zgl::glsl::Program* linked = LinkProgram(
+  std::unique_ptr<glanceasy::glsl::ShaderAst> vertex;
+  std::unique_ptr<glanceasy::glsl::ShaderAst> fragment;
+  std::unique_ptr<glanceasy::glsl::Program> program;
+  glanceasy::glsl::Program* linked = LinkProgram(
       kVertexSource, kFloatOutputFragmentSource, &vertex, &fragment, &program);
   ASSERT_TRUE(linked != nullptr);
 
@@ -195,7 +195,7 @@ TEST(IntegerAddFloatOutputMatchesReferenceFormula) {
       {1073741824, 0}, {123456789, -123456789},
   };
   for (const auto& value : values) {
-    zgl::glsl::FragmentOutput output;
+    glanceasy::glsl::FragmentOutput output;
     ASSERT_TRUE(RunFragmentWithAttributes(
         linked, 0, 0, static_cast<uint32_t>(value[0]),
         static_cast<uint32_t>(value[1]), &output));
@@ -203,13 +203,13 @@ TEST(IntegerAddFloatOutputMatchesReferenceFormula) {
         static_cast<int32_t>(static_cast<uint32_t>(value[0]) +
                              static_cast<uint32_t>(value[1]));
     const float expected = static_cast<float>(sum) * 4e-10f + 0.5f;
-    EXPECT_TRUE(output.color_base[0] == zgl::glsl::BaseType::kFloat);
+    EXPECT_TRUE(output.color_base[0] == glanceasy::glsl::BaseType::kFloat);
     EXPECT_NEAR(output.color[0][0], expected, 1e-6);
   }
 }
 
 TEST(IntegerAddSurvivesRasterizationAndVaryings) {
-  ASSERT_TRUE(zglCreateContext(32, 32) == 1);
+  ASSERT_TRUE(glanceasyCreateContext(32, 32) == 1);
   const char* vertex_source =
       "#version 300 es\n"
       "precision highp float;\n"
@@ -269,17 +269,17 @@ TEST(IntegerAddSurvivesRasterizationAndVaryings) {
 }
 
 TEST(IntegerArrayConstructorPreservesOrder) {
-  std::unique_ptr<zgl::glsl::ShaderAst> vertex;
-  std::unique_ptr<zgl::glsl::ShaderAst> fragment;
-  std::unique_ptr<zgl::glsl::Program> program;
-  zgl::glsl::Program* linked = LinkProgram(kVertexSource, kArrayFragmentSource,
+  std::unique_ptr<glanceasy::glsl::ShaderAst> vertex;
+  std::unique_ptr<glanceasy::glsl::ShaderAst> fragment;
+  std::unique_ptr<glanceasy::glsl::Program> program;
+  glanceasy::glsl::Program* linked = LinkProgram(kVertexSource, kArrayFragmentSource,
                                           &vertex, &fragment, &program);
   ASSERT_TRUE(linked != nullptr);
 
-  zgl::glsl::FragmentOutput output;
+  glanceasy::glsl::FragmentOutput output;
   ASSERT_TRUE(RunFragmentWithAttributes(linked, 7u, 0xFFFFFFFFu, 2u, 0u,
                                        &output));
-  EXPECT_EQ(output.color_base[0], zgl::glsl::BaseType::kInt);
+  EXPECT_EQ(output.color_base[0], glanceasy::glsl::BaseType::kInt);
   // The input vector is [7, -1, 2]; the array rotates it to [2, 7, -1].
   EXPECT_EQ(output.color_int[0][0], 2u);
   EXPECT_EQ(output.color_int[0][1], 7u);

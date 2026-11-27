@@ -1,14 +1,14 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/zgl_simd.h"
+#include "src/glanceasy_simd.h"
 
 #if defined(__ARM_NEON)
 #include <arm_neon.h>
 #endif
 
-namespace zgl {
+namespace glanceasy {
 namespace simd {
 
 float Dot(const float* a, const float* b, int count) {
@@ -86,4 +86,4 @@ void FillU8(uint8_t* destination, size_t count, uint8_t value) {
 }
 
 }  // namespace simd
-}  // namespace zgl
+}  // namespace glanceasy

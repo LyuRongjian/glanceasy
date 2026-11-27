@@ -1,9 +1,9 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ZGL_SRC_GLSL_GLSL_TYPES_H_
-#define ZGL_SRC_GLSL_GLSL_TYPES_H_
+#ifndef GLANCEASY_SRC_GLSL_GLSL_TYPES_H_
+#define GLANCEASY_SRC_GLSL_GLSL_TYPES_H_
 
 #include <stdint.h>
 
@@ -12,9 +12,9 @@
 #include <string>
 #include <vector>
 
-#include "src/zgl_common.h"
+#include "src/glanceasy_common.h"
 
-namespace zgl {
+namespace glanceasy {
 namespace glsl {
 
 // Scalar and opaque base types of the subset.  Vectors and matrices are
@@ -233,6 +233,6 @@ int Std140StructMemberOffset(const StructInfo& info, int member_index,
                              int matrix_layout = 0);
 
 }  // namespace glsl
-}  // namespace zgl
+}  // namespace glanceasy
 
-#endif  // ZGL_SRC_GLSL_GLSL_TYPES_H_
+#endif  // GLANCEASY_SRC_GLSL_GLSL_TYPES_H_

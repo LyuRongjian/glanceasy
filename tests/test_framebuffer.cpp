@@ -1,12 +1,12 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdio.h>
 
 #include "GLES3/gl32.h"
-#include "tests/zgl_test.h"
-#include "zgl/zgl.h"
+#include "tests/glanceasy_test.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -73,7 +73,7 @@ GLuint MakeColourTexture(int width, int height, GLenum internal_format) {
 }  // namespace
 
 TEST(FramebufferCompletenessRules) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   GLuint framebuffer = 0;
   glGenFramebuffers(1, &framebuffer);
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -116,11 +116,11 @@ TEST(FramebufferCompletenessRules) {
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteTextures(1, &depth_texture);
   glDeleteTextures(1, &colour);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(RenderbuffersBackDepthAndStencilAttachments) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   GLuint renderbuffer = 0;
   glGenRenderbuffers(1, &renderbuffer);
   glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
@@ -149,11 +149,11 @@ TEST(RenderbuffersBackDepthAndStencilAttachments) {
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
   glDeleteRenderbuffers(1, &renderbuffer);
   EXPECT_EQ(glIsRenderbuffer(renderbuffer), GL_FALSE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ClearBufferCommandsTargetAttachments) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint colour = MakeColourTexture(32, 32, GL_RGBA);
   GLuint framebuffer = 0;
   glGenFramebuffers(1, &framebuffer);
@@ -189,11 +189,11 @@ TEST(ClearBufferCommandsTargetAttachments) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteTextures(1, &colour);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(FramebufferBlitCopiesColourAndDepth) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const float triangle[6] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
   const GLuint program = MakeSolidProgram(1.0f, 0.5f, 0.0f, 1.0f);
   glUseProgram(program);
@@ -240,11 +240,11 @@ TEST(FramebufferBlitCopiesColourAndDepth) {
   glDeleteTextures(1, &destination_colour);
   glDeleteTextures(1, &source_colour);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(ReadPixelsSupportsEveryFormat) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   glClearColor(0.25f, 0.5f, 0.75f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
@@ -280,11 +280,11 @@ TEST(ReadPixelsSupportsEveryFormat) {
   EXPECT_EQ(glGetError(), GL_INVALID_ENUM);
   glReadPixels(0, 0, -1, 1, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
   EXPECT_EQ(glGetError(), GL_INVALID_VALUE);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(InvalidateAndDiscardAffectNoState) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint colour = MakeColourTexture(32, 32, GL_RGBA);
   GLuint framebuffer = 0;
   glGenFramebuffers(1, &framebuffer);
@@ -305,11 +305,11 @@ TEST(InvalidateAndDiscardAffectNoState) {
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteTextures(1, &colour);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(DefaultFramebufferPixelsAreReadable) {
-  EXPECT_EQ(zglCreateContext(64, 48), 1);
+  EXPECT_EQ(glanceasyCreateContext(64, 48), 1);
   const GLuint program = MakeSolidProgram(0.0f, 1.0f, 0.0f, 1.0f);
   glUseProgram(program);
   glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
@@ -321,19 +321,19 @@ TEST(DefaultFramebufferPixelsAreReadable) {
   EXPECT_EQ(rgba[1], 255);
   EXPECT_EQ(rgba[2], 0);
 
-  // The colour buffer is also exposed through the ZCat host API.
+  // The colour buffer is also exposed through the Glanceasy host API.
   int width = 0;
   int height = 0;
-  const unsigned int* pixels = zglGetPixels32(&width, &height);
+  const unsigned int* pixels = glanceasyGetPixels32(&width, &height);
   EXPECT_TRUE(pixels != nullptr);
   EXPECT_EQ(width, 64);
   EXPECT_EQ(height, 48);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(MultisampleFramebufferResolvesCoverage) {
-  EXPECT_EQ(zglCreateContext(32, 32), 1);
+  EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   GLuint color_buffer = 0;
   GLuint depth_buffer = 0;
   GLuint framebuffer = 0;
@@ -391,11 +391,11 @@ TEST(MultisampleFramebufferResolvesCoverage) {
   glDeleteRenderbuffers(1, &color_buffer);
   glDeleteRenderbuffers(1, &depth_buffer);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }
 
 TEST(MultisampleShaderReadsSampleId) {
-  EXPECT_EQ(zglCreateContext(8, 8), 1);
+  EXPECT_EQ(glanceasyCreateContext(8, 8), 1);
   GLuint color_buffer = 0;
   GLuint framebuffer = 0;
   glGenRenderbuffers(1, &color_buffer);
@@ -443,5 +443,5 @@ TEST(MultisampleShaderReadsSampleId) {
   glDeleteFramebuffers(1, &framebuffer);
   glDeleteRenderbuffers(1, &color_buffer);
   glDeleteProgram(program);
-  zglDestroyContext();
+  glanceasyDestroyContext();
 }

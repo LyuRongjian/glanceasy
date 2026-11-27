@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,11 @@
 #include <vector>
 
 #include "GLES3/gl32.h"
-#include "src/zgl_api_common.h"
-#include "src/zgl_texture.h"
-#include "src/zgl_texture_compressed.h"
+#include "src/glanceasy_api_common.h"
+#include "src/glanceasy_texture.h"
+#include "src/glanceasy_texture_compressed.h"
 
-namespace zgl {
+namespace glanceasy {
 namespace {
 
 #ifndef GL_TEXTURE_SWIZZLE_RGBA
@@ -467,7 +467,7 @@ void UploadSlice(TextureImage* destination,
              source.depth16.data() + static_cast<size_t>(y) * source_stride,
              sizeof(uint16_t) * source_stride);
     }
-    if (getenv("ZGL_DEBUG_TEXARR")) {
+    if (getenv("GLANCEASY_DEBUG_TEXARR")) {
       fprintf(stderr,
               "[upl] z=%d off=%zu d16size=%zu first=%u srcfirst=%u\n",
               zoffset, destination_offset, destination->depth16.size(),
@@ -881,7 +881,7 @@ bool ResolveUnpackPixels(Context* context,
                row_bytes * static_cast<size_t>(image_rows);
   if (offset > buffer->data.size() ||
       required > buffer->data.size() - offset) {
-    if (getenv("ZGL_DEBUG_PBO"))
+    if (getenv("GLANCEASY_DEBUG_PBO"))
       fprintf(stderr,
               "[pbo] reject off=%zu req=%zu size=%zu bytes=%zu align=%d\n",
               offset, required, buffer->data.size(), bytes, alignment);
@@ -1052,7 +1052,7 @@ void SetTextureImage(GLenum target,
     // base and the new one stay undefined until they are specified.
     texture->Resize(level + 1, texture->faces());
   }
-  if (getenv("ZGL_DEBUG_TEX"))
+  if (getenv("GLANCEASY_DEBUG_TEX"))
     fprintf(stderr, "[tex] image2d level=%d %dx%d ifmt=%x ptr=%p cur_levels=%d\n",
             level, width, height, internal_format, pixels, texture->levels);
   const int faces = texture->faces();
@@ -1151,7 +1151,7 @@ void SetTextureImage(GLenum target,
                      ? depth
                      : 1;
   const size_t texels = static_cast<size_t>(width) * height * image->depth;
-  if (zgl::IsIntegerInternalFormat(internal_format)) {
+  if (glanceasy::IsIntegerInternalFormat(internal_format)) {
     image->integer_signed = IsSignedIntegerInternalFormat(internal_format);
     image->integer_rgba.assign(texels * 4, 0u);
   } else if (IsSnormFormat(internal_format)) {
@@ -1241,7 +1241,7 @@ void SetMultisampleTextureStorage(GLenum target,
     image->height = height;
     image->depth = 1;
     image->samples = std::max(1, samples);
-    if (zgl::IsIntegerInternalFormat(internal_format)) {
+    if (glanceasy::IsIntegerInternalFormat(internal_format)) {
       image->integer_rgba.assign(texels * 4, 0u);
       if (samples > 0)
         image->sample_integer_rgba.assign(sample_texels * 4, 0u);
@@ -1353,7 +1353,7 @@ void SetTextureStorage(GLenum target,
 // Copies |width| by |height| pixels starting at the GL window coordinate
 // (x, y) from the current read framebuffer into |destination|.  Texture rows
 // are stored bottom up, matching glReadPixels and glTexImage2D.
-void CopyFramebufferPixels(zgl::Context* context,
+void CopyFramebufferPixels(glanceasy::Context* context,
                            int x,
                            int y,
                            int width,
@@ -1363,8 +1363,8 @@ void CopyFramebufferPixels(zgl::Context* context,
                            int destination_x,
                            int destination_y,
                            int destination_height) {
-  zgl::RenderTarget source = context->GetReadTarget();
-  const uint32_t transparent = zgl::PackRgba(0, 0, 0, 0);
+  glanceasy::RenderTarget source = context->GetReadTarget();
+  const uint32_t transparent = glanceasy::PackRgba(0, 0, 0, 0);
   for (int row = 0; row < height; ++row) {
     const int source_y = y + row;
     const int target_row = destination_y + row;
@@ -1389,12 +1389,12 @@ void CopyFramebufferPixels(zgl::Context* context,
 }
 
 }  // namespace
-}  // namespace zgl
+}  // namespace glanceasy
 
 extern "C" {
 
 void glGenTextures(GLsizei n, GLuint* textures) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -1403,14 +1403,14 @@ void glGenTextures(GLsizei n, GLuint* textures) {
   }
   for (GLsizei i = 0; i < n; ++i) {
     textures[i] = context->textures.Generate();
-    zgl::Texture* object = context->textures.Get(textures[i]);
+    glanceasy::Texture* object = context->textures.Get(textures[i]);
     if (object)
       object->generated_only = true;
   }
 }
 
 void glDeleteTextures(GLsizei n, const GLuint* textures) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -1419,30 +1419,30 @@ void glDeleteTextures(GLsizei n, const GLuint* textures) {
   }
   if (!textures)
     return;
-  zgl::Framebuffer* bound_framebuffer =
+  glanceasy::Framebuffer* bound_framebuffer =
       context->framebuffers.Get(context->state.framebuffer);
   for (GLsizei i = 0; i < n; ++i) {
     const GLuint name = textures[i];
-    zgl::Texture* texture = context->textures.Get(name);
+    glanceasy::Texture* texture = context->textures.Get(name);
     if (!texture || name == 0)
       continue;
     if (bound_framebuffer) {
-      for (int j = 0; j < zgl::kMaxColorAttachments; ++j) {
+      for (int j = 0; j < glanceasy::kMaxColorAttachments; ++j) {
         if (bound_framebuffer->colors[j].texture == name)
-          bound_framebuffer->colors[j] = zgl::FramebufferAttachment();
+          bound_framebuffer->colors[j] = glanceasy::FramebufferAttachment();
       }
       if (bound_framebuffer->depth.texture == name)
-        bound_framebuffer->depth = zgl::FramebufferAttachment();
+        bound_framebuffer->depth = glanceasy::FramebufferAttachment();
       if (bound_framebuffer->stencil.texture == name)
-        bound_framebuffer->stencil = zgl::FramebufferAttachment();
+        bound_framebuffer->stencil = glanceasy::FramebufferAttachment();
     }
-    std::shared_ptr<const zgl::Texture> retained =
-        std::make_shared<const zgl::Texture>(*texture);
-    context->framebuffers.ForEach([&](zgl::Framebuffer& framebuffer) {
+    std::shared_ptr<const glanceasy::Texture> retained =
+        std::make_shared<const glanceasy::Texture>(*texture);
+    context->framebuffers.ForEach([&](glanceasy::Framebuffer& framebuffer) {
       if (&framebuffer == bound_framebuffer)
         return;
-      for (int j = 0; j < zgl::kMaxColorAttachments; ++j) {
-        zgl::FramebufferAttachment& attachment = framebuffer.colors[j];
+      for (int j = 0; j < glanceasy::kMaxColorAttachments; ++j) {
+        glanceasy::FramebufferAttachment& attachment = framebuffer.colors[j];
         if (attachment.texture == name) {
           attachment.retained_texture = retained;
         }
@@ -1455,7 +1455,7 @@ void glDeleteTextures(GLsizei n, const GLuint* textures) {
       }
     });
     texture->delete_status = true;
-    for (int unit = 0; unit < zgl::kMaxCombinedTextureUnits; ++unit) {
+    for (int unit = 0; unit < glanceasy::kMaxCombinedTextureUnits; ++unit) {
       if (context->state.textures[unit] == name)
         context->state.textures[unit] = 0;
       if (context->state.textures_2d[unit] == name)
@@ -1471,20 +1471,20 @@ void glDeleteTextures(GLsizei n, const GLuint* textures) {
 }
 
 GLboolean glIsTexture(GLuint texture) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || texture == 0)
     return GL_FALSE;
-  const zgl::Texture* object = context->textures.Get(texture);
+  const glanceasy::Texture* object = context->textures.Get(texture);
   return object && !object->delete_status ? GL_TRUE : GL_FALSE;
 }
 
 void glActiveTexture(GLenum texture) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   const GLint unit =
       static_cast<GLint>(texture) - static_cast<GLint>(GL_TEXTURE0);
-  if (unit < 0 || unit >= zgl::kMaxCombinedTextureUnits) {
+  if (unit < 0 || unit >= glanceasy::kMaxCombinedTextureUnits) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
@@ -1492,18 +1492,18 @@ void glActiveTexture(GLenum texture) {
 }
 
 void glBindTexture(GLenum target, GLuint texture) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   int face = 0;
-  const GLenum family = zgl::TextureFamily(target, &face);
+  const GLenum family = glanceasy::TextureFamily(target, &face);
   if (family == 0) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
   const int unit = static_cast<int>(context->state.active_texture) -
                    static_cast<int>(GL_TEXTURE0);
-  if (unit < 0 || unit >= zgl::kMaxCombinedTextureUnits) {
+  if (unit < 0 || unit >= glanceasy::kMaxCombinedTextureUnits) {
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
@@ -1519,7 +1519,7 @@ void glBindTexture(GLenum target, GLuint texture) {
     context->state.textures[unit] = 0;
     return;
   }
-  zgl::Texture* object = context->textures.Get(texture);
+  glanceasy::Texture* object = context->textures.Get(texture);
   if (object && object->delete_status) {
     context->textures.Delete(texture);
     object = context->textures.GetOrCreate(texture);
@@ -1542,23 +1542,23 @@ void glBindTexture(GLenum target, GLuint texture) {
 }
 
 void glTexParameteri(GLenum target, GLenum pname, GLint param) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
-  zgl::SetTextureParameter(texture, pname, param);
+  glanceasy::SetTextureParameter(texture, pname, param);
 }
 
 void glTexParameterf(GLenum target, GLenum pname, GLfloat param) {
   if (pname == GL_TEXTURE_MIN_LOD || pname == GL_TEXTURE_MAX_LOD) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (!context)
       return;
     int face = 0;
-    zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+    glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
     if (!texture)
       return;
     if (pname == GL_TEXTURE_MIN_LOD)
@@ -1576,12 +1576,12 @@ void glTexParameteriv(GLenum target, GLenum pname, const GLint* params) {
   if (!params)
     return;
   if (pname == GL_TEXTURE_SWIZZLE_RGBA) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (!context)
       return;
     int face = 0;
-    zgl::Texture* texture =
-        zgl::BindTargetTexture(context, target, &face);
+    glanceasy::Texture* texture =
+        glanceasy::BindTargetTexture(context, target, &face);
     if (!texture)
       return;
     texture->swizzle_r = static_cast<GLenum>(params[0]);
@@ -1600,11 +1600,11 @@ void glTexParameterfv(GLenum target, GLenum pname, const GLfloat* params) {
 }
 
 void glGetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   switch (pname) {
@@ -1684,11 +1684,11 @@ void glGetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
 void glGetTexParameterfv(GLenum target, GLenum pname, GLfloat* params) {
   if (!params)
     return;
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   if (pname == GL_TEXTURE_MIN_LOD) {
@@ -1705,7 +1705,7 @@ void glGetTexParameterfv(GLenum target, GLenum pname, GLfloat* params) {
 }
 
 bool SubImageFormatMatches(GLenum internal_format, GLenum format) {
-  if (zgl::IsIntegerInternalFormat(internal_format))
+  if (glanceasy::IsIntegerInternalFormat(internal_format))
     return format == GL_RGBA_INTEGER || format == GL_RGB_INTEGER ||
            format == GL_RG_INTEGER || format == GL_RED_INTEGER;
   switch (internal_format) {
@@ -1739,7 +1739,7 @@ void glTexImage2D(GLenum target,
                   GLenum format,
                   GLenum type,
                   const void* pixels) {
-  zgl::SetTextureImage(target, level, internal_format, width, height, 1, border,
+  glanceasy::SetTextureImage(target, level, internal_format, width, height, 1, border,
                        format, type, pixels);
 }
 
@@ -1754,12 +1754,12 @@ void glTexImage3D(GLenum target,
                   GLenum type,
                   const void* pixels) {
   if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (context)
       context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::SetTextureImage(target, level, internal_format, width, height, depth,
+  glanceasy::SetTextureImage(target, level, internal_format, width, height, depth,
                        border, format, type, pixels);
 }
 
@@ -1772,7 +1772,7 @@ void glTexSubImage2D(GLenum target,
                      GLenum format,
                      GLenum type,
                      const void* pixels) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   const bool is_cube_face =
@@ -1787,27 +1787,27 @@ void glTexSubImage2D(GLenum target,
     return;
   }
   const int max_extent =
-      is_cube_face ? zgl::kMaxCubeMapSize : zgl::kMaxTextureSize;
-  if (level >= zgl::MipLevelCount(max_extent, max_extent)) {
+      is_cube_face ? glanceasy::kMaxCubeMapSize : glanceasy::kMaxTextureSize;
+  if (level >= glanceasy::MipLevelCount(max_extent, max_extent)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!zgl::ValidFormatType(format, type)) {
-    if (zgl::IsKnownFormat(format) && zgl::IsKnownType(type))
+  if (!glanceasy::ValidFormatType(format, type)) {
+    if (glanceasy::IsKnownFormat(format) && glanceasy::IsKnownType(type))
       context->SetError(GL_INVALID_OPERATION);
     else
       context->SetError(GL_INVALID_ENUM);
     return;
   }
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   if (level >= texture->levels) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::TextureImage* image = texture->mutable_image(level, face);
+  glanceasy::TextureImage* image = texture->mutable_image(level, face);
   if (!image || image->width <= 0) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -1820,21 +1820,21 @@ void glTexSubImage2D(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (!zgl::ResolveUnpackPixels(context, pixels, width, height, 1, format, type,
+  if (!glanceasy::ResolveUnpackPixels(context, pixels, width, height, 1, format, type,
                                &pixels)) {
     return;
   }
   if (!pixels)
     return;
-  const zgl::PixelStoreState& store = context->state.pixel_store;
+  const glanceasy::PixelStoreState& store = context->state.pixel_store;
   if (!image->float_rgba.empty()) {
-    zgl::UploadFloatSlice(image, xoffset, yoffset, 0, width, height, format,
+    glanceasy::UploadFloatSlice(image, xoffset, yoffset, 0, width, height, format,
                           type, store.unpack_row_length,
                           store.unpack_skip_rows, store.unpack_skip_pixels,
                           pixels, store.unpack_alignment);
     return;
   }
-  zgl::UploadSlice(image, xoffset, yoffset, 0, width, height, format, type,
+  glanceasy::UploadSlice(image, xoffset, yoffset, 0, width, height, format, type,
                    store.unpack_row_length, store.unpack_skip_rows,
                    store.unpack_skip_pixels, pixels,
                    store.unpack_alignment);
@@ -1851,7 +1851,7 @@ void glTexSubImage3D(GLenum target,
                      GLenum format,
                      GLenum type,
                      const void* pixels) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY) {
@@ -1863,28 +1863,28 @@ void glTexSubImage3D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  const int max_extent = target == GL_TEXTURE_3D ? zgl::kMax3DTextureSize
-                                                 : zgl::kMaxTextureSize;
-  if (level >= zgl::MipLevelCount(max_extent, max_extent)) {
+  const int max_extent = target == GL_TEXTURE_3D ? glanceasy::kMax3DTextureSize
+                                                 : glanceasy::kMaxTextureSize;
+  if (level >= glanceasy::MipLevelCount(max_extent, max_extent)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!zgl::ValidFormatType(format, type)) {
-    if (zgl::IsKnownFormat(format) && zgl::IsKnownType(type))
+  if (!glanceasy::ValidFormatType(format, type)) {
+    if (glanceasy::IsKnownFormat(format) && glanceasy::IsKnownType(type))
       context->SetError(GL_INVALID_OPERATION);
     else
       context->SetError(GL_INVALID_ENUM);
     return;
   }
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   if (level >= texture->levels) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::TextureImage* image = texture->mutable_image(level, 0);
+  glanceasy::TextureImage* image = texture->mutable_image(level, 0);
   if (!image || image->depth <= 0) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -1898,19 +1898,19 @@ void glTexSubImage3D(GLenum target,
     context->SetError(GL_INVALID_OPERATION);
     return;
   }
-  if (!zgl::ResolveUnpackPixels(context, pixels, width, height, depth, format,
+  if (!glanceasy::ResolveUnpackPixels(context, pixels, width, height, depth, format,
                                 type, &pixels)) {
     return;
   }
   if (!pixels)
     return;
-  const zgl::PixelStoreState& store = context->state.pixel_store;
+  const glanceasy::PixelStoreState& store = context->state.pixel_store;
   const size_t stride =
-      zgl::UnpackImageStride(store, width, height, format, type);
+      glanceasy::UnpackImageStride(store, width, height, format, type);
   // One depth slice at a time; UploadSlice dispatches to integer, float or
   // normalized storage that matches the image internal format.
   for (int z = 0; z < depth; ++z) {
-    zgl::UploadSlice(image, xoffset, yoffset, z + zoffset, width, height,
+    glanceasy::UploadSlice(image, xoffset, yoffset, z + zoffset, width, height,
                      format, type, store.unpack_row_length,
                      store.unpack_skip_rows, store.unpack_skip_pixels,
                      static_cast<const uint8_t*>(pixels) +
@@ -1930,12 +1930,12 @@ void glTexStorage2D(GLenum target,
   // glTexStorage2D covers 2D textures and cube maps; cube faces share the
   // same level chain, so the generic storage path handles both.
   int face = 0;
-  if (zgl::TextureFamily(target, &face) == GL_TEXTURE_2D ||
+  if (glanceasy::TextureFamily(target, &face) == GL_TEXTURE_2D ||
       target == GL_TEXTURE_CUBE_MAP) {
-    zgl::SetTextureStorage(target, levels, internal_format, width, height, 1);
+    glanceasy::SetTextureStorage(target, levels, internal_format, width, height, 1);
     return;
   }
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (context)
     context->SetError(GL_INVALID_ENUM);
 }
@@ -1947,12 +1947,12 @@ void glTexStorage3D(GLenum target,
                     GLsizei height,
                     GLsizei depth) {
   if (target != GL_TEXTURE_3D && target != GL_TEXTURE_2D_ARRAY) {
-    zgl::Context* context = zgl::ApiContext();
+    glanceasy::Context* context = glanceasy::ApiContext();
     if (context)
       context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::SetTextureStorage(target, levels, internal_format, width, height, depth);
+  glanceasy::SetTextureStorage(target, levels, internal_format, width, height, depth);
 }
 
 void glCompressedTexImage2D(GLenum target,
@@ -1963,7 +1963,7 @@ void glCompressedTexImage2D(GLenum target,
                             GLint border,
                             GLsizei image_size,
                             const void* data) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   const bool is_cube_face =
@@ -1979,7 +1979,7 @@ void glCompressedTexImage2D(GLenum target,
     return;
   }
   const int max_extent =
-      is_cube_face ? zgl::kMaxCubeMapSize : zgl::kMaxTextureSize;
+      is_cube_face ? glanceasy::kMaxCubeMapSize : glanceasy::kMaxTextureSize;
   if (width > max_extent || height > max_extent) {
     context->SetError(GL_INVALID_VALUE);
     return;
@@ -1988,17 +1988,17 @@ void glCompressedTexImage2D(GLenum target,
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!zgl::IsCompressedFormat(internal_format)) {
+  if (!glanceasy::IsCompressedFormat(internal_format)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  if (level >= zgl::MipLevelCount(max_extent, max_extent)) {
+  if (level >= glanceasy::MipLevelCount(max_extent, max_extent)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
   const int expected = ((width + 3) / 4) * ((height + 3) / 4) *
-                       zgl::CompressedBlockBytes(internal_format);
-  if (!zgl::ResolveUnpackBufferBytes(context, data,
+                       glanceasy::CompressedBlockBytes(internal_format);
+  if (!glanceasy::ResolveUnpackBufferBytes(context, data,
                                      static_cast<size_t>(image_size), &data)) {
     return;
   }
@@ -2007,7 +2007,7 @@ void glCompressedTexImage2D(GLenum target,
     return;
   }
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   if (texture->immutable) {
@@ -2024,7 +2024,7 @@ void glCompressedTexImage2D(GLenum target,
   }
   const int levels = std::max(texture->levels, level + 1);
   texture->Resize(levels, texture->faces());
-  zgl::TextureImage* image = texture->mutable_image(level, face);
+  glanceasy::TextureImage* image = texture->mutable_image(level, face);
   if (!image)
     return;
   image->width = width;
@@ -2032,7 +2032,7 @@ void glCompressedTexImage2D(GLenum target,
   image->depth = 1;
   if (!data)
     return;
-  if (!zgl::DecodeCompressedImage(internal_format, width, height, image_size,
+  if (!glanceasy::DecodeCompressedImage(internal_format, width, height, image_size,
                                   data, image)) {
     context->SetError(GL_INVALID_VALUE);
   }
@@ -2047,7 +2047,7 @@ void glCompressedTexSubImage2D(GLenum target,
                                GLenum format,
                                GLsizei image_size,
                                const void* data) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   const bool is_cube_face =
@@ -2063,14 +2063,14 @@ void glCompressedTexSubImage2D(GLenum target,
     return;
   }
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   if (level >= texture->levels) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::TextureImage* image = texture->mutable_image(level, face);
+  glanceasy::TextureImage* image = texture->mutable_image(level, face);
   if (!image || image->width <= 0) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -2084,8 +2084,8 @@ void glCompressedTexSubImage2D(GLenum target,
     return;
   }
   const int expected = ((width + 3) / 4) * ((height + 3) / 4) *
-                       zgl::CompressedBlockBytes(format);
-  if (!zgl::ResolveUnpackBufferBytes(context, data,
+                       glanceasy::CompressedBlockBytes(format);
+  if (!glanceasy::ResolveUnpackBufferBytes(context, data,
                                      static_cast<size_t>(image_size), &data)) {
     return;
   }
@@ -2100,8 +2100,8 @@ void glCompressedTexSubImage2D(GLenum target,
   }
   if (width == 0 || height == 0)
     return;
-  zgl::TextureImage decoded;
-  if (!zgl::DecodeCompressedImage(format, width, height, image_size, data,
+  glanceasy::TextureImage decoded;
+  if (!glanceasy::DecodeCompressedImage(format, width, height, image_size, data,
                                   &decoded)) {
     context->SetError(GL_INVALID_VALUE);
     return;
@@ -2124,22 +2124,22 @@ void glCopyTexImage2D(GLenum target,
                       GLsizei width,
                       GLsizei height,
                       GLint border) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   if (level < 0 || width < 0 || height < 0 || border != 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  if (!zgl::ValidInternalFormat(internal_format)) {
+  if (!glanceasy::ValidInternalFormat(internal_format)) {
     context->SetError(GL_INVALID_ENUM);
     return;
   }
-  zgl::RenderTarget source = context->GetReadTarget();
+  glanceasy::RenderTarget source = context->GetReadTarget();
   if (!source.valid()) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
@@ -2161,7 +2161,7 @@ void glCopyTexImage2D(GLenum target,
   }
   std::vector<uint8_t> pixels(static_cast<size_t>(width) * height *
                               copy_components);
-  const uint32_t transparent = zgl::PackRgba(0, 0, 0, 0);
+  const uint32_t transparent = glanceasy::PackRgba(0, 0, 0, 0);
   for (int row = 0; row < height; ++row) {
     const int source_y = y + row;
     for (int column = 0; column < width; ++column) {
@@ -2198,7 +2198,7 @@ void glCopyTexImage2D(GLenum target,
       }
     }
   }
-  zgl::SetTextureImage(target, level, internal_format, width, height, 1, border,
+  glanceasy::SetTextureImage(target, level, internal_format, width, height, 1, border,
                        copy_format, GL_UNSIGNED_BYTE, pixels.data());
 }
 
@@ -2210,29 +2210,29 @@ void glCopyTexSubImage2D(GLenum target,
                          GLint y,
                          GLsizei width,
                          GLsizei height) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   if (level < 0 || xoffset < 0 || yoffset < 0 || width < 0 || height < 0) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::RenderTarget source = context->GetReadTarget();
+  glanceasy::RenderTarget source = context->GetReadTarget();
   if (!source.valid()) {
     context->SetError(GL_INVALID_FRAMEBUFFER_OPERATION);
     return;
   }
-  zgl::TextureImage* image = texture->mutable_image(level, face);
+  glanceasy::TextureImage* image = texture->mutable_image(level, face);
   if (!image || xoffset + width > image->width ||
       yoffset + height > image->height) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  zgl::CopyFramebufferPixels(context, x, y, width, height, image->rgba.data(),
+  glanceasy::CopyFramebufferPixels(context, x, y, width, height, image->rgba.data(),
                              image->width, xoffset, yoffset, image->height);
   if (texture->internal_format == GL_LUMINANCE ||
       texture->internal_format == GL_LUMINANCE_ALPHA) {
@@ -2250,7 +2250,7 @@ void glCopyTexSubImage2D(GLenum target,
         const uint32_t texel = image->rgba[index];
         const uint8_t alpha = static_cast<uint8_t>(texel >> 24);
         image->rgba[index] =
-            zgl::PackRgba(static_cast<uint8_t>(texel & 0xff),
+            glanceasy::PackRgba(static_cast<uint8_t>(texel & 0xff),
                           static_cast<uint8_t>(texel & 0xff),
                           static_cast<uint8_t>(texel & 0xff), alpha);
       }
@@ -2259,11 +2259,11 @@ void glCopyTexSubImage2D(GLenum target,
 }
 
 void glGenerateMipmap(GLenum target) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   if (texture->width <= 0 || texture->height <= 0) {
@@ -2272,7 +2272,7 @@ void glGenerateMipmap(GLenum target) {
   }
   if (texture->target == GL_TEXTURE_CUBE_MAP) {
     for (int face_index = 0; face_index < texture->faces(); ++face_index) {
-      const zgl::TextureImage* image = texture->image(0, face_index);
+      const glanceasy::TextureImage* image = texture->image(0, face_index);
       if (!image || image->width <= 0 || image->height <= 0 ||
           image->width != texture->width || image->height != texture->height) {
         context->SetError(GL_INVALID_OPERATION);
@@ -2280,34 +2280,34 @@ void glGenerateMipmap(GLenum target) {
       }
     }
   }
-  const int levels = zgl::MipLevelCount(texture->width, texture->height);
+  const int levels = glanceasy::MipLevelCount(texture->width, texture->height);
   if (!texture->immutable) {
     texture->Resize(levels, texture->faces());
     int width = texture->width;
     int height = texture->height;
     for (int level = 0; level < levels; ++level) {
       for (int face_index = 0; face_index < texture->faces(); ++face_index) {
-        zgl::TextureImage* image = texture->mutable_image(level, face_index);
+        glanceasy::TextureImage* image = texture->mutable_image(level, face_index);
         if (image->width <= 0) {
           image->width = width;
           image->height = height;
           image->depth = 1;
           image->rgba.assign(static_cast<size_t>(width) * height,
-                             zgl::PackRgba(0, 0, 0, 0));
+                             glanceasy::PackRgba(0, 0, 0, 0));
         }
       }
       width = std::max(1, width / 2);
       height = std::max(1, height / 2);
     }
   }
-  zgl::GenerateMipmap(texture);
+  glanceasy::GenerateMipmap(texture);
 }
 
 void glBindSampler(GLuint unit, GLuint sampler) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  if (unit >= static_cast<GLuint>(zgl::kMaxCombinedTextureUnits)) {
+  if (unit >= static_cast<GLuint>(glanceasy::kMaxCombinedTextureUnits)) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
@@ -2319,7 +2319,7 @@ void glBindSampler(GLuint unit, GLuint sampler) {
 }
 
 void glGenSamplers(GLsizei n, GLuint* samplers) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -2331,7 +2331,7 @@ void glGenSamplers(GLsizei n, GLuint* samplers) {
 }
 
 void glDeleteSamplers(GLsizei n, const GLuint* samplers) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
   if (n < 0) {
@@ -2342,7 +2342,7 @@ void glDeleteSamplers(GLsizei n, const GLuint* samplers) {
     return;
   for (GLsizei i = 0; i < n; ++i) {
     context->samplers.Delete(samplers[i]);
-    for (int unit = 0; unit < zgl::kMaxCombinedTextureUnits; ++unit) {
+    for (int unit = 0; unit < glanceasy::kMaxCombinedTextureUnits; ++unit) {
       if (context->state.samplers[unit] == samplers[i])
         context->state.samplers[unit] = 0;
     }
@@ -2350,17 +2350,17 @@ void glDeleteSamplers(GLsizei n, const GLuint* samplers) {
 }
 
 GLboolean glIsSampler(GLuint sampler) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || sampler == 0)
     return GL_FALSE;
   return context->samplers.Get(sampler) ? GL_TRUE : GL_FALSE;
 }
 
 void glSamplerParameteri(GLuint sampler, GLenum pname, GLint param) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::Sampler* object = context->samplers.Get(sampler);
+  glanceasy::Sampler* object = context->samplers.Get(sampler);
   if (!object) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -2431,10 +2431,10 @@ void glSamplerParameteri(GLuint sampler, GLenum pname, GLint param) {
 }
 
 void glSamplerParameterf(GLuint sampler, GLenum pname, GLfloat param) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::Sampler* object = context->samplers.Get(sampler);
+  glanceasy::Sampler* object = context->samplers.Get(sampler);
   if (!object) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -2464,8 +2464,8 @@ void glSamplerParameteriv(GLuint sampler, GLenum pname, const GLint* params) {
   if (!params)
     return;
   if (pname == GL_TEXTURE_SWIZZLE_RGBA) {
-    zgl::Context* context = zgl::ApiContext();
-    zgl::Sampler* object = context ? context->samplers.Get(sampler) : nullptr;
+    glanceasy::Context* context = glanceasy::ApiContext();
+    glanceasy::Sampler* object = context ? context->samplers.Get(sampler) : nullptr;
     if (!object) {
       if (context)
         context->SetError(GL_INVALID_OPERATION);
@@ -2588,18 +2588,18 @@ void glGetTexLevelParameteriv(GLenum target,
                               GLint level,
                               GLenum pname,
                               GLint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
   int face = 0;
-  zgl::Texture* texture = zgl::BindTargetTexture(context, target, &face);
+  glanceasy::Texture* texture = glanceasy::BindTargetTexture(context, target, &face);
   if (!texture)
     return;
   if (level < 0 || level >= texture->levels) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  const zgl::TextureImage* image = texture->image(level, face);
+  const glanceasy::TextureImage* image = texture->image(level, face);
   if (!image) {
     context->SetError(GL_INVALID_VALUE);
     return;
@@ -2641,7 +2641,7 @@ void glGetTexLevelParameteriv(GLenum target,
       params[0] = stencil_bits;
       return;
     case GL_TEXTURE_COMPRESSED:
-      params[0] = zgl::IsCompressedFormat(texture->internal_format) ? 1 : 0;
+      params[0] = glanceasy::IsCompressedFormat(texture->internal_format) ? 1 : 0;
       return;
     case GL_TEXTURE_SAMPLES:
       params[0] = image->samples > 1 ? image->samples : 0;
@@ -2661,15 +2661,15 @@ void glTexStorage2DMultisample(GLenum target,
                                GLsizei width,
                                GLsizei height,
                                GLboolean fixed_sample_locations) {
-  zgl::SetMultisampleTextureStorage(target, samples, internal_format, width,
+  glanceasy::SetMultisampleTextureStorage(target, samples, internal_format, width,
                                    height, fixed_sample_locations);
 }
 
 void glGetSamplerParameteriv(GLuint sampler, GLenum pname, GLint* params) {
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context || !params)
     return;
-  zgl::Sampler* object = context->samplers.Get(sampler);
+  glanceasy::Sampler* object = context->samplers.Get(sampler);
   if (!object) {
     context->SetError(GL_INVALID_OPERATION);
     return;
@@ -2715,10 +2715,10 @@ void glGetSamplerParameteriv(GLuint sampler, GLenum pname, GLint* params) {
 void glGetSamplerParameterfv(GLuint sampler, GLenum pname, GLfloat* params) {
   if (!params)
     return;
-  zgl::Context* context = zgl::ApiContext();
+  glanceasy::Context* context = glanceasy::ApiContext();
   if (!context)
     return;
-  zgl::Sampler* object = context->samplers.Get(sampler);
+  glanceasy::Sampler* object = context->samplers.Get(sampler);
   if (!object) {
     context->SetError(GL_INVALID_OPERATION);
     return;

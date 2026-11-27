@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 
 #include "src/glsl/glsl_jit.h"
 
-namespace zgl {
+namespace glanceasy {
 namespace glsl {
 
 bool EvaluateGlobalInitializers(ShaderAst* ast,
@@ -530,7 +530,7 @@ bool Program::Link(
           field.location = static_cast<int>(uniforms_.size() +
                                             uniform_fields_.size());
           uniform_fields_.push_back(field);
-          if (getenv("ZGL_DEBUG_UNIFLOC"))
+          if (getenv("GLANCEASY_DEBUG_UNIFLOC"))
             fprintf(stderr, "[field] '%s' type=%s loc=%d\n",
                     field.name.c_str(), element.Name().c_str(),
                     field.location);
@@ -549,7 +549,7 @@ bool Program::Link(
         field.location = static_cast<int>(uniforms_.size() +
                                           uniform_fields_.size());
         uniform_fields_.push_back(field);
-        if (getenv("ZGL_DEBUG_UNIFLOC"))
+        if (getenv("GLANCEASY_DEBUG_UNIFLOC"))
           fprintf(stderr, "[field] '%s' type=%s loc=%d\n", field_name.c_str(),
                   member.type.Name().c_str(), field.location);
         add_struct_fields(field_name, member.type, parent,
@@ -711,7 +711,7 @@ bool Program::Link(
   uses_point_size_ = vertex->uses_point_size;
   linked_ = true;
 
-#if defined(ZGL_ENABLE_JIT)
+#if defined(GLANCEASY_ENABLE_JIT)
   // The JIT is an optimisation, not part of link validation.  A construct the
   // native backend cannot lower only means that stage keeps the evaluator.
   bool has_integer_io = false;
@@ -751,7 +751,7 @@ bool Program::Link(
   if (!has_output_array && !has_integer_io) {
     std::string jit_reason;
     fragment_jit_ = ShaderJit::Compile(*fragment, &jit_reason);
-    if (!fragment_jit_ && getenv("ZGL_DEBUG_JIT"))
+    if (!fragment_jit_ && getenv("GLANCEASY_DEBUG_JIT"))
       fprintf(stderr, "[jit] fragment fallback: %s\n", jit_reason.c_str());
   }
 #endif
@@ -872,7 +872,7 @@ int Program::UniformLocation(const std::string& name) const {
           }
         }
       }
-      if (getenv("ZGL_DEBUG_UNIFLOC"))
+      if (getenv("GLANCEASY_DEBUG_UNIFLOC"))
         fprintf(stderr, "[unifloc] '%s' -> %d (parent=%d off=%d)\n",
                 name.c_str(), field.location, field.parent,
                 field.component_offset);
@@ -911,7 +911,7 @@ int Program::UniformLocation(const std::string& name) const {
       }
     }
   }
-  if (getenv("ZGL_DEBUG_UNIFLOC")) {
+  if (getenv("GLANCEASY_DEBUG_UNIFLOC")) {
     fprintf(stderr, "[unifloc] lookup '%s' failed; fields=%zu\n", name.c_str(),
             uniform_fields_.size());
     for (const UniformFieldInfo& field : uniform_fields_)
@@ -1082,14 +1082,14 @@ void Program::UploadUniformBlock(int block_index,
     if (!value)
       continue;
     read_member(member.offset, member.type, value, 0, member.matrix_layout);
-    if (getenv("ZGL_DEBUG_UBO") && block.name == "BlockE") {
+    if (getenv("GLANCEASY_DEBUG_UBO") && block.name == "BlockE") {
       fprintf(stderr, "RAW");
       for (int q = 80; q < 352 && q + 4 <= static_cast<int>(byte_count);
            q += 4)
         fprintf(stderr, " %.0f", *reinterpret_cast<const float*>(bytes + q));
       fprintf(stderr, "\n");
     }
-    if (getenv("ZGL_DEBUG_UBO")) {
+    if (getenv("GLANCEASY_DEBUG_UBO")) {
       fprintf(stderr, "UBO %s packed=%d row=%d off=%d %s:", block.name.c_str(),
               block.packed ? 1 : 0, member.matrix_layout, member.offset,
               member.name.c_str());
@@ -1101,4 +1101,4 @@ void Program::UploadUniformBlock(int block_index,
 }
 
 }  // namespace glsl
-}  // namespace zgl
+}  // namespace glanceasy

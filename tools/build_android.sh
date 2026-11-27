@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+# Copyright 2026 The Glanceasy Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-build_dir="${1:-/home/lrj/build/zcat-gles-arm}"
+build_dir="${1:-/home/lrj/build/glanceasy-arm}"
 ndk="${ANDROID_NDK_ROOT:-$HOME/android-ndk-r27c}"
 
 if [[ ! -d "$ndk" ]]; then
@@ -30,14 +30,14 @@ cmake -S "$repo_root" -B "$build_dir" -G Ninja \
   -DANDROID_PLATFORM=android-21 \
   -DANDROID_STL=c++_static \
   -DCMAKE_BUILD_TYPE=Release \
-  -DZGL_BUILD_TESTS=ON \
+  -DGLANCEASY_BUILD_TESTS=ON \
   -DCMAKE_C_FLAGS="-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=softfp" \
   -DCMAKE_CXX_FLAGS="-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=softfp" \
   -DCMAKE_EXE_LINKER_FLAGS="-static"
 
 cmake --build "$build_dir"
 
-for binary in "$build_dir/zgl_unittests" "$build_dir/libzcat_gles.a"; do
+for binary in "$build_dir/glanceasy_unittests" "$build_dir/libglanceasy.a"; do
   if [[ -f "$binary" ]]; then
     file "$binary"
   fi

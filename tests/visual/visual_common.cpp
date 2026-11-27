@@ -1,10 +1,10 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "tests/visual/visual_common.h"
 
-namespace zglvis {
+namespace glanceasyvis {
 namespace {
 
 GLuint CompileShader(GLenum type, const char* source, const char* stage) {
@@ -118,4 +118,4 @@ void DrawFullscreenTriangle() {
   glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
-}  // namespace zglvis
+}  // namespace glanceasyvis

@@ -1,4 +1,4 @@
-// Copyright 2026 The ZCat-GLES Authors. All rights reserved.
+// Copyright 2026 The Glanceasy Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -6,7 +6,7 @@
 // to a binary PPM file. The demo is deliberately dependency free so the same
 // source can run on the host, under qemu-arm-static, or on an RV1106 board.
 //
-// Usage: zgl_cube_demo [output.ppm] [width] [height]
+// Usage: glanceasy_cube_demo [output.ppm] [width] [height]
 
 #include <math.h>
 #include <stdio.h>
@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "GLES3/gl32.h"
-#include "zgl/zgl.h"
+#include "glanceasy/glanceasy.h"
 
 namespace {
 
@@ -191,15 +191,15 @@ bool WritePpm(const char* path, int width, int height) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  const char* output = argc > 1 ? argv[1] : "zgl_cube.ppm";
+  const char* output = argc > 1 ? argv[1] : "glanceasy_cube.ppm";
   const int width = argc > 2 ? atoi(argv[2]) : kDefaultWidth;
   const int height = argc > 3 ? atoi(argv[3]) : kDefaultHeight;
   if (width <= 0 || height <= 0) {
     fprintf(stderr, "invalid size %dx%d\n", width, height);
     return 1;
   }
-  if (zglCreateContext(width, height) != 1) {
-    fprintf(stderr, "cannot create the zgl context\n");
+  if (glanceasyCreateContext(width, height) != 1) {
+    fprintf(stderr, "cannot create the glanceasy context\n");
     return 1;
   }
 
@@ -295,7 +295,7 @@ int main(int argc, char** argv) {
   const bool written = WritePpm(output, width, height);
   glDeleteProgram(cube);
   glDeleteProgram(background);
-  zglDestroyContext();
+  glanceasyDestroyContext();
   if (!written)
     return 1;
   printf("wrote %s (%dx%d)\n", output, width, height);
