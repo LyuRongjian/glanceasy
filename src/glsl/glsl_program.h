@@ -5,6 +5,7 @@
 #ifndef GLANCEASY_SRC_GLSL_GLSL_PROGRAM_H_
 #define GLANCEASY_SRC_GLSL_GLSL_PROGRAM_H_
 
+#include "src/glanceasy_common.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -137,6 +138,23 @@ class TextureSampler {
                                 float lod_bias,
                                 float out[4]) = 0;
   virtual void Size(int unit, int out[3]) = 0;
+  // Returns true when an implicit-LOD texture lookup on |unit| can select a
+  // mip level.  Backends with one level (or a non-mipmap min filter) can skip
+  // derivative projection and log2 work entirely.
+  virtual bool Sample2DRgba8Fast(int unit,
+                                 float u,
+                                 float v,
+                                 float out[4]) {
+    (void)unit;
+    (void)u;
+    (void)v;
+    (void)out;
+    return false;
+  }
+  virtual bool NeedsImplicitLod(int unit) {
+    (void)unit;
+    return true;
+  }
   // Active minification filter (sampler object overrides texture state).
   virtual uint32_t MinFilter(int unit) {
     (void)unit;
@@ -259,8 +277,64 @@ class Program {
   int VaryingFloats() const { return varying_floats_; }
 
   bool uses_frag_depth() const { return uses_frag_depth_; }
+
+  // Fast path for the common `gl_FragColor = texture2D(s, v)` fragment
+  // shader.  Returns the resolved sampler uniform slot (-1 for a literal
+  // sampler unit), the varying offset and the output location.
+  bool simple_texture_sample(int* uniform_slot,
+                             int* literal_unit,
+                             int* varying_offset,
+                             int* output_location) const {
+    if (!simple_texture_)
+      return false;
+    if (uniform_slot)
+      *uniform_slot = simple_texture_uniform_slot_;
+    if (literal_unit)
+      *literal_unit = simple_texture_literal_unit_;
+    if (varying_offset)
+      *varying_offset = simple_texture_varying_offset_;
+    if (output_location)
+      *output_location = simple_texture_output_location_;
+    return true;
+  }
+  bool uses_varying_derivatives() const {
+    return fragment_ &&
+           (fragment_->uses_derivatives || fragment_->uses_implicit_lod);
+  }
+
+  // Fast path for the generated separable blur:
+  //   result = sum(texture2D(s, v + vec2(dx*step_x, dy*step_y)) * weight);
+  // The pipeline samples the taps itself instead of entering the JIT per tap.
+  struct SimpleConvolution {
+    bool valid = false;
+    int uniform_slot = -1;
+    int literal_unit = 0;
+    int varying_offset = -1;
+    int output_location = 0;
+    float step_x = 0.0f;
+    float step_y = 0.0f;
+    float scale = 1.0f;
+    bool rgb_output = true;
+    std::vector<glsl::ConvolutionTap> taps;
+  };
+  const SimpleConvolution& simple_convolution() const {
+    return simple_convolution_;
+  }
   bool uses_discard() const { return uses_discard_; }
   bool uses_point_size() const { return uses_point_size_; }
+
+  // A vertex shader whose gl_Position is exactly
+  //   gl_Position = uniform mat4 * vec4(attribute vec3, 1.0)
+  // can cheaply transform positions before running the full vertex stage.
+  // This is used for conservative pre-culling of invisible/sub-pixel
+  // triangles; it is never used to replace the shader result.
+  struct SimplePosition {
+    bool valid = false;
+    int uniform_slot = -1;
+    int attribute_location = -1;
+    int attribute_components = 0;
+  };
+  const SimplePosition& simple_position() const { return simple_position_; }
 
   // True when at least one stage was compiled to native code at link time.
   // The counterpart, whether a particular draw took the JIT path, is exposed
@@ -316,6 +390,22 @@ class Program {
   std::vector<Value> uniform_values_;
   std::vector<int> vertex_uniform_map_;
   std::vector<int> fragment_uniform_map_;
+  // Number of array elements each fragment global needs when it carries a
+  // fragment output.  Computed once at link time; RunFragment must not
+  // allocate a fresh vector for every fragment.
+  std::vector<int> fragment_output_element_counts_;
+  // User (non-built-in) fragment globals are per-invocation state and need
+  // restoring between fragments.  Built-in inputs are filled by
+  // PrepareBuiltins and outputs are written by the shader, so copying all
+  // globals on every fragment is pure overhead.
+  std::vector<int> fragment_reset_slots_;
+  SimplePosition simple_position_;
+  SimpleConvolution simple_convolution_;
+  bool simple_texture_ = false;
+  int simple_texture_uniform_slot_ = -1;
+  int simple_texture_literal_unit_ = 0;
+  int simple_texture_varying_offset_ = 0;
+  int simple_texture_output_location_ = 0;
   int varying_floats_ = 0;
 
   // Per-stage global variables, including built-ins.

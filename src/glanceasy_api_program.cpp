@@ -7,6 +7,8 @@
 #include <string.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -19,6 +21,309 @@
 namespace glanceasy {
 
 const GLint kUniformElementBase = 0x10000000;
+
+bool ParseLeadingFloat(const std::string& text, float* value) {
+  size_t begin = text.find_first_not_of(" \t");
+  if (begin == std::string::npos)
+    return false;
+  char* end = nullptr;
+  const float parsed = std::strtof(text.c_str() + begin, &end);
+  if (end == text.c_str() + begin)
+    return false;
+  *value = parsed;
+  return true;
+}
+
+// Recognises the generated form used by separable Gaussian blurs:
+//
+//   result = texture2D(s, v + vec2(dx * TextureStepX, dy * TextureStepY))
+//            * KernelA * KernelB + ... + 0.0;
+//
+// Keeping only the taps inside |dx|,|dy| <= radius and rescaling the
+// surviving weights produces a cheap, visually close approximation.  This is
+// intentionally gated by GLANCEASY_APPROX_BLUR and never changes exact
+// rendering by default.
+std::string ApproximateConvolutionSource(const std::string& source) {
+  const char* option = std::getenv("GLANCEASY_APPROX_BLUR");
+  if (!option)
+    return source;
+  const int radius = std::atoi(option);
+  if (radius < 0)
+    return source;
+  if (source.find("TextureStepX") == std::string::npos &&
+      source.find("TextureStepY") == std::string::npos)
+    return source;
+
+  std::vector<std::pair<std::string, float>> kernels;
+  for (size_t pos = 0; (pos = source.find("const float Kernel", pos)) !=
+                       std::string::npos;) {
+    const size_t name_end = source.find('=', pos);
+    if (name_end == std::string::npos)
+      break;
+    std::string name = source.substr(pos + 12, name_end - pos - 12);
+    name.erase(std::remove_if(name.begin(), name.end(), ::isspace), name.end());
+    const size_t value_end = source.find(';', name_end);
+    if (value_end == std::string::npos)
+      break;
+    float value = 0.0f;
+    if (ParseLeadingFloat(source.substr(name_end + 1, value_end - name_end - 1),
+                          &value))
+      kernels.emplace_back(name, value);
+    pos = value_end + 1;
+  }
+  if (kernels.empty())
+    return source;
+
+  const auto kernel_value = [&](const std::string& name) {
+    for (const auto& entry : kernels)
+      if (entry.first == name)
+        return entry.second;
+    return 1.0f;
+  };
+
+  const size_t assign = source.find("result =");
+  if (assign == std::string::npos)
+    return source;
+  const size_t semicolon = source.find(';', assign);
+  if (semicolon == std::string::npos)
+    return source;
+  const std::string expression =
+      source.substr(assign, semicolon - assign);
+
+  struct Term {
+    std::string line;
+    float dx = 0.0f;
+    float dy = 0.0f;
+    float weight = 1.0f;
+  };
+  std::vector<Term> terms;
+  float total_weight = 0.0f;
+  size_t cursor = 0;
+  while (cursor < expression.size()) {
+    const size_t newline = expression.find('\n', cursor);
+    const std::string line = expression.substr(
+        cursor, newline == std::string::npos ? std::string::npos
+                                             : newline - cursor);
+    cursor = newline == std::string::npos ? expression.size() : newline + 1;
+    const size_t texture = line.find("texture2D(");
+    const size_t vec = line.find("vec2(", texture == std::string::npos
+                                                 ? 0
+                                                 : texture);
+    if (texture == std::string::npos || vec == std::string::npos)
+      continue;
+    const size_t vec_end = line.find(')', vec);
+    if (vec_end == std::string::npos)
+      continue;
+    const std::string components = line.substr(vec + 5, vec_end - vec - 5);
+    const size_t comma = components.find(',');
+    if (comma == std::string::npos)
+      continue;
+    float dx = 0.0f;
+    float dy = 0.0f;
+    ParseLeadingFloat(components.substr(0, comma), &dx);
+    ParseLeadingFloat(components.substr(comma + 1), &dy);
+    if (components.substr(0, comma).find("TextureStepY") != std::string::npos)
+      std::swap(dx, dy);
+    if (components.substr(comma + 1).find("TextureStepX") != std::string::npos)
+      std::swap(dx, dy);
+    float weight = 1.0f;
+    for (size_t k = line.find("Kernel"); k != std::string::npos;
+         k = line.find("Kernel", k + 1)) {
+      size_t end = k + 6;
+      while (end < line.size() && std::isdigit(static_cast<unsigned char>(line[end])))
+        ++end;
+      weight *= kernel_value(line.substr(k, end - k));
+    }
+    total_weight += weight;
+    terms.push_back({line, dx, dy, weight});
+  }
+  if (terms.empty() || total_weight == 0.0f)
+    return source;
+
+  float kept_weight = 0.0f;
+  std::string rebuilt = "result = \n";
+  for (const Term& term : terms) {
+    if (std::fabs(term.dx) <= static_cast<float>(radius) &&
+        std::fabs(term.dy) <= static_cast<float>(radius)) {
+      rebuilt += term.line;
+      rebuilt += '\n';
+      kept_weight += term.weight;
+    }
+  }
+  if (kept_weight <= 0.0f)
+    return source;
+  char scale[32];
+  std::snprintf(scale, sizeof(scale), "%.9g", total_weight / kept_weight);
+  rebuilt += "0.0 ;\n";
+  rebuilt += "result = result * " + std::string(scale) + ";\n";
+  return source.substr(0, assign) + rebuilt +
+         source.substr(semicolon + 1);
+}
+
+// Fills |info| when |source| is exactly the generated convolution shape that
+// ApproximateConvolutionSource understands.  This runs after any optional
+// approximation rewrite, so the tap list always matches the shader that is
+// actually compiled.
+bool ParseConvolutionSource(const std::string& source,
+                            glanceasy::glsl::ConvolutionInfo* info) {
+  if (source.find("TextureStepX") == std::string::npos &&
+      source.find("TextureStepY") == std::string::npos)
+    return false;
+
+  std::vector<std::pair<std::string, float>> kernels;
+  for (size_t pos = 0; (pos = source.find("const float Kernel", pos)) !=
+                       std::string::npos;) {
+    const size_t name_end = source.find('=', pos);
+    if (name_end == std::string::npos)
+      break;
+    std::string name = source.substr(pos + 12, name_end - pos - 12);
+    name.erase(std::remove_if(name.begin(), name.end(), ::isspace), name.end());
+    const size_t value_end = source.find(';', name_end);
+    if (value_end == std::string::npos)
+      break;
+    float value = 0.0f;
+    if (ParseLeadingFloat(source.substr(name_end + 1, value_end - name_end - 1),
+                          &value))
+      kernels.emplace_back(name, value);
+    pos = value_end + 1;
+  }
+
+  const auto kernel_value = [&](const std::string& name) {
+    for (const auto& entry : kernels)
+      if (entry.first == name)
+        return entry.second;
+    return 1.0f;
+  };
+  const auto trim = [](std::string text) {
+    const size_t begin = text.find_first_not_of(" \t\r\n");
+    if (begin == std::string::npos)
+      return std::string();
+    const size_t end = text.find_last_not_of(" \t\r\n");
+    return text.substr(begin, end - begin + 1);
+  };
+  const auto parse_step = [&](const char* name, float* value) {
+    const std::string marker = std::string("const float ") + name;
+    const size_t pos = source.find(marker);
+    if (pos == std::string::npos)
+      return false;
+    const size_t equals = source.find('=', pos + marker.size());
+    if (equals == std::string::npos)
+      return false;
+    return ParseLeadingFloat(source.substr(equals + 1,
+                                          source.find(';', equals) - equals - 1),
+                             value);
+  };
+  float step_x = 1.0f;
+  float step_y = 1.0f;
+  parse_step("TextureStepX", &step_x);
+  parse_step("TextureStepY", &step_y);
+
+  const size_t assign = source.find("result =");
+  if (assign == std::string::npos)
+    return false;
+  const size_t semicolon = source.find(';', assign);
+  if (semicolon == std::string::npos)
+    return false;
+  const std::string expression = source.substr(assign, semicolon - assign);
+
+  std::vector<glanceasy::glsl::ConvolutionTap> taps;
+  std::string sampler_name;
+  std::string varying_name;
+  size_t cursor = 0;
+  while (cursor < expression.size()) {
+    const size_t newline = expression.find('\n', cursor);
+    const std::string line = expression.substr(
+        cursor, newline == std::string::npos ? std::string::npos
+                                             : newline - cursor);
+    cursor = newline == std::string::npos ? expression.size() : newline + 1;
+    const size_t texture = line.find("texture2D(");
+    if (texture == std::string::npos)
+      continue;
+    const size_t comma = line.find(',', texture);
+    const size_t vec = line.find("vec2(", comma);
+    if (comma == std::string::npos || vec == std::string::npos)
+      continue;
+    const std::string sampler = trim(line.substr(texture + 10, comma - texture - 10));
+    if (sampler.empty())
+      continue;
+    if (sampler_name.empty())
+      sampler_name = sampler;
+
+    const size_t vec_end = line.find(')', vec);
+    if (vec_end == std::string::npos)
+      continue;
+    const std::string components = line.substr(vec + 5, vec_end - vec - 5);
+    const size_t component_comma = components.find(',');
+    if (component_comma == std::string::npos)
+      continue;
+    const auto parse_offset = [&](std::string component, float step,
+                                  float* offset) {
+      component = trim(component);
+      const bool x = component.find("TextureStepX") != std::string::npos;
+      const bool y = component.find("TextureStepY") != std::string::npos;
+      if (!x && !y) {
+        *offset = 0.0f;
+        return;
+      }
+      const size_t star = component.find('*');
+      const std::string factor =
+          trim(star == std::string::npos ? std::string() : component.substr(0, star));
+      float value = 1.0f;
+      if (!factor.empty())
+        ParseLeadingFloat(factor, &value);
+      *offset = value;
+    };
+    float dx = 0.0f;
+    float dy = 0.0f;
+    parse_offset(components.substr(0, component_comma), step_x, &dx);
+    parse_offset(components.substr(component_comma + 1), step_y, &dy);
+
+    // The varying is the part of the texture coordinate before "+ vec2(".
+    const size_t plus_vec = line.find("+ vec2(", comma);
+    if (plus_vec != std::string::npos && varying_name.empty()) {
+      varying_name = trim(line.substr(comma + 1, plus_vec - comma - 1));
+    }
+
+    float weight = 1.0f;
+    for (size_t k = line.find("Kernel"); k != std::string::npos;
+         k = line.find("Kernel", k + 1)) {
+      size_t end = k + 6;
+      while (end < line.size() &&
+             std::isdigit(static_cast<unsigned char>(line[end])))
+        ++end;
+      weight *= kernel_value(line.substr(k, end - k));
+    }
+    taps.push_back({dx, dy, weight});
+  }
+  if (taps.empty() || sampler_name.empty() || varying_name.empty())
+    return false;
+
+  float scale = 1.0f;
+  const size_t scale_pos = source.find("result = result *", semicolon);
+  if (scale_pos != std::string::npos)
+    ParseLeadingFloat(source.substr(scale_pos + 17,
+                                    source.find(';', scale_pos) - scale_pos - 17),
+                      &scale);
+
+  const size_t frag_color = source.find("gl_FragColor");
+  const bool rgb_output =
+      frag_color != std::string::npos &&
+      source.find("result.xyz", frag_color) != std::string::npos &&
+      source.find("1.0", frag_color) != std::string::npos;
+  if (!rgb_output)
+    return false;
+
+  info->valid = true;
+  info->sampler_name = sampler_name;
+  info->varying_name = varying_name;
+  info->step_x = step_x;
+  info->step_y = step_y;
+  info->scale = scale;
+  info->rgb_output = true;
+  info->output_location = 0;
+  info->taps = std::move(taps);
+  return true;
+}
 
 bool DecodeUniformLocation(GLint location, int* index, int* element) {
   if (location >= kUniformElementBase) {
@@ -287,8 +592,13 @@ void glCompileShader(GLuint shader) {
     context->SetError(GL_INVALID_VALUE);
     return;
   }
-  glanceasy::glsl::Parser parser(glanceasy::ShaderStage(object->type), object->source);
+  const std::string compiled_source =
+      glanceasy::ApproximateConvolutionSource(object->source);
+  glanceasy::glsl::Parser parser(glanceasy::ShaderStage(object->type),
+                                 compiled_source);
   object->ast = parser.Parse();
+  if (object->ast)
+    glanceasy::ParseConvolutionSource(compiled_source, &object->ast->convolution);
   object->compiled = object->ast != nullptr;
   object->log = parser.error();
 }

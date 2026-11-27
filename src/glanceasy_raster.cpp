@@ -36,7 +36,14 @@ constexpr int64_t kSubpixelScale = int64_t(1) << kSubpixelBits;
 constexpr int64_t kSubpixelHalf = kSubpixelScale / 2;
 
 int64_t QuantizeSubpixel(float value) {
-  return static_cast<int64_t>(std::floor(value * kSubpixelScale + 0.5f));
+  // Called three times per triangle.  std::floor here resolves to a software
+  // double-precision libm call on Cortex-A7; truncation plus a correction is
+  // exact for the bounded screen coordinates and much cheaper.
+  const float scaled = value * kSubpixelScale + 0.5f;
+  int64_t truncated = static_cast<int64_t>(scaled);
+  if (scaled < static_cast<float>(truncated))
+    --truncated;
+  return truncated;
 }
 
 int64_t EdgeFunction(int64_t ax, int64_t ay, int64_t bx, int64_t by,
@@ -73,10 +80,22 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
   float max_x = std::max(a.x, std::max(b.x, c.x));
   float min_y = std::min(a.y, std::min(b.y, c.y));
   float max_y = std::max(a.y, std::max(b.y, c.y));
-  int x0 = std::max(clip_.x, static_cast<int>(std::floor(min_x)));
-  int x1 = std::min(clip_.right() - 1, static_cast<int>(std::ceil(max_x)));
-  int y0 = std::max(clip_.y, static_cast<int>(std::floor(min_y)));
-  int y1 = std::min(clip_.bottom() - 1, static_cast<int>(std::ceil(max_y)));
+  // std::floor/std::ceil pull in the double-precision libm path on Cortex-A7,
+  // and this runs once per triangle in every scene.  A truncating conversion
+  // plus a correction is an exact floor/ceil for the finite screen
+  // coordinates that reach here and costs a few cycles instead.
+  const auto floor_to_int = [](float value) {
+    const int truncated = static_cast<int>(value);
+    return value < static_cast<float>(truncated) ? truncated - 1 : truncated;
+  };
+  const auto ceil_to_int = [](float value) {
+    const int truncated = static_cast<int>(value);
+    return value > static_cast<float>(truncated) ? truncated + 1 : truncated;
+  };
+  int x0 = std::max(clip_.x, floor_to_int(min_x));
+  int x1 = std::min(clip_.right() - 1, ceil_to_int(max_x));
+  int y0 = std::max(clip_.y, floor_to_int(min_y));
+  int y1 = std::min(clip_.bottom() - 1, ceil_to_int(max_y));
   if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_RAST")) {
     static int dbg = 0;
     if (dbg < 8) {
@@ -199,6 +218,32 @@ void Rasterizer::DrawTriangle(const RasterVertex& a,
     return inside_edge(a0) && inside_edge(a1) && inside_edge(a2) &&
            inside_edge(b0) && inside_edge(b1) && inside_edge(b2);
   };
+
+  // Tiny triangles dominate the low-resolution glmark2 scenes.  Their eight
+  // pixel run machinery and row setup cost more than simply testing every
+  // pixel, and a 4x4 box bounds the whole triangle.
+  const int box_pixels = (x1 - x0 + 1) * (y1 - y0 + 1);
+  if (samples_ <= 1 && box_pixels <= 24) {
+    for (int y = y0; y <= y1; ++y) {
+      const float py = static_cast<float>(y) + 0.5f;
+      float px = static_cast<float>(x0) + 0.5f;
+      float w0 =
+          ((v1->y - v2->y) * (px - v2->x) + (v2->x - v1->x) * (py - v2->y)) *
+          inv_det;
+      float w1 =
+          ((v2->y - v0->y) * (px - v2->x) + (v0->x - v2->x) * (py - v2->y)) *
+          inv_det;
+      for (int x = x0; x <= x1; ++x) {
+        if (covers(QuantizeSubpixel(px), QuantizeSubpixel(py)))
+          shade_pixel(x, y, w0, w1);
+        w0 += dw0_dx;
+        w1 += dw1_dx;
+        px += 1.0f;
+      }
+    }
+    flush_batch();
+    return;
+  }
 
   for (int y = y0; y <= y1; ++y) {
     const float py = static_cast<float>(y) + 0.5f;

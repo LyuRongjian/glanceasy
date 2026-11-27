@@ -23,6 +23,17 @@ void FetchTexelImage(const TextureImage& image, size_t index, float rgba[4]);
 // Samples a bound texture.  |lod| is the level of detail: values <= 0 select
 // the base level.  Bilinear filtering, the three wrap modes, 2D, cube and 3D
 // textures are supported.
+// Direct base-level RGBA8 sample with no LOD, alpha-mask or swizzle handling.
+void SampleTexture2DRgba8Fast(const TextureImage& image,
+                              float u,
+                              float v,
+                              GLenum filter,
+                              GLenum wrap_s,
+                              GLenum wrap_t,
+                              bool flip_y,
+                              bool opaque,
+                              float out[4]);
+
 void SampleTexture2D(const Texture& texture,
                      float u,
                      float v,

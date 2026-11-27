@@ -2727,6 +2727,24 @@ ExprPtr Parser::ParseCall(const std::string& name, int line) {
     ExprPtr call = MakeExpr(Expr::Kind::kCall, line);
     call->builtin_func = function;
     call->text = name;
+    if (function == BuiltinFunc::kDfdx || function == BuiltinFunc::kDfdy ||
+        function == BuiltinFunc::kFwidth) {
+      ast_->uses_derivatives = true;
+    }
+    switch (function) {
+      case BuiltinFunc::kTexture2D:
+      case BuiltinFunc::kTexture2DProj:
+      case BuiltinFunc::kTextureCube:
+      case BuiltinFunc::kTexture3D:
+      case BuiltinFunc::kTexture:
+      case BuiltinFunc::kTextureProj:
+      case BuiltinFunc::kTextureOffset:
+      case BuiltinFunc::kTextureProjOffset:
+        ast_->uses_implicit_lod = true;
+        break;
+      default:
+        break;
+    }
     if (!ExpectPunct("("))
       return nullptr;
     if (!CheckPunct(")")) {

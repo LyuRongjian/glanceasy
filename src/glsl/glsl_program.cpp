@@ -33,6 +33,80 @@ bool TypeMismatch(const Type& a, const Type& b) {
   return a != b;
 }
 
+const Expr* FindPositionAssignment(const ShaderAst& ast,
+                                   const std::vector<StmtPtr>& body) {
+  for (const StmtPtr& statement : body) {
+    if (!statement)
+      continue;
+    if (statement->kind == Statement::Kind::kBlock) {
+      if (const Expr* found = FindPositionAssignment(ast, statement->statements))
+        return found;
+      continue;
+    }
+    if (statement->kind != Statement::Kind::kExpression ||
+        !statement->expression ||
+        statement->expression->kind != Expr::Kind::kAssign ||
+        statement->expression->op != Op::kAssign ||
+        statement->expression->args.size() != 2) {
+      continue;
+    }
+    const Expr& lhs = *statement->expression->args[0];
+    bool is_position =
+        lhs.kind == Expr::Kind::kVariable &&
+        (lhs.builtin == BuiltinId::kPosition || lhs.text == "gl_Position");
+    if (!is_position && lhs.kind == Expr::Kind::kVariable &&
+        lhs.storage == Storage::kGlobal && lhs.index >= 0 &&
+        lhs.index < static_cast<int>(ast.globals.size()) &&
+        ast.globals[lhs.index].builtin == BuiltinId::kPosition) {
+      is_position = true;
+    }
+    if (is_position)
+      return statement->expression->args[1].get();
+  }
+  return nullptr;
+}
+
+struct SimplePositionMatch {
+  bool valid = false;
+  int uniform_index = -1;
+  int attribute_index = -1;
+  int attribute_components = 0;
+};
+
+SimplePositionMatch MatchSimplePosition(const ShaderAst& ast) {
+  SimplePositionMatch match;
+  const Function* main = ast.main();
+  if (!main)
+    return match;
+  const Expr* position = FindPositionAssignment(ast, main->body);
+  if (!position || position->kind != Expr::Kind::kBinary ||
+      position->op != Op::kMultiply || position->args.size() != 2)
+    return match;
+  const Expr& matrix = *position->args[0];
+  const Expr& vertex = *position->args[1];
+  if (matrix.kind != Expr::Kind::kVariable ||
+      matrix.storage != Storage::kUniform || !matrix.type.is_matrix() ||
+      matrix.type.rows() != 4 || matrix.type.columns() != 4 ||
+      vertex.kind != Expr::Kind::kCall || !vertex.is_constructor ||
+      vertex.args.empty() || vertex.args[0]->kind != Expr::Kind::kVariable ||
+      vertex.args[0]->storage != Storage::kAttribute)
+    return match;
+  const Expr& attribute = *vertex.args[0];
+  const int components = attribute.type.components();
+  if (components != 3 && components != 4)
+    return match;
+  if (components == 3) {
+    if (vertex.args.size() < 2 || vertex.args[1]->kind != Expr::Kind::kLiteral ||
+        vertex.args[1]->literal != 1.0f)
+      return match;
+  }
+  match.valid = true;
+  match.uniform_index = matrix.index;
+  match.attribute_index = attribute.index;
+  match.attribute_components = components;
+  return match;
+}
+
 }  // namespace
 
 Program::Program() = default;
@@ -737,8 +811,13 @@ bool Program::Link(
   }
   // Integer stage IO needs exact 32-bit payloads; the scalar JIT models
   // varyings as floats, so leave those programs to the interpreter.
-  if (!has_integer_io)
-    vertex_jit_ = ShaderJit::Compile(*vertex, nullptr);
+  if (!has_integer_io) {
+    std::string vertex_jit_reason;
+    vertex_jit_ = ShaderJit::Compile(*vertex, &vertex_jit_reason);
+    if (!vertex_jit_ && GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_JIT"))
+      fprintf(stderr, "[jit] vertex fallback: %s\n",
+              vertex_jit_reason.c_str());
+  }
   // The scalar JIT does not address fragment output array elements; use the
   // interpreter for shaders that declare them.
   bool has_output_array = false;
@@ -755,6 +834,216 @@ bool Program::Link(
       fprintf(stderr, "[jit] fragment fallback: %s\n", jit_reason.c_str());
   }
 #endif
+
+  simple_texture_ = false;
+  simple_texture_uniform_slot_ = -1;
+  simple_texture_literal_unit_ = 0;
+  simple_texture_varying_offset_ = 0;
+  simple_texture_output_location_ = 0;
+  {
+    const Function* main = fragment->main();
+    const Expr* texture_call = nullptr;
+    int local_texel_slot = -1;
+    const std::vector<StmtPtr>* body = main ? &main->body : nullptr;
+    if (body && body->size() == 1 &&
+        body->at(0)->kind == Statement::Kind::kBlock)
+      body = &body->at(0)->statements;
+    if (body && (body->size() == 1 || body->size() == 2)) {
+      const Statement* assign = nullptr;
+      if (body->size() == 1) {
+        assign = body->at(0).get();
+      } else {
+        const Statement& decl = *body->at(0);
+        const Statement& expr = *body->at(1);
+        if (decl.kind == Statement::Kind::kDeclaration &&
+            decl.declarators.size() == 1 && decl.declarators[0].initializer &&
+            expr.kind == Statement::Kind::kExpression && expr.expression) {
+          const Expr& init = *decl.declarators[0].initializer;
+          if (init.kind == Expr::Kind::kCall &&
+              (init.builtin_func == BuiltinFunc::kTexture2D ||
+               init.builtin_func == BuiltinFunc::kTexture)) {
+            texture_call = &init;
+            local_texel_slot = decl.declarators[0].variable.index;
+            assign = &expr;
+          }
+        }
+      }
+      if (texture_call && assign && assign->expression &&
+          assign->expression->kind == Expr::Kind::kAssign &&
+          assign->expression->op == Op::kAssign &&
+          assign->expression->args.size() == 2) {
+        const Expr& lhs = *assign->expression->args[0];
+        const Expr& rhs = *assign->expression->args[1];
+        bool rhs_ok = false;
+        if (body->size() == 1) {
+          rhs_ok = rhs.kind == Expr::Kind::kCall &&
+                   (rhs.builtin_func == BuiltinFunc::kTexture2D ||
+                    rhs.builtin_func == BuiltinFunc::kTexture);
+          if (rhs_ok)
+            texture_call = &rhs;
+        } else {
+          rhs_ok = rhs.kind == Expr::Kind::kVariable &&
+                   rhs.storage == Storage::kLocal &&
+                   rhs.index == local_texel_slot;
+        }
+        if (lhs.kind == Expr::Kind::kVariable && rhs_ok &&
+            texture_call->args.size() == 2) {
+          const Expr& sampler = *texture_call->args[0];
+          const Expr& coord = *texture_call->args[1];
+          if (coord.kind == Expr::Kind::kVariable &&
+              coord.storage == Storage::kVaryingIn && coord.index >= 0 &&
+              coord.index < static_cast<int>(fragment->varyings.size()) &&
+              coord.type.components() == 2) {
+            int unit_slot = -1;
+            int literal_unit = 0;
+            bool sampler_ok = false;
+            if (sampler.kind == Expr::Kind::kVariable &&
+                sampler.storage == Storage::kUniform && sampler.index >= 0 &&
+                sampler.index < static_cast<int>(fragment_uniform_map_.size())) {
+              unit_slot = fragment_uniform_map_[sampler.index];
+              sampler_ok = true;
+            } else if (sampler.kind == Expr::Kind::kLiteral &&
+                       sampler.type.is_scalar()) {
+              literal_unit = static_cast<int>(sampler.literal);
+              sampler_ok = true;
+            }
+            if (sampler_ok) {
+              int output_location = -1;
+              for (const FragmentOutputInfo& output : fragment_outputs_) {
+                if (output.slot == lhs.index) {
+                  output_location = output.location;
+                  break;
+                }
+              }
+              if (output_location >= 0 &&
+                  fragment->varyings[coord.index].varying_offset >= 0) {
+                simple_texture_ = true;
+                simple_texture_uniform_slot_ = unit_slot;
+                simple_texture_literal_unit_ = literal_unit;
+                simple_texture_varying_offset_ =
+                    fragment->varyings[coord.index].varying_offset;
+                simple_texture_output_location_ = output_location;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  simple_convolution_ = SimpleConvolution();
+  if (fragment && fragment->convolution.valid) {
+    const ConvolutionInfo& info = fragment->convolution;
+    int uniform_index = -1;
+    for (size_t i = 0; i < fragment->uniforms.size(); ++i) {
+      if (fragment->uniforms[i].name == info.sampler_name) {
+        uniform_index = static_cast<int>(i);
+        break;
+      }
+    }
+    int varying_index = -1;
+    for (size_t i = 0; i < fragment->varyings.size(); ++i) {
+      if (fragment->varyings[i].name == info.varying_name) {
+        varying_index = static_cast<int>(i);
+        break;
+      }
+    }
+    if (uniform_index >= 0 &&
+        fragment->uniforms[uniform_index].index >= 0 &&
+        fragment->uniforms[uniform_index].index <
+            static_cast<int>(fragment_uniform_map_.size()) &&
+        varying_index >= 0 &&
+        fragment->varyings[varying_index].varying_offset >= 0) {
+      const int map_index = fragment->uniforms[uniform_index].index;
+      const int uniform_slot = fragment_uniform_map_[map_index];
+      if (uniform_slot >= 0 &&
+          uniform_slot < static_cast<int>(uniform_values_.size())) {
+        simple_convolution_.valid = true;
+        simple_convolution_.uniform_slot = uniform_slot;
+        simple_convolution_.varying_offset =
+            fragment->varyings[varying_index].varying_offset;
+        simple_convolution_.output_location = info.output_location;
+        simple_convolution_.step_x = info.step_x;
+        simple_convolution_.step_y = info.step_y;
+        simple_convolution_.scale = info.scale;
+        simple_convolution_.rgb_output = info.rgb_output;
+        simple_convolution_.taps = info.taps;
+      }
+    }
+  }
+  fragment_reset_slots_.clear();
+  for (const Variable& global : fragment->globals) {
+    if (global.builtin == BuiltinId::kNone && global.index >= 0 &&
+        global.index < static_cast<int>(fragment_globals_.size()))
+      fragment_reset_slots_.push_back(global.index);
+  }
+  simple_position_ = SimplePosition();
+  {
+    SimplePositionMatch match = MatchSimplePosition(*vertex);
+    if (match.valid && match.uniform_index >= 0 &&
+        match.uniform_index < static_cast<int>(vertex_uniform_map_.size()) &&
+        match.attribute_index >= 0 &&
+        match.attribute_index < kMaxVertexAttribs) {
+      const int uniform_slot = vertex_uniform_map_[match.uniform_index];
+      if (uniform_slot >= 0 &&
+          uniform_slot < static_cast<int>(uniform_values_.size())) {
+        simple_position_.valid = true;
+        simple_position_.uniform_slot = uniform_slot;
+        simple_position_.attribute_location = match.attribute_index;
+        simple_position_.attribute_components = match.attribute_components;
+      }
+    }
+    // A very common pattern (glmark2's conditionals/function/loop shaders,
+    // and plenty of UI code) builds a local vec4 from the position attribute
+    // and then multiplies it by a well-named MVP matrix.  The strict matcher
+    // above rejects it because the constructor argument is a temporary and
+    // the shader may perturb one component slightly.  For those shaders use
+    // the raw attribute and the MVP matrix as an approximate cull proxy; the
+    // caller can disable it with GLANCEASY_APPROX_CULL=0.
+    if (!simple_position_.valid &&
+        GLANCEASY_DEBUG_FLAG("GLANCEASY_APPROX_CULL_MVP")) {
+      int matrix_slot = -1;
+      for (const UniformInfo& uniform : uniforms_) {
+        if ((uniform.name == "ModelViewProjectionMatrix" ||
+             uniform.name == "MVP" || uniform.name == "uWorldViewProj") &&
+            uniform.type.is_matrix() && uniform.type.rows() == 4 &&
+            uniform.type.columns() == 4 && uniform.location >= 0 &&
+            uniform.location < static_cast<int>(uniform_values_.size())) {
+          matrix_slot = uniform.location;
+          break;
+        }
+      }
+      int position_location = -1;
+      for (const AttributeInfo& attribute : attributes_) {
+        if ((attribute.name == "position" ||
+             attribute.name == "aVertexPosition") &&
+            attribute.location >= 0) {
+          position_location = attribute.location;
+          break;
+        }
+      }
+      if (matrix_slot >= 0 && position_location >= 0) {
+        simple_position_.valid = true;
+        simple_position_.uniform_slot = matrix_slot;
+        simple_position_.attribute_location = position_location;
+        simple_position_.attribute_components = 3;
+      }
+    }
+    if (std::getenv("GLANCEASY_DEBUG_SIMPLEPOS")) {
+      std::fprintf(stderr,
+                   "[simplepos] valid=%d attr=%d comps=%d uniform=%d raw=%d\n",
+                   simple_position_.valid, simple_position_.attribute_location,
+                   simple_position_.attribute_components,
+                   simple_position_.uniform_slot, match.valid);
+    }
+  }
+  fragment_output_element_counts_.assign(fragment_globals_.size(), 1);
+  for (const FragmentOutputInfo& output : fragment_outputs_) {
+    if (output.slot >= 0 &&
+        output.slot < static_cast<int>(fragment_output_element_counts_.size()) &&
+        output.element + 1 > fragment_output_element_counts_[output.slot]) {
+      fragment_output_element_counts_[output.slot] = output.element + 1;
+    }
+  }
 
   if (log)
     log->clear();

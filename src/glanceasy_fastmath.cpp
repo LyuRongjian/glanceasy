@@ -82,6 +82,25 @@ float AtanPolynomial(float x) {
   return x * p;
 }
 
+// Integer exponentiation by squaring.  Shaders commonly use pow() with a
+// constant integer exponent (specular shininess, falloff powers); this avoids
+// the log2/exp2 polynomial pair and is both faster and more accurate there.
+float PowInteger(float x, int exponent) {
+  unsigned int n = exponent < 0
+                      ? static_cast<unsigned int>(-exponent)
+                      : static_cast<unsigned int>(exponent);
+  float result = 1.0f;
+  float base = x;
+  while (n != 0) {
+    if (n & 1u)
+      result *= base;
+    n >>= 1;
+    if (n != 0)
+      base *= base;
+  }
+  return exponent < 0 ? 1.0f / result : result;
+}
+
 float Exp2Polynomial(float f) {
   // 2^f - 1, factored so that f == 0 produces exactly one.
   float p = 0.00020823112435402593f;
@@ -267,6 +286,11 @@ float Pow(float x, float y) {
   }
   if (x < 0.0f)
     return Nan();
+  if (y >= -4096.0f && y <= 4096.0f) {
+    const int integer_exponent = static_cast<int>(y);
+    if (static_cast<float>(integer_exponent) == y)
+      return PowInteger(x, integer_exponent);
+  }
   return Exp2(y * Log2(x));
 }
 

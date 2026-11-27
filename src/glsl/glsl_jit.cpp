@@ -18,11 +18,17 @@
 #include <string.h>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
+#include "src/glanceasy_fastmath.h"
 #include "src/glsl/glsl_builtins.h"
 #include "src/glsl/glsl_program.h"
 #include "src/glsl/glsl_types.h"
@@ -97,9 +103,140 @@ void CopyValueToFloats(const Value& value, float* out) {
     out[i] = value.data[i];
 }
 
+// Hot built-ins that the JIT can implement without constructing a Value
+// vector or going through the interpreter.  The generated code passes direct
+// pointers into the shader frame, so the common vector maths in normal-mapped
+// and Phong shaders stays a handful of NEON/scalar operations.
+extern "C" void JitFastNormalize(const float* a, const float* b, int n,
+                                 float* out) {
+  (void)b;
+  float sum = 0.0f;
+  for (int i = 0; i < n; ++i)
+    sum += a[i] * a[i];
+  const float inverse = fastmath::InverseSqrt(sum);
+  for (int i = 0; i < n; ++i)
+    out[i] = a[i] * inverse;
+}
+
+extern "C" void JitFastDot(const float* a, const float* b, int n, float* out) {
+  float sum = 0.0f;
+  for (int i = 0; i < n; ++i)
+    sum += a[i] * b[i];
+  out[0] = sum;
+}
+
+extern "C" void JitFastLength(const float* a, const float* b, int n,
+                              float* out) {
+  (void)b;
+  float sum = 0.0f;
+  for (int i = 0; i < n; ++i)
+    sum += a[i] * a[i];
+  out[0] = fastmath::Sqrt(sum);
+}
+
+extern "C" void JitFastReflect(const float* a, const float* b, int n,
+                               float* out) {
+  float dot = 0.0f;
+  for (int i = 0; i < n; ++i)
+    dot += a[i] * b[i];
+  dot *= 2.0f;
+  for (int i = 0; i < n; ++i)
+    out[i] = a[i] - dot * b[i];
+}
+
+extern "C" void JitFastPow(const float* a, const float* b, int n,
+                           float* out) {
+  (void)n;
+  out[0] = fastmath::Pow(a[0], b[0]);
+}
+
+extern "C" void JitFastMax(const float* a, const float* b, int n,
+                           float* out) {
+  for (int i = 0; i < n; ++i)
+    out[i] = a[i] < b[i] ? b[i] : a[i];
+}
+
+extern "C" void JitFastMin(const float* a, const float* b, int n,
+                           float* out) {
+  for (int i = 0; i < n; ++i)
+    out[i] = a[i] > b[i] ? b[i] : a[i];
+}
+
+extern "C" void JitFastFract(const float* a, const float* /*unused*/, int n,
+                             float* out) {
+  for (int i = 0; i < n; ++i) {
+    const float value = a[i];
+    // Cortex-A7 has no single-instruction floor; the library floorf is a
+    // slow software path.  Integer truncation plus a correction is exact for
+    // the ordinary shader range and is much cheaper here.
+    const int truncated = static_cast<int>(value);
+    const float floor_value =
+        value < static_cast<float>(truncated)
+            ? static_cast<float>(truncated - 1)
+            : static_cast<float>(truncated);
+    out[i] = value - floor_value;
+  }
+}
+
+extern "C" void JitFastSin(const float* a, const float* /*unused*/, int n,
+                           float* out) {
+  for (int i = 0; i < n; ++i)
+    out[i] = fastmath::Sin(a[i]);
+}
+
+extern "C" void JitFastCos(const float* a, const float* /*unused*/, int n,
+                           float* out) {
+  for (int i = 0; i < n; ++i)
+    out[i] = fastmath::Cos(a[i]);
+}
+
+extern "C" void JitFastAbs(const float* a, const float* /*unused*/, int n,
+                           float* out) {
+  for (int i = 0; i < n; ++i)
+    out[i] = a[i] < 0.0f ? -a[i] : a[i];
+}
+
+extern "C" void JitFastDistance(const float* a, const float* b, int n,
+                                float* out) {
+  float sum = 0.0f;
+  for (int i = 0; i < n; ++i) {
+    const float delta = a[i] - b[i];
+    sum += delta * delta;
+  }
+  out[0] = fastmath::Sqrt(sum);
+}
+
+extern "C" void JitFastMat4MulVec4(const float* matrix,
+                                   const float* vector,
+                                   float* out) {
+#if defined(__ARM_NEON)
+  const float32x4_t c0 = vld1q_f32(matrix + 0);
+  const float32x4_t c1 = vld1q_f32(matrix + 4);
+  const float32x4_t c2 = vld1q_f32(matrix + 8);
+  const float32x4_t c3 = vld1q_f32(matrix + 12);
+  float32x4_t result = vmulq_n_f32(c0, vector[0]);
+  result = vmlaq_n_f32(result, c1, vector[1]);
+  result = vmlaq_n_f32(result, c2, vector[2]);
+  result = vmlaq_n_f32(result, c3, vector[3]);
+  vst1q_f32(out, result);
+#else
+  for (int r = 0; r < 4; ++r) {
+    out[r] = matrix[0 * 4 + r] * vector[0] +
+             matrix[1 * 4 + r] * vector[1] +
+             matrix[2 * 4 + r] * vector[2] +
+             matrix[3 * 4 + r] * vector[3];
+  }
+#endif
+}
+
 // Called from generated code for built-ins implemented by the evaluator.
 void JitBuiltin(const JitBuiltinCall* call, const float* args, float* out) {
-  std::vector<Value> values(static_cast<size_t>(call->arg_count));
+  // This is called for every built-in invokation in every fragment.  A fresh
+  // heap vector here used to dominate complex fragment shaders; keep one
+  // thread-local buffer and only resize it when the argument count changes.
+  static thread_local std::vector<Value> values;
+  if (values.size() != static_cast<size_t>(call->arg_count))
+    values.resize(static_cast<size_t>(call->arg_count));
   for (int i = 0; i < call->arg_count; ++i) {
     values[i].type = call->arg_types[i];
     for (int j = 0; j < kValueFloats; ++j)
@@ -118,8 +255,9 @@ void JitTexture(const JitRuntime* runtime,
                 const JitTextureCall* call,
                 const float* args,
                 float* out) {
-  for (int i = 0; i < kValueFloats; ++i)
-    out[i] = 0.0f;
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
   out[3] = 1.0f;
   if (call->arg_count < 2 || !runtime->sampler)
     return;
@@ -162,6 +300,14 @@ void JitTexture(const JitRuntime* runtime,
     coord = proj_coord;
   }
 
+  const BaseType fast_base = call->arg_types[0].base();
+  if (!projective && fast_base == BaseType::kSampler2D &&
+      (call->function == BuiltinFunc::kTexture2D ||
+       call->function == BuiltinFunc::kTexture) &&
+      call->arg_count >= 2 &&
+      runtime->sampler->Sample2DRgba8Fast(unit, coord[0], coord[1], out))
+    return;
+
   const BaseType base = call->arg_types[0].base();
   const bool cube = call->function == BuiltinFunc::kTextureCube ||
                     base == BaseType::kSamplerCube ||
@@ -186,7 +332,7 @@ void JitTexture(const JitRuntime* runtime,
   else if (call->arg_count > 2)
     lod = args[2 * kValueFloats];
   if (!explicit_lod && call->coord_offset >= 0 && runtime->varyings_dx &&
-      runtime->varyings_dy) {
+      runtime->varyings_dy && runtime->sampler->NeedsImplicitLod(unit)) {
     const int dims =
         array ? 2
               : (call->coord_dims > 0 ? call->coord_dims
@@ -346,6 +492,7 @@ class ShaderJit::Impl {
   bool EmitStatement(const Statement& statement);
   bool EmitBlock(const std::vector<StmtPtr>& body);
   bool EmitIf(const Statement& statement);
+  bool EmitLoop(const Statement& statement);
 
   Temp EmitExpr(const Expr& expr);
   Temp EmitLiteral(const Expr& expr);
@@ -354,6 +501,7 @@ class ShaderJit::Impl {
   Temp EmitIndex(const Expr& expr);
   Temp EmitConstructor(const Expr& expr);
   Temp EmitCall(const Expr& expr);
+  Temp EmitUserCall(const Expr& expr);
   Temp EmitUnary(const Expr& expr);
   Temp EmitBinary(const Expr& expr);
   Temp EmitAssignment(const Expr& expr);
@@ -377,6 +525,7 @@ class ShaderJit::Impl {
                            int count);
 
   bool EmitBuiltinCall(const Expr& expr, int out, int arg_area);
+  bool EmitFastBuiltin(const Expr& expr, int out);
   bool EmitTextureCall(const Expr& expr, int out, int arg_area);
   bool EmitMatrixMultiply(int out,
                           int left,
@@ -400,6 +549,7 @@ class ShaderJit::Impl {
 
   bool IsVariableWritable(const Expr& expr) const;
   int SourceSlot(const Expr& expr) const;
+  int ResolveLocalSlot(int index) const;
   bool IsSupportedType(const Type& type) const;
   bool IsSamplerType(const Type& type) const { return type.is_sampler(); }
   bool ConstantIndex(const Expr& expr, int* index) const;
@@ -418,6 +568,19 @@ class ShaderJit::Impl {
   const Function* main_ = nullptr;
   sljit_compiler* compiler_ = nullptr;
   std::vector<sljit_jump*> end_jumps_;
+  struct InlineFrame {
+    const Function* function = nullptr;
+    std::vector<int> slot_map;
+    int return_slot = -1;
+    std::vector<sljit_jump*> return_jumps;
+  };
+  std::vector<InlineFrame> inline_frames_;
+  struct LoopContext {
+    sljit_label* continue_label = nullptr;
+    std::vector<sljit_jump*> break_jumps;
+    std::vector<sljit_jump*> continue_jumps;
+  };
+  std::vector<LoopContext> loops_;
   sljit_label* end_label_ = nullptr;
   std::string failure_;
 
@@ -463,8 +626,9 @@ bool ShaderJit::Impl::Check(sljit_s32 result, std::string* reason) {
 bool ShaderJit::Impl::IsSupportedType(const Type& type) const {
   if (type.is_aggregate())
     return false;
-  if (type.base() == BaseType::kInt || type.base() == BaseType::kUInt)
-    return false;
+  // Integer values are stored numerically as floats in the scalar JIT.
+  // Only exact small-integer operations are accepted by ScanExpr below;
+  // bitwise, modulo and division operations are left to the interpreter.
   if (type.base() == BaseType::kVoid)
     return false;
   return true;
@@ -481,6 +645,49 @@ bool ShaderJit::Impl::ConstantIndex(const Expr& expr, int* index) const {
 bool ShaderJit::Impl::ScanExpr(const Expr& expr) {
   if (!IsSupportedType(expr.type) && !IsSamplerType(expr.type))
     return false;
+  if (expr.type.is_integer()) {
+    if (expr.kind == Expr::Kind::kLiteral &&
+        expr.integer_literal > (1ULL << 24))
+      return false;
+    if (expr.kind == Expr::Kind::kCall)
+      return false;
+    if (expr.kind == Expr::Kind::kAssign &&
+        (expr.op == Op::kDivideAssign || expr.op == Op::kModuloAssign ||
+         expr.op == Op::kShiftLeftAssign || expr.op == Op::kShiftRightAssign ||
+         expr.op == Op::kBitAndAssign || expr.op == Op::kBitXorAssign ||
+         expr.op == Op::kBitOrAssign))
+      return false;
+    if (expr.kind == Expr::Kind::kBinary) {
+      switch (expr.op) {
+        case Op::kAdd:
+        case Op::kSubtract:
+        case Op::kMultiply:
+        case Op::kLess:
+        case Op::kLessEqual:
+        case Op::kGreater:
+        case Op::kGreaterEqual:
+        case Op::kEqual:
+        case Op::kNotEqual:
+        case Op::kLogicalAnd:
+        case Op::kLogicalOr:
+        case Op::kLogicalXor:
+          break;
+        default:
+          return false;
+      }
+    } else if (expr.kind == Expr::Kind::kUnary) {
+      switch (expr.op) {
+        case Op::kPreIncrement:
+        case Op::kPreDecrement:
+        case Op::kPostIncrement:
+        case Op::kPostDecrement:
+        case Op::kNegate:
+          break;
+        default:
+          return false;
+      }
+    }
+  }
   if (expr.is_constructor && expr.type.base() == BaseType::kBool) {
     for (const ExprPtr& argument : expr.args) {
       if (argument->type.base() != BaseType::kBool)
@@ -488,7 +695,9 @@ bool ShaderJit::Impl::ScanExpr(const Expr& expr) {
     }
   }
   if (expr.kind == Expr::Kind::kCall && !expr.is_constructor) {
-    if (expr.builtin_func == BuiltinFunc::kNone)
+    if (expr.builtin_func == BuiltinFunc::kNone &&
+        (expr.function_index < 0 ||
+         expr.function_index >= static_cast<int>(ast_.functions.size())))
       return false;
     if (expr.builtin_func == BuiltinFunc::kLessThan ||
         expr.builtin_func == BuiltinFunc::kLessThanEqual ||
@@ -520,12 +729,6 @@ bool ShaderJit::Impl::ScanExpr(const Expr& expr) {
 
 bool ShaderJit::Impl::ScanStatement(const Statement& statement) {
   switch (statement.kind) {
-    case Statement::Kind::kFor:
-    case Statement::Kind::kWhile:
-    case Statement::Kind::kDoWhile:
-    case Statement::Kind::kBreak:
-    case Statement::Kind::kContinue:
-      return false;
     default:
       break;
   }
@@ -555,7 +758,7 @@ bool ShaderJit::Impl::ScanStatement(const Statement& statement) {
 }
 
 bool ShaderJit::Impl::Scan() {
-  if (ast_.functions.size() != 1)
+  if (ast_.functions.empty())
     return false;
   if (!ast_.main())
     return false;
@@ -580,9 +783,13 @@ bool ShaderJit::Impl::Scan() {
     if (!IsSupportedType(varying.type))
       return false;
   }
-  for (const StmtPtr& statement : main_->body) {
-    if (!ScanStatement(*statement))
+  for (const Function& function : ast_.functions) {
+    if (function.slot_count > kMaxJitFrameSlots)
       return false;
+    for (const StmtPtr& statement : function.body) {
+      if (!ScanStatement(*statement))
+        return false;
+    }
   }
   return true;
 }
@@ -598,17 +805,26 @@ bool ShaderJit::Impl::EmitPrologue() {
                  offsetof(JitRuntime, globals));
 
   // Locals are zero-initialised exactly like Evaluator::CallFunction().
-  for (int slot = 0; slot < frame_slots_; ++slot) {
-    for (int component = 0; component < kValueFloats; ++component) {
-      if (!EmitSetComponent(slot, component, 0.0f))
-        return false;
-    }
-  }
+  // Do it from the host with one memset in Run() instead of emitting a
+  // literal store for every component: a fragment shader with a few dozen
+  // slots otherwise executes hundreds of zeroing instructions per fragment.
   return true;
 }
 
 int ShaderJit::Impl::SourceSlot(const Expr& expr) const {
   return expr.index;
+}
+
+int ShaderJit::Impl::ResolveLocalSlot(int index) const {
+  if (!inline_frames_.empty()) {
+    const InlineFrame& frame = inline_frames_.back();
+    if (index < 0 || index >= static_cast<int>(frame.slot_map.size()))
+      return -1;
+    return frame.slot_map[index];
+  }
+  if (index < 0 || index >= main_->slot_count)
+    return -1;
+  return index;
 }
 
 ShaderJit::Impl::Temp ShaderJit::Impl::NewTemp(const Type& type) {
@@ -750,14 +966,16 @@ ShaderJit::Impl::Temp ShaderJit::Impl::EmitVariable(const Expr& expr) {
     return result;
   const int components = expr.type.is_scalar() ? 1 : expr.type.components();
   switch (expr.storage) {
-    case Storage::kLocal:
-      if (expr.index < 0 || expr.index >= main_->slot_count) {
+    case Storage::kLocal: {
+      const int local_slot = ResolveLocalSlot(expr.index);
+      if (local_slot < 0) {
         Release(result);
         return Temp{};
       }
       for (int i = 0; i < components; ++i)
-        EmitMoveComponent(result.slot, i, expr.index, i);
+        EmitMoveComponent(result.slot, i, local_slot, i);
       return result;
+    }
     case Storage::kGlobal:
     case Storage::kBuiltin: {
       if (expr.index < 0) {
@@ -1029,6 +1247,23 @@ bool ShaderJit::Impl::EmitMatrixMultiply(int out,
                                          int right,
                                          const Type& right_type,
                                          const Type& result_type) {
+  // mat4 * vec4 is the dominant vertex transform.  Keep it out of the scalar
+  // lowering and hand it to a small NEON helper; the JIT only has to pass
+  // three frame-slot pointers.
+  if (left_type.is_matrix() && left_type.rows() == 4 &&
+      left_type.columns() == 4 && right_type.components() == 4 &&
+      result_type.components() == 4 && left >= 0 && right >= 0) {
+    sljit_emit_op2(compiler_, SLJIT_ADD, SLJIT_R0, 0, SLJIT_S1, 0, SLJIT_IMM,
+                   SlotOffset(left));
+    sljit_emit_op2(compiler_, SLJIT_ADD, SLJIT_R1, 0, SLJIT_S1, 0, SLJIT_IMM,
+                   SlotOffset(right));
+    sljit_emit_op2(compiler_, SLJIT_ADD, SLJIT_R2, 0, SLJIT_S1, 0, SLJIT_IMM,
+                   SlotOffset(out));
+    return Check(sljit_emit_icall(compiler_, SLJIT_CALL,
+                                  SLJIT_ARGS3V(P, P, P), SLJIT_IMM,
+                                  SLJIT_FUNC_ADDR(JitFastMat4MulVec4)),
+                 nullptr);
+  }
   if (left_type.is_matrix() && right_type.is_matrix()) {
     if (left_type.columns() != right_type.rows())
       return false;
@@ -1171,10 +1406,8 @@ bool ShaderJit::Impl::EmitLogical(int dst,
 }
 
 ShaderJit::Impl::Temp ShaderJit::Impl::EmitUnary(const Expr& expr) {
-  // Integer values live as floats in the scalar JIT, so any operation that
-  // needs an exact 32-bit payload is left to the interpreter instead.
-  if (expr.type.is_integer())
-    return Temp{};
+  // Integer values live as floats in the scalar JIT; ScanExpr has already
+  // limited them to operations that are exact for small values.
   if (expr.op == Op::kPreIncrement || expr.op == Op::kPreDecrement ||
       expr.op == Op::kPostIncrement || expr.op == Op::kPostDecrement) {
     if (expr.args[0]->kind != Expr::Kind::kVariable &&
@@ -1248,6 +1481,8 @@ ShaderJit::Impl::Temp ShaderJit::Impl::EmitBinary(const Expr& expr) {
   if (expr.op == Op::kModulo || expr.op == Op::kShiftLeft ||
       expr.op == Op::kShiftRight || expr.op == Op::kBitAnd ||
       expr.op == Op::kBitXor || expr.op == Op::kBitOr)
+    return Temp{};
+  if (expr.op == Op::kDivide && expr.type.is_integer())
     return Temp{};
 
   Temp left = EmitExpr(*expr.args[0]);
@@ -1463,9 +1698,15 @@ bool ShaderJit::Impl::EmitTextureCall(const Expr& expr,
       Release(t);
     return false;
   }
-  for (int i = 0; i < call->arg_count; ++i)
-    for (int c = 0; c < kValueFloats; ++c)
+  for (int i = 0; i < call->arg_count; ++i) {
+    // JitTexture only reads the declared components of each argument.  The
+    // old loop copied all 16 Value floats for every argument, which is
+    // especially wasteful for the common texture2D(sampler, vec2) case.
+    const int components =
+        std::min(args[i].type.components(), kValueFloats);
+    for (int c = 0; c < components; ++c)
       EmitMoveComponent(arg_area + i, c, args[i].slot, c);
+  }
   for (const Temp& t : args)
     Release(t);
 
@@ -1484,9 +1725,124 @@ bool ShaderJit::Impl::EmitTextureCall(const Expr& expr,
                nullptr);
 }
 
+bool ShaderJit::Impl::EmitFastBuiltin(const Expr& expr, int out) {
+  using Fn = void (*)(const float*, const float*, int, float*);
+  Fn function = nullptr;
+  int components = expr.type.components();
+  if (components > 4)
+    return false;
+  switch (expr.builtin_func) {
+    case BuiltinFunc::kNormalize:
+      if (expr.args.size() == 1 && components >= 1 && components <= 4 &&
+          expr.args[0]->type.components() == components)
+        function = JitFastNormalize;
+      break;
+    case BuiltinFunc::kDot:
+      if (expr.args.size() == 2 && components == 1 &&
+          expr.args[0]->type.components() == expr.args[1]->type.components())
+        function = JitFastDot;
+      break;
+    case BuiltinFunc::kLength:
+      if (expr.args.size() == 1 && components == 1)
+        function = JitFastLength;
+      break;
+    case BuiltinFunc::kReflect:
+      if (expr.args.size() == 2 && components >= 3 &&
+          expr.args[0]->type.components() == components &&
+          expr.args[1]->type.components() == components)
+        function = JitFastReflect;
+      break;
+    case BuiltinFunc::kPow:
+      if (expr.args.size() == 2 && components == 1 &&
+          expr.args[0]->type.is_scalar() && expr.args[1]->type.is_scalar())
+        function = JitFastPow;
+      break;
+    case BuiltinFunc::kMax:
+      if (expr.args.size() == 2 && components == 1 &&
+          expr.args[0]->type.is_scalar() && expr.args[1]->type.is_scalar())
+        function = JitFastMax;
+      break;
+    case BuiltinFunc::kMin:
+      if (expr.args.size() == 2 && components == 1 &&
+          expr.args[0]->type.is_scalar() && expr.args[1]->type.is_scalar())
+        function = JitFastMin;
+      break;
+    case BuiltinFunc::kFract:
+      if (expr.args.size() == 1 &&
+          expr.args[0]->type.components() == components)
+        function = JitFastFract;
+      break;
+    case BuiltinFunc::kSin:
+      if (expr.args.size() == 1 &&
+          expr.args[0]->type.components() == components)
+        function = JitFastSin;
+      break;
+    case BuiltinFunc::kCos:
+      if (expr.args.size() == 1 &&
+          expr.args[0]->type.components() == components)
+        function = JitFastCos;
+      break;
+    case BuiltinFunc::kAbs:
+      if (expr.args.size() == 1 &&
+          expr.args[0]->type.components() == components)
+        function = JitFastAbs;
+      break;
+    case BuiltinFunc::kDistance:
+      if (expr.args.size() == 2 && components == 1 &&
+          expr.args[0]->type.components() == expr.args[1]->type.components())
+        function = JitFastDistance;
+      break;
+    default:
+      return false;
+  }
+  if (!function)
+    return false;
+
+  std::vector<Temp> args;
+  args.reserve(expr.args.size());
+  for (const ExprPtr& arg : expr.args)
+    args.push_back(EmitExpr(*arg));
+  if (std::any_of(args.begin(), args.end(),
+                  [](const Temp& t) { return t.slot < 0; })) {
+    for (const Temp& t : args)
+      Release(t);
+    return false;
+  }
+
+  const int n = expr.builtin_func == BuiltinFunc::kDot ||
+                        expr.builtin_func == BuiltinFunc::kLength ||
+                        expr.builtin_func == BuiltinFunc::kDistance
+                    ? std::max(1, int(expr.args[0]->type.components()))
+                    : (expr.builtin_func == BuiltinFunc::kPow ||
+                               expr.builtin_func == BuiltinFunc::kMax ||
+                               expr.builtin_func == BuiltinFunc::kMin
+                           ? 1
+                           : components);
+  sljit_emit_op2(compiler_, SLJIT_ADD, SLJIT_R0, 0, SLJIT_S1, 0, SLJIT_IMM,
+                 SlotOffset(args[0].slot));
+  if (args.size() > 1)
+    sljit_emit_op2(compiler_, SLJIT_ADD, SLJIT_R1, 0, SLJIT_S1, 0, SLJIT_IMM,
+                   SlotOffset(args[1].slot));
+  else
+    sljit_emit_op1(compiler_, SLJIT_MOV, SLJIT_R1, 0, SLJIT_IMM, 0);
+  sljit_emit_op1(compiler_, SLJIT_MOV, SLJIT_R2, 0, SLJIT_IMM, n);
+  sljit_emit_op2(compiler_, SLJIT_ADD, SLJIT_R3, 0, SLJIT_S1, 0, SLJIT_IMM,
+                 SlotOffset(out));
+  const bool ok = Check(sljit_emit_icall(compiler_, SLJIT_CALL,
+                                         SLJIT_ARGS4V(P, P, W, P),
+                                         SLJIT_IMM,
+                                         SLJIT_FUNC_ADDR(function)),
+                        nullptr);
+  for (const Temp& t : args)
+    Release(t);
+  return ok;
+}
+
 ShaderJit::Impl::Temp ShaderJit::Impl::EmitCall(const Expr& expr) {
   if (expr.is_constructor)
     return EmitConstructor(expr);
+  if (expr.builtin_func == BuiltinFunc::kNone && expr.function_index >= 0)
+    return EmitUserCall(expr);
   switch (expr.builtin_func) {
     case BuiltinFunc::kTextureSize:
     case BuiltinFunc::kTextureOffset:
@@ -1534,11 +1890,93 @@ ShaderJit::Impl::Temp ShaderJit::Impl::EmitCall(const Expr& expr) {
   Temp result = NewTemp(expr.type);
   if (result.slot < 0)
     return result;
+  if (EmitFastBuiltin(expr, result.slot))
+    return result;
   if (!EmitBuiltinCall(expr, result.slot, arg_area_)) {
     Release(result);
     return Temp{};
   }
   return result;
+}
+
+ShaderJit::Impl::Temp ShaderJit::Impl::EmitUserCall(const Expr& expr) {
+  if (expr.function_index < 0 ||
+      expr.function_index >= static_cast<int>(ast_.functions.size()))
+    return Temp{};
+  const Function& function = ast_.functions[expr.function_index];
+  if (function.return_type.is_void())
+    return Temp{};
+  for (const InlineFrame& active : inline_frames_) {
+    if (active.function == &function)
+      return Temp{};
+  }
+  if (static_cast<int>(inline_frames_.size()) >= 8)
+    return Temp{};
+  if (expr.args.size() != function.parameters.size())
+    return Temp{};
+
+  InlineFrame frame;
+  frame.function = &function;
+  frame.slot_map.assign(function.slot_count, -1);
+  frame.return_slot = NewTemp(function.return_type).slot;
+  if (frame.return_slot < 0)
+    return Temp{};
+  for (int i = 0; i < function.return_type.components(); ++i)
+    EmitSetComponent(frame.return_slot, i, 0.0f);
+
+  auto allocate_slot = [&](const Variable& variable) -> bool {
+    if (variable.index < 0 || variable.index >= function.slot_count)
+      return false;
+    if (frame.slot_map[variable.index] >= 0)
+      return true;
+    Temp temp = NewTemp(variable.type);
+    if (temp.slot < 0)
+      return false;
+    frame.slot_map[variable.index] = temp.slot;
+    for (int component = 0; component < kValueFloats; ++component)
+      EmitSetComponent(temp.slot, component, 0.0f);
+    return true;
+  };
+  for (const Variable& parameter : function.parameters)
+    if (!allocate_slot(parameter))
+      return Temp{};
+  for (const Variable& local : function.locals)
+    if (!allocate_slot(local))
+      return Temp{};
+
+  for (size_t i = 0; i < expr.args.size(); ++i) {
+    Temp value = EmitExpr(*expr.args[i]);
+    if (value.slot < 0)
+      return Temp{};
+    const Variable& parameter = function.parameters[i];
+    const int dst = frame.slot_map[parameter.index];
+    Temp converted = ConvertTo(value, parameter.type);
+    if (value.slot != converted.slot)
+      Release(value);
+    if (converted.slot < 0)
+      return Temp{};
+    EmitCopy(dst, parameter.type, converted.slot, parameter.type);
+    Release(converted);
+  }
+
+  inline_frames_.push_back(frame);
+  const bool body_ok = EmitBlock(function.body);
+  InlineFrame& active = inline_frames_.back();
+  sljit_label* end_label = sljit_emit_label(compiler_);
+  for (sljit_jump* jump : active.return_jumps)
+    sljit_set_label(jump, end_label);
+  const int return_slot = active.return_slot;
+  std::vector<int> frame_slots = active.slot_map;
+  inline_frames_.pop_back();
+  for (int slot : frame_slots) {
+    if (slot >= 0 && slot != return_slot)
+      Release(Temp{slot, Type::Float()});
+  }
+  if (!body_ok) {
+    Release(Temp{return_slot, function.return_type});
+    return Temp{};
+  }
+  return Temp{return_slot, function.return_type};
 }
 
 ShaderJit::Impl::Temp ShaderJit::Impl::EmitAssignment(const Expr& expr) {
@@ -1548,6 +1986,11 @@ ShaderJit::Impl::Temp ShaderJit::Impl::EmitAssignment(const Expr& expr) {
   if (expr.op != Op::kAssign) {
     Temp current = EmitExpr(*expr.args[0]);
     if (current.slot < 0) {
+      Release(value);
+      return Temp{};
+    }
+    if (expr.op == Op::kDivideAssign && expr.args[0]->type.is_integer()) {
+      Release(current);
       Release(value);
       return Temp{};
     }
@@ -1695,10 +2138,14 @@ bool ShaderJit::Impl::EmitStoreVariable(const Expr& target,
                                         int slot,
                                         const Type& type) {
   switch (target.storage) {
-    case Storage::kLocal:
+    case Storage::kLocal: {
+      const int local_slot = ResolveLocalSlot(target.index);
+      if (local_slot < 0)
+        return false;
       for (int i = 0; i < type.components(); ++i)
-        EmitMoveComponent(target.index, i, slot, i);
+        EmitMoveComponent(local_slot, i, slot, i);
       return true;
+    }
     case Storage::kGlobal:
     case Storage::kBuiltin: {
       for (int i = 0; i < type.components(); ++i) {
@@ -1841,13 +2288,32 @@ bool ShaderJit::Impl::EmitStatement(const Statement& statement) {
     case Statement::Kind::kIf:
       return EmitIf(statement);
     case Statement::Kind::kReturn:
-      if (statement.expression) {
-        Temp value = EmitExpr(*statement.expression);
-        if (value.slot < 0)
-          return false;
-        Release(value);
+      if (!inline_frames_.empty()) {
+        InlineFrame& frame = inline_frames_.back();
+        if (statement.expression) {
+          Temp value = EmitExpr(*statement.expression);
+          if (value.slot < 0)
+            return false;
+          if (frame.return_slot >= 0) {
+            if (!EmitCopy(frame.return_slot, frame.function->return_type,
+                          value.slot, value.type)) {
+              Release(value);
+              return false;
+            }
+          }
+          Release(value);
+        }
+        frame.return_jumps.push_back(
+            sljit_emit_jump(compiler_, SLJIT_JUMP));
+      } else {
+        if (statement.expression) {
+          Temp value = EmitExpr(*statement.expression);
+          if (value.slot < 0)
+            return false;
+          Release(value);
+        }
+        end_jumps_.push_back(sljit_emit_jump(compiler_, SLJIT_JUMP));
       }
-      end_jumps_.push_back(sljit_emit_jump(compiler_, SLJIT_JUMP));
       return true;
     case Statement::Kind::kDiscard:
       sljit_emit_op1(compiler_, SLJIT_MOV, SLJIT_R0, 0, SLJIT_IMM, 1);
@@ -1855,14 +2321,141 @@ bool ShaderJit::Impl::EmitStatement(const Statement& statement) {
                      offsetof(JitRuntime, discarded), SLJIT_R0, 0);
       end_jumps_.push_back(sljit_emit_jump(compiler_, SLJIT_JUMP));
       return true;
+    case Statement::Kind::kBreak:
+      if (loops_.empty())
+        return Fail("break outside loop");
+      loops_.back().break_jumps.push_back(
+          sljit_emit_jump(compiler_, SLJIT_JUMP));
+      return true;
+    case Statement::Kind::kContinue:
+      if (loops_.empty())
+        return Fail("continue outside loop");
+      loops_.back().continue_jumps.push_back(
+          sljit_emit_jump(compiler_, SLJIT_JUMP));
+      return true;
     case Statement::Kind::kFor:
     case Statement::Kind::kWhile:
     case Statement::Kind::kDoWhile:
-    case Statement::Kind::kBreak:
-    case Statement::Kind::kContinue:
-      return Fail("unsupported control flow");
+      return EmitLoop(statement);
   }
   return false;
+}
+
+bool ShaderJit::Impl::EmitLoop(const Statement& statement) {
+  if (failed_)
+    return false;
+  LoopContext loop;
+  loops_.push_back(loop);
+  const int loop_index = static_cast<int>(loops_.size()) - 1;
+
+  auto patch_false = [&](sljit_jump* jump, sljit_label* label) {
+    if (jump)
+      sljit_set_label(jump, label);
+  };
+
+  if (statement.kind == Statement::Kind::kFor) {
+    if (statement.init && !EmitStatement(*statement.init)) {
+      loops_.pop_back();
+      return false;
+    }
+    sljit_label* condition_label = sljit_emit_label(compiler_);
+    sljit_jump* exit_jump = nullptr;
+    if (statement.condition && statement.condition->expression) {
+      Temp condition = EmitExpr(*statement.condition->expression);
+      if (condition.slot < 0) {
+        loops_.pop_back();
+        return false;
+      }
+      exit_jump = EmitJumpIfFalse(condition.slot,
+                                  statement.condition->expression->type);
+      Release(condition);
+      if (!exit_jump) {
+        loops_.pop_back();
+        return false;
+      }
+    }
+    if (statement.then_branch && !EmitStatement(*statement.then_branch)) {
+      loops_.pop_back();
+      return false;
+    }
+    sljit_label* step_label = sljit_emit_label(compiler_);
+    loops_[loop_index].continue_label = step_label;
+    if (statement.step && !EmitStatement(*statement.step)) {
+      loops_.pop_back();
+      return false;
+    }
+    sljit_jump* back = sljit_emit_jump(compiler_, SLJIT_JUMP);
+    sljit_set_label(back, condition_label);
+    sljit_label* exit_label = sljit_emit_label(compiler_);
+    patch_false(exit_jump, exit_label);
+    for (sljit_jump* jump : loops_[loop_index].break_jumps)
+      sljit_set_label(jump, exit_label);
+    for (sljit_jump* jump : loops_[loop_index].continue_jumps)
+      sljit_set_label(jump, step_label);
+  } else if (statement.kind == Statement::Kind::kWhile) {
+    sljit_label* condition_label = sljit_emit_label(compiler_);
+    loops_[loop_index].continue_label = condition_label;
+    sljit_jump* exit_jump = nullptr;
+    if (statement.condition && statement.condition->expression) {
+      Temp condition = EmitExpr(*statement.condition->expression);
+      if (condition.slot < 0) {
+        loops_.pop_back();
+        return false;
+      }
+      exit_jump = EmitJumpIfFalse(condition.slot,
+                                  statement.condition->expression->type);
+      Release(condition);
+      if (!exit_jump) {
+        loops_.pop_back();
+        return false;
+      }
+    }
+    if (statement.then_branch && !EmitStatement(*statement.then_branch)) {
+      loops_.pop_back();
+      return false;
+    }
+    sljit_jump* back = sljit_emit_jump(compiler_, SLJIT_JUMP);
+    sljit_set_label(back, condition_label);
+    sljit_label* exit_label = sljit_emit_label(compiler_);
+    patch_false(exit_jump, exit_label);
+    for (sljit_jump* jump : loops_[loop_index].break_jumps)
+      sljit_set_label(jump, exit_label);
+    for (sljit_jump* jump : loops_[loop_index].continue_jumps)
+      sljit_set_label(jump, condition_label);
+  } else {  // do-while
+    sljit_label* body_label = sljit_emit_label(compiler_);
+    if (statement.then_branch && !EmitStatement(*statement.then_branch)) {
+      loops_.pop_back();
+      return false;
+    }
+    sljit_label* condition_label = sljit_emit_label(compiler_);
+    loops_[loop_index].continue_label = condition_label;
+    sljit_jump* exit_jump = nullptr;
+    if (statement.condition && statement.condition->expression) {
+      Temp condition = EmitExpr(*statement.condition->expression);
+      if (condition.slot < 0) {
+        loops_.pop_back();
+        return false;
+      }
+      exit_jump = EmitJumpIfFalse(condition.slot,
+                                  statement.condition->expression->type);
+      Release(condition);
+      if (!exit_jump) {
+        loops_.pop_back();
+        return false;
+      }
+    }
+    sljit_jump* back = sljit_emit_jump(compiler_, SLJIT_JUMP);
+    sljit_set_label(back, body_label);
+    sljit_label* exit_label = sljit_emit_label(compiler_);
+    patch_false(exit_jump, exit_label);
+    for (sljit_jump* jump : loops_[loop_index].break_jumps)
+      sljit_set_label(jump, exit_label);
+    for (sljit_jump* jump : loops_[loop_index].continue_jumps)
+      sljit_set_label(jump, condition_label);
+  }
+  loops_.pop_back();
+  return true;
 }
 
 bool ShaderJit::Impl::EmitBlock(const std::vector<StmtPtr>& body) {
@@ -2008,6 +2601,8 @@ bool ShaderJit::Impl::Run(const JitRunInputs& inputs, bool* discarded) {
   runtime.globals = inputs.globals;
   runtime.locals = locals_.data();
   runtime.discarded = 0;
+  if (!locals_.empty())
+    memset(locals_.data(), 0, locals_.size() * sizeof(float));
   entry_(&runtime);
   g_jit_counters.dispatches++;
   if (discarded)

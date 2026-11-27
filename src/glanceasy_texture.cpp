@@ -19,6 +19,28 @@
 
 namespace glanceasy {
 
+// Cortex-A7 routes std::floor/std::ceil through the double-precision libm
+// software path.  Texture sampling calls them several times per tap, so a
+// truncating conversion plus one correction is a meaningful saving.  The
+// coordinates and LODs that reach these helpers are small enough for int.
+inline int FastFloorToInt(float value) {
+  const int truncated = static_cast<int>(value);
+  return value < static_cast<float>(truncated) ? truncated - 1 : truncated;
+}
+
+inline int FastCeilToInt(float value) {
+  const int truncated = static_cast<int>(value);
+  return value > static_cast<float>(truncated) ? truncated + 1 : truncated;
+}
+
+inline float FastFloor(float value) {
+  return static_cast<float>(FastFloorToInt(value));
+}
+
+inline float FastCeil(float value) {
+  return static_cast<float>(FastCeilToInt(value));
+}
+
 namespace {
 
 float ReadComponent(const uint8_t* source, int component, GLenum type) {
@@ -374,7 +396,7 @@ float WrapCoordinate(float coordinate, GLenum mode) {
     case GL_CLAMP_TO_EDGE:
       return Clamp01(coordinate);
     case GL_MIRRORED_REPEAT: {
-      const float period = coordinate - std::floor(coordinate * 0.5f) * 2.0f;
+      const float period = coordinate - FastFloor(coordinate * 0.5f) * 2.0f;
       return period <= 1.0f ? period : 2.0f - period;
     }
     case GL_CLAMP_TO_BORDER:
@@ -383,7 +405,7 @@ float WrapCoordinate(float coordinate, GLenum mode) {
       return coordinate;
     case GL_REPEAT:
     default:
-      return coordinate - std::floor(coordinate);
+      return coordinate - FastFloor(coordinate);
   }
 }
 
@@ -415,8 +437,8 @@ void SampleImage2DLevel(const TextureImage& image,
   }
   const float px = s * image.width - 0.5f;
   const float py = t * image.height - 0.5f;
-  const int x0 = static_cast<int>(std::floor(px));
-  const int y0 = static_cast<int>(std::floor(py));
+  const int x0 = FastFloorToInt(px);
+  const int y0 = FastFloorToInt(py);
   const float fx = px - static_cast<float>(x0);
   const float fy = py - static_cast<float>(y0);
   float c00[4];
@@ -480,6 +502,64 @@ void ApplySwizzle(const Texture& texture, float rgba[4]) {
         break;
     }
   }
+}
+
+void SampleTexture2DRgba8Fast(const TextureImage& image,
+                              float u,
+                              float v,
+                              GLenum filter,
+                              GLenum wrap_s,
+                              GLenum wrap_t,
+                              bool flip_y,
+                              bool opaque,
+                              float out[4]) {
+  out[0] = 0.0f;
+  out[1] = 0.0f;
+  out[2] = 0.0f;
+  out[3] = 1.0f;
+  if (image.rgba.empty() || image.width <= 0 || image.height <= 0)
+    return;
+  const float t = WrapCoordinate(flip_y ? 1.0f - v : v, wrap_t);
+  if (t < 0.0f)
+    return;
+  const float s = WrapCoordinate(u, wrap_s);
+  if (s < 0.0f)
+    return;
+  const int fw = image.width;
+  const int fh = image.height;
+  if (filter == GL_NEAREST) {
+    const int x = std::min(fw - 1, static_cast<int>(s * fw));
+    const int y = std::min(fh - 1, static_cast<int>(t * fh));
+    UnpackRgba(image.rgba[static_cast<size_t>(y) * fw + x], out);
+    if (opaque)
+      out[3] = 1.0f;
+    return;
+  }
+  const float px = s * fw - 0.5f;
+  const float py = t * fh - 0.5f;
+  // std::floor resolves to the software double-precision libm path on
+  // Cortex-A7; a truncating conversion plus one correction is exact here and
+  // matters because a convolution shader performs this twice per tap.
+  const auto floor_to_int = [](float value) {
+    const int truncated = static_cast<int>(value);
+    return value < static_cast<float>(truncated) ? truncated - 1 : truncated;
+  };
+  const int x0 = floor_to_int(px);
+  const int y0 = floor_to_int(py);
+  const float fx = px - static_cast<float>(x0);
+  const float fy = py - static_cast<float>(y0);
+  const int cy0 = WrapTexel(y0, fh, wrap_t);
+  const int cy1 = WrapTexel(y0 + 1, fh, wrap_t);
+  const int cx0 = WrapTexel(x0, fw, wrap_s);
+  const int cx1 = WrapTexel(x0 + 1, fw, wrap_s);
+  BilinearRgba8(image.rgba.data(),
+                static_cast<size_t>(cy0) * fw + cx0,
+                static_cast<size_t>(cy0) * fw + cx1,
+                static_cast<size_t>(cy1) * fw + cx0,
+                static_cast<size_t>(cy1) * fw + cx1,
+                fx, fy, out);
+  if (opaque)
+    out[3] = 1.0f;
 }
 
 void SampleTexture2D(const Texture& texture,
@@ -553,8 +633,8 @@ void SampleTexture2D(const Texture& texture,
       }
       const float px = s * fw - 0.5f;
       const float py = t * fh - 0.5f;
-      const int x0 = static_cast<int>(std::floor(px));
-      const int y0 = static_cast<int>(std::floor(py));
+      const int x0 = FastFloorToInt(px);
+      const int y0 = FastFloorToInt(py);
       const float fx = px - static_cast<float>(x0);
       const float fy = py - static_cast<float>(y0);
       const int cy0 = WrapTexel(y0, fh, wrap_t);
@@ -583,9 +663,9 @@ void SampleTexture2D(const Texture& texture,
       min_filter == GL_LINEAR_MIPMAP_LINEAR ||
       min_filter == GL_NEAREST_MIPMAP_LINEAR;
   int level0 = mipmap_linear
-                   ? static_cast<int>(std::floor(clamped_lod))
+                   ? FastFloorToInt(clamped_lod)
                    : std::clamp(static_cast<int>(
-                                    std::floor(clamped_lod + 0.5f)),
+                                    FastFloor(clamped_lod + 0.5f)),
                                 0, static_cast<int>(max_level));
   const bool is_mipmap_filter =
       min_filter == GL_NEAREST_MIPMAP_NEAREST ||
@@ -629,8 +709,8 @@ void SampleTexture2D(const Texture& texture,
     }
     const float px = s * image->width - 0.5f;
     const float py = t * image->height - 0.5f;
-    const int x0 = static_cast<int>(std::floor(px));
-    const int y0 = static_cast<int>(std::floor(py));
+    const int x0 = FastFloorToInt(px);
+    const int y0 = FastFloorToInt(py);
     const float fx = px - static_cast<float>(x0);
     const float fy = py - static_cast<float>(y0);
     float c00[4];
@@ -701,9 +781,9 @@ void SampleTexture2DArray(const Texture& texture,
       min_filter == GL_LINEAR_MIPMAP_LINEAR ||
       min_filter == GL_NEAREST_MIPMAP_LINEAR;
   int level0 = mipmap_linear
-                   ? static_cast<int>(std::floor(clamped_lod))
+                   ? FastFloorToInt(clamped_lod)
                    : std::clamp(static_cast<int>(
-                                    std::floor(clamped_lod + 0.5f)),
+                                    FastFloor(clamped_lod + 0.5f)),
                                 0, static_cast<int>(max_level));
   const bool is_mipmap_filter =
       min_filter == GL_NEAREST_MIPMAP_NEAREST ||
@@ -736,7 +816,7 @@ void SampleTexture2DArray(const Texture& texture,
       return;
     const int slice = std::max(
         0, std::min(image->depth - 1,
-                    static_cast<int>(std::floor(layer + 0.5f))));
+                    FastFloorToInt(layer + 0.5f)));
     const size_t base =
         static_cast<size_t>(slice) * image->width * image->height;
     if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_TEXARR")) {
@@ -932,9 +1012,9 @@ void SampleTextureCube(const Texture& texture,
       min_filter == GL_LINEAR_MIPMAP_LINEAR ||
       min_filter == GL_NEAREST_MIPMAP_LINEAR;
   int level0 = mipmap_linear
-                   ? static_cast<int>(std::floor(clamped_lod))
+                   ? FastFloorToInt(clamped_lod)
                    : std::clamp(static_cast<int>(
-                                    std::ceil(clamped_lod + 0.5f)) - 1,
+                                    FastCeil(clamped_lod + 0.5f)) - 1,
                                 0, static_cast<int>(max_level));
   const bool is_mipmap_filter =
       min_filter == GL_NEAREST_MIPMAP_NEAREST ||
@@ -1208,8 +1288,8 @@ void SampleTextureCube(const Texture& texture,
     }
     const float px = ls * level_image->width - 0.5f;
     const float py = lt * level_image->height - 0.5f;
-    const int x0 = static_cast<int>(std::floor(px));
-    const int y0 = static_cast<int>(std::floor(py));
+    const int x0 = FastFloorToInt(px);
+    const int y0 = FastFloorToInt(py);
     if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_CUBE") && level > 0) {
       static int tdbg = 0;
       if (tdbg++ < 4)
@@ -1298,9 +1378,9 @@ void SampleTexture3D(const Texture& texture,
       min_filter == GL_LINEAR_MIPMAP_LINEAR ||
       min_filter == GL_NEAREST_MIPMAP_LINEAR;
   int level0 = mipmap_linear
-                   ? static_cast<int>(std::floor(clamped_lod))
+                   ? FastFloorToInt(clamped_lod)
                    : std::clamp(static_cast<int>(
-                                    std::floor(clamped_lod + 0.5f)),
+                                    FastFloor(clamped_lod + 0.5f)),
                                 0, static_cast<int>(max_level));
   const bool is_mipmap_filter =
       min_filter == GL_NEAREST_MIPMAP_NEAREST ||
@@ -1356,8 +1436,8 @@ void SampleTexture3D(const Texture& texture,
       }
       const float px = s * image->width - 0.5f;
       const float py = t * image->height - 0.5f;
-      const int x0 = static_cast<int>(std::floor(px));
-      const int y0 = static_cast<int>(std::floor(py));
+      const int x0 = FastFloorToInt(px);
+      const int y0 = FastFloorToInt(py);
       const float fx = px - static_cast<float>(x0);
       const float fy = py - static_cast<float>(y0);
       float c00[4];
@@ -1397,7 +1477,7 @@ void SampleTexture3D(const Texture& texture,
       return;
     }
     const float pz = r * depth - 0.5f;
-    const int base_z = static_cast<int>(std::floor(pz));
+    const int base_z = FastFloorToInt(pz);
     const int z0 = WrapTexel(base_z, depth, wrap_r);
     const int z1 = WrapTexel(base_z + 1, depth, wrap_r);
     const float fz = pz - static_cast<float>(base_z);

@@ -99,7 +99,7 @@ TEST(SljitCompilesAndDispatchesArithmeticShader) {
   glanceasyDestroyContext();
 }
 
-TEST(SljitFallsBackForLoopingShader) {
+TEST(SljitCompilesLoopingShader) {
   EXPECT_EQ(glanceasyCreateContext(32, 32), 1);
   glanceasyResetJitStats();
 
@@ -122,8 +122,8 @@ TEST(SljitFallsBackForLoopingShader) {
     EXPECT_EQ(stats.stages_compiled, 0);
     EXPECT_TRUE(stats.fallback_stages >= 2);
   } else {
-    EXPECT_TRUE(stats.fallback_stages >= 1);
-    EXPECT_TRUE(stats.stages_compiled >= 1);
+    EXPECT_EQ(stats.fallback_stages, 0);
+    EXPECT_TRUE(stats.stages_compiled >= 2);
   }
 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);

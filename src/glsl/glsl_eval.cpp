@@ -518,33 +518,53 @@ void Evaluator::StoreBuiltin(BuiltinId id, const Value& value) {
 }
 
 void Evaluator::PrepareBuiltins() {
-  Value depth_range(Type::Vec(3));
-  depth_range.data[0] = depth_range_[0];
-  depth_range.data[1] = depth_range_[1];
-  depth_range.data[2] = depth_range_[2];
-  StoreBuiltin(BuiltinId::kDepthRange, depth_range);
+  if (!globals_)
+    return;
+  const auto writable = [&](BuiltinId id) -> Value* {
+    const int slot = BuiltinSlot(id);
+    if (slot < 0 || slot >= static_cast<int>(globals_->size()))
+      return nullptr;
+    return &(*globals_)[slot];
+  };
+  if (Value* depth_range = writable(BuiltinId::kDepthRange)) {
+    depth_range->data[0] = depth_range_[0];
+    depth_range->data[1] = depth_range_[1];
+    depth_range->data[2] = depth_range_[2];
+  }
   if (ast_.stage == Stage::kVertex) {
-    StoreBuiltin(BuiltinId::kVertexId, MakeInt(vertex_id_));
-    StoreBuiltin(BuiltinId::kInstanceId, MakeInt(instance_id_));
+    if (Value* vertex_id = writable(BuiltinId::kVertexId)) {
+      vertex_id->data[0] = static_cast<float>(vertex_id_);
+      vertex_id->int_data[0] = static_cast<uint32_t>(vertex_id_);
+    }
+    if (Value* instance_id = writable(BuiltinId::kInstanceId)) {
+      instance_id->data[0] = static_cast<float>(instance_id_);
+      instance_id->int_data[0] = static_cast<uint32_t>(instance_id_);
+    }
     return;
   }
-  Value coord(Type::Vec(4));
-  for (int i = 0; i < 4; ++i)
-    coord.data[i] = fragment_coord_[i];
-  StoreBuiltin(BuiltinId::kFragCoord, coord);
-  StoreBuiltin(BuiltinId::kFrontFacing, MakeBool(front_facing_));
-  if (GLANCEASY_DEBUG_FLAG("GLANCEASY_DEBUG_DR"))
-    fprintf(stderr, "[dr] prepare stage=%d slot=%d slots=%d/%d value=%.2f %.2f %.2f\n",
-            (int)ast_.stage, BuiltinSlot(BuiltinId::kDepthRange),
-            (int)ast_.builtin_slots.size(), (int)BuiltinId::kDepthRange,
-            depth_range.data[0], depth_range.data[1], depth_range.data[2]);
-  StoreBuiltin(BuiltinId::kDepthRange, depth_range);
-  Value point(Type::Vec(2));
-  point.data[0] = point_coord_[0];
-  point.data[1] = point_coord_[1];
-  StoreBuiltin(BuiltinId::kPointCoord, point);
-  StoreBuiltin(BuiltinId::kSampleId, MakeInt(sample_id_));
-  StoreBuiltin(BuiltinId::kSampleMaskIn, MakeInt(static_cast<int>(sample_mask_)));
+  if (Value* coord = writable(BuiltinId::kFragCoord)) {
+    coord->data[0] = fragment_coord_[0];
+    coord->data[1] = fragment_coord_[1];
+    coord->data[2] = fragment_coord_[2];
+    coord->data[3] = fragment_coord_[3];
+  }
+  if (Value* front_facing = writable(BuiltinId::kFrontFacing)) {
+    front_facing->data[0] = front_facing_ ? 1.0f : 0.0f;
+    front_facing->int_data[0] = front_facing_ ? 1u : 0u;
+  }
+  if (Value* point = writable(BuiltinId::kPointCoord)) {
+    point->data[0] = point_coord_[0];
+    point->data[1] = point_coord_[1];
+  }
+  if (Value* sample_id = writable(BuiltinId::kSampleId)) {
+    sample_id->data[0] = static_cast<float>(sample_id_);
+    sample_id->int_data[0] = static_cast<uint32_t>(sample_id_);
+  }
+  if (Value* sample_mask = writable(BuiltinId::kSampleMaskIn)) {
+    sample_mask->data[0] =
+        static_cast<float>(static_cast<int32_t>(sample_mask_));
+    sample_mask->int_data[0] = sample_mask_;
+  }
 }
 
 bool Evaluator::RunMain() {
@@ -2958,19 +2978,14 @@ bool Program::RunFragment(const FragmentInput& input, FragmentOutput* output) {
   output->discarded = false;
   if (!linked_ || !fragment_)
     return false;
-  fragment_globals_ = fragment_global_initials_;
+  for (int slot : fragment_reset_slots_)
+    fragment_globals_[slot] = fragment_global_initials_[slot];
 
   // Output arrays share one global slot.  A built-in declaration for that
   // slot may have reset it to vec4 during linking, so restore the aggregate
-  // storage before the shader writes its elements.
-  std::vector<int> output_elements(fragment_globals_.size(), 1);
-  for (const FragmentOutputInfo& output : fragment_outputs_) {
-    if (output.slot >= 0 &&
-        output.slot < static_cast<int>(output_elements.size()) &&
-        output.element + 1 > output_elements[output.slot]) {
-      output_elements[output.slot] = output.element + 1;
-    }
-  }
+  // storage before the shader writes its elements.  The element counts are
+  // cached at link time: this path runs once per fragment.
+  const std::vector<int>& output_elements = fragment_output_element_counts_;
   for (const FragmentOutputInfo& output : fragment_outputs_) {
     if (output.slot < 0 ||
         output.slot >= static_cast<int>(fragment_globals_.size()))

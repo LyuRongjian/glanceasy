@@ -64,6 +64,33 @@ struct FragmentOut {
   BaseType base = BaseType::kFloat;
 };
 
+// A generated separable/2D texture convolution:
+//
+//   result = texture2D(s, v + vec2(dx * TextureStepX, dy * TextureStepY))
+//            * KernelA * KernelB + ... ;
+//   result = result * scale;
+//   gl_FragColor = vec4(result.xyz, 1.0);
+//
+// Recognising it lets the rasteriser sample the taps directly instead of
+// entering the JIT once per tap.
+struct ConvolutionTap {
+  float dx = 0.0f;
+  float dy = 0.0f;
+  float weight = 0.0f;
+};
+
+struct ConvolutionInfo {
+  bool valid = false;
+  std::string sampler_name;
+  std::string varying_name;
+  float step_x = 0.0f;
+  float step_y = 0.0f;
+  float scale = 1.0f;
+  bool rgb_output = false;
+  int output_location = 0;
+  std::vector<ConvolutionTap> taps;
+};
+
 // Operator codes, indexed by precedence level in the parser.
 enum class Op {
   kNone,
@@ -373,6 +400,7 @@ struct ShaderAst {
   std::vector<Variable> attributes;
   std::vector<Variable> varyings;  // Outputs for VS, inputs for FS.
   std::vector<FragmentOut> outputs;  // Fragment shader colour outputs.
+  ConvolutionInfo convolution;
   std::vector<Function> functions;
   std::vector<GlobalInit> global_initializers;
 
@@ -392,6 +420,11 @@ struct ShaderAst {
   bool uses_depth_range = false;
   bool uses_front_facing = false;
   bool uses_point_coord = false;
+  // Set when a fragment shader calls dFdx/dFdy/fwidth, or an implicit-LOD
+  // texture lookup.  The rasteriser can then skip derivative interpolation
+  // for shaders that never consume it.
+  bool uses_derivatives = false;
+  bool uses_implicit_lod = false;
   bool uses_frag_color = false;
   bool uses_frag_data = false;
   bool declares_position = false;
