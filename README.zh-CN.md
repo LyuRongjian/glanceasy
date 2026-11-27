@@ -3,11 +3,11 @@
   <a href="README.zh-CN.md"><img src="docs/badge-zh.svg" alt="简体中文"></a>
 </p>
 
-# ZCat-GLES（中文）
+# Glanceasy（中文）
 
 一个独立的、纯 CPU 的 OpenGL ES 实现，面向 ARM32 Cortex-A SoC。
 
-ZCat-GLES 的每一次绘制都在软件中完成光栅化。它源自 WebGlance 浏览器原型中的
+Glanceasy 的每一次绘制都在软件中完成光栅化。它源自 WebGlance 浏览器原型中的
 ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、不依赖 EGL、不依赖
 平台窗口系统，也没有任何 x86 SSE 专用代码。库对外提供 Khronos GLES 2.0 / 3.0
 入口，自带 RGBA8 颜色缓冲、16 位深度缓冲和 8 位模板缓冲，渲染结果留在内存中，
@@ -18,7 +18,7 @@ ZCat 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、�
 参考目标芯片是 Rockchip RV1106（单核 Cortex-A7，带 NEON）。下图由 ARM32 构建
 在 `qemu-arm-static -cpu cortex-a7` 下实际渲染得到：
 
-![ZCat-GLES 渲染的彩色立方体](docs/screenshot.png)
+![Glanceasy 渲染的彩色立方体](docs/screenshot.png)
 
 ## 可视化测试图库
 
@@ -175,7 +175,7 @@ gcov 数字，覆盖率只统计通过 API 测试执行到的库代码。
 
 ### 测试范围与环境
 
-使用 Khronos VK-GL-CTS 的完整 `gles3-main` 用例列表，对 ZCat-GLES 的 ARM32
+使用 Khronos VK-GL-CTS 的完整 `gles3-main` 用例列表，对 Glanceasy 的 ARM32
 构建进行全量测试。
 
 | 项目 | 内容 |

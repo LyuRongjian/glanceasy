@@ -3,11 +3,11 @@
   <a href="README.zh-CN.md"><img src="docs/badge-zh.svg" alt="简体中文"></a>
 </p>
 
-# ZCat-GLES
+# Glanceasy
 
 A standalone, CPU-only implementation of OpenGL ES for ARM32 Cortex-A SoCs.
 
-ZCat-GLES rasterises every draw call in software. It is derived from the ZCat
+Glanceasy rasterises every draw call in software. It is derived from the ZCat
 software painter that shipped inside the WebGlance browser prototype, but the
 GLES front end has been rewritten from scratch: no GPU driver, no EGL, no
 platform window system, and no x86-specific code. The library exposes the
@@ -22,7 +22,7 @@ The reference target is the Rockchip RV1106, a single-core Cortex-A7 with NEON.
 The screenshot below was rendered by the ARM32 build running under
 `qemu-arm-static -cpu cortex-a7`:
 
-![ZCat-GLES rendering a colour cube](docs/screenshot.png)
+![Glanceasy rendering a colour cube](docs/screenshot.png)
 
 ## Visual test gallery
 
@@ -191,7 +191,7 @@ gcov figures, which measure the library through the API tests only.
 ### Scope and environment
 
 The complete `gles3-main` case list from Khronos VK-GL-CTS was executed against
-the ARM32 build of ZCat-GLES.
+the ARM32 build of Glanceasy.
 
 | Item | Value |
 | --- | --- |
