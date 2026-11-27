@@ -184,6 +184,10 @@ std::string ExpandIdentifiers(const std::string& line,
       out += "1";
       continue;
     }
+    if (name == "GL_FRAGMENT_PRECISION_HIGH") {
+      out += "1";
+      continue;
+    }
     const auto it = macros.find(name);
     if (it == macros.end()) {
       out += name;
@@ -326,7 +330,8 @@ std::string StripBlockComments(const std::string& source) {
 bool IsPreprocessorDefined(const std::map<std::string, Macro>& macros,
                            const std::string& name) {
   return macros.count(name) != 0 || name == "__LINE__" || name == "__FILE__" ||
-         name == "__VERSION__" || name == "GL_ES";
+         name == "__VERSION__" || name == "GL_ES" ||
+         name == "GL_FRAGMENT_PRECISION_HIGH";
 }
 
 // Replace defined(NAME) and defined NAME before macro expansion so that the

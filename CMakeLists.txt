@@ -17,6 +17,7 @@ option(GLANCEASY_COVERAGE "Instrument the library for gcov coverage" OFF)
 option(GLANCEASY_BUILD_TESTS "Build the unit test binary" ON)
 option(GLANCEASY_BUILD_EXAMPLES "Build the example programs" ON)
 option(GLANCEASY_ENABLE_JIT "Compile GLSL shaders to native code with SLJIT" ON)
+option(GLANCEASY_BUILD_EGL "Build libEGL adapter and shared library for glmark2" OFF)
 
 # SLJIT is a small, platform-independent JIT backend.  It is vendored under
 # deps/sljit so that builds never fetch code from the network.  Only
@@ -26,6 +27,7 @@ add_library(sljit STATIC
 target_include_directories(sljit PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/deps/sljit/sljit_src)
 set_target_properties(sljit PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
+set_target_properties(sljit PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
   target_compile_options(sljit PRIVATE /W0)
 else()
@@ -82,6 +84,49 @@ set_target_properties(glanceasy PROPERTIES OUTPUT_NAME glanceasy)
 if(GLANCEASY_COVERAGE AND NOT MSVC)
   target_compile_options(glanceasy PRIVATE --coverage -O0 -g)
   target_link_options(glanceasy PUBLIC --coverage)
+endif()
+
+
+if(GLANCEASY_BUILD_EGL AND UNIX)
+  add_library(glanceasy_shared SHARED ${GLANCEASY_SOURCES})
+  target_include_directories(glanceasy_shared
+      PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+      PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_features(glanceasy_shared PUBLIC cxx_std_17)
+  target_compile_definitions(glanceasy_shared PUBLIC KHRONOS_STATIC)
+  set_target_properties(glanceasy_shared PROPERTIES
+      OUTPUT_NAME glanceasy
+      SOVERSION 0
+      VERSION 0.1.0
+      POSITION_INDEPENDENT_CODE ON
+      CXX_VISIBILITY_PRESET default
+      C_VISIBILITY_PRESET default)
+  if(MSVC)
+    target_compile_options(glanceasy_shared PRIVATE /W4 /permissive- /GR-)
+  else()
+    target_compile_options(glanceasy_shared PRIVATE
+        -Wall -Wextra -fno-exceptions -fno-rtti -fvisibility=default)
+  endif()
+  if(GLANCEASY_ENABLE_JIT)
+    target_compile_definitions(glanceasy_shared PRIVATE GLANCEASY_ENABLE_JIT=1)
+    target_link_libraries(glanceasy_shared PRIVATE sljit)
+  endif()
+
+  add_library(glanceasy_egl SHARED egl/egl_shim.cpp)
+  target_link_libraries(glanceasy_egl PRIVATE glanceasy_shared ${CMAKE_DL_LIBS})
+  target_include_directories(glanceasy_egl PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  set_target_properties(glanceasy_egl PROPERTIES
+      OUTPUT_NAME EGL
+      SOVERSION 1
+      VERSION 1.4.0
+      POSITION_INDEPENDENT_CODE ON)
+  add_custom_command(TARGET glanceasy_shared POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E remove -f
+          "${CMAKE_CURRENT_BINARY_DIR}/libGLESv2.so"
+      COMMAND ${CMAKE_COMMAND} -E create_symlink
+          "$<TARGET_FILE_NAME:glanceasy_shared>"
+          "${CMAKE_CURRENT_BINARY_DIR}/libGLESv2.so")
 endif()
 
 if(GLANCEASY_BUILD_TESTS)

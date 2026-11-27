@@ -521,7 +521,8 @@ const GLubyte* glGetString(GLenum name) {
       return reinterpret_cast<const GLubyte*>(
           "OpenGL ES GLSL ES 3.00 Glanceasy");
     case GL_EXTENSIONS:
-      return reinterpret_cast<const GLubyte*>("");
+      return reinterpret_cast<const GLubyte*>(
+          "GL_OES_rgb8_rgba8 GL_OES_depth24");
     default:
       break;
   }
@@ -540,10 +541,8 @@ const GLubyte* glGetStringi(GLenum name, GLuint index) {
     return nullptr;
   }
   // No extensions are advertised, so every index is out of range.
-  if (index >= 0) {
-    context->SetError(GL_INVALID_VALUE);
-    return nullptr;
-  }
+  (void)index;
+  context->SetError(GL_INVALID_VALUE);
   return nullptr;
 }
 

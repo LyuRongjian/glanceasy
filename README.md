@@ -9,9 +9,9 @@ A standalone, CPU-only implementation of OpenGL ES for ARM32 Cortex-A SoCs.
 
 Glanceasy rasterises every draw call in software. It is derived from the Glanceasy
 software painter that shipped inside the WebGlance browser prototype, but the
-GLES front end has been rewritten from scratch: no GPU driver, no EGL, no
-platform window system, and no x86-specific code. The library exposes the
-Khronos GLES 2.0 and 3.0 entry points, keeps its own RGBA8 colour buffer, a
+GLES front end has been rewritten from scratch: no GPU driver and no platform
+window system; an optional EGL 1.4 adapter exists only for benchmark harnesses.
+The library exposes the Khronos GLES 2.0 and 3.0 entry points, keeps its own RGBA8 colour buffer, a
 16-bit depth buffer and an 8-bit stencil buffer, and renders into memory that
 the embedder can blit or upload wherever it likes.
 
@@ -147,6 +147,21 @@ tools/run_qemu_arm.sh build-rv1106/glanceasy_visual_tests visual-out 640 480
 `QEMU_ARM_STATIC` selects the emulator; otherwise `qemu-arm-static` is looked up
 in `PATH`. A system-mode QEMU installation can boot a full ARM image, but the
 user-mode emulator is what this suite is verified against.
+
+## glmark2 benchmark
+
+`GLANCEASY_BUILD_EGL=ON` adds a minimal EGL 1.4 adapter and shared GLES
+libraries so generic GLES benchmarks can run off-screen. The adapter is not a
+window-system backend; it implements the surfaceless/pbuffer subset used by
+`glmark2-es2-null` and maps an EGL context to a Glanceasy context.
+
+```sh
+cmake -S . -B build-egl -DCMAKE_BUILD_TYPE=Release -DGLANCEASY_BUILD_EGL=ON
+cmake --build build-egl -j
+```
+
+See [docs/BENCHMARK.md](docs/BENCHMARK.md) for the glmark2 build, the QEMU
+commands, the current scores and their caveats.
 
 ## Rendering the demo
 
@@ -313,7 +328,9 @@ examples/                      Standalone rendering demo
 tests/                         Unit tests and the test harness
 tests/visual/                  Visual regression cases and the PPM writer
 tools/                         Luckfox/NDK builds, QEMU runner, TLS patch, coverage
-docs/                          GLSL subset, porting notes and rendered screenshots
+egl/                           Optional EGL 1.4 adapter for benchmark harnesses
+bench/                         glmark2 runner script
+docs/                          GLSL subset, benchmark notes, porting notes and screenshots
 ```
 
 ## Using the library

@@ -8,9 +8,9 @@
 一个独立的、纯 CPU 的 OpenGL ES 实现，面向 ARM32 Cortex-A SoC。
 
 Glanceasy 的每一次绘制都在软件中完成光栅化。它源自 WebGlance 浏览器原型中的
-Glanceasy 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、不依赖 EGL、不依赖
-平台窗口系统，也没有任何 x86 SSE 专用代码。库对外提供 Khronos GLES 2.0 / 3.0
-入口，自带 RGBA8 颜色缓冲、16 位深度缓冲和 8 位模板缓冲，渲染结果留在内存中，
+Glanceasy 软件画家，但 GLES 前端是完全重写的：不依赖 GPU 驱动、不依赖平台窗口系统，
+也没有任何 x86 SSE 专用代码。另有一个可选的 EGL 1.4 适配层，仅用于基准测试工具。
+库对外提供 Khronos GLES 2.0 / 3.0 入口，自带 RGBA8 颜色缓冲、16 位深度缓冲和 8 位模板缓冲，渲染结果留在内存中，
 由集成方自行上屏或上传。
 
 代码与注释遵循 Chromium C++ 风格，所有注释均为英文。
@@ -138,6 +138,21 @@ tools/run_qemu_arm.sh build-rv1106/glanceasy_visual_tests visual-out 640 480
 `QEMU_ARM_STATIC` 可指定模拟器路径；未设置时从 `PATH` 中查找
 `qemu-arm-static`。系统模式的 QEMU 也可以启动完整 ARM 镜像，但本套件验证使用
 的是用户模式模拟器。
+
+## glmark2 基准测试
+
+配置 `GLANCEASY_BUILD_EGL=ON` 会额外生成最小 EGL 1.4 适配层和共享 GLES 库，
+使通用 GLES 基准测试可以在离屏模式下运行。该适配层不是窗口系统后端，只实现
+`glmark2-es2-null` 所需的 surfaceless/pbuffer 子集，并把 EGL 上下文映射到
+Glanceasy 上下文。
+
+```sh
+cmake -S . -B build-egl -DCMAKE_BUILD_TYPE=Release -DGLANCEASY_BUILD_EGL=ON
+cmake --build build-egl -j
+```
+
+glmark2 的构建、QEMU 运行命令、当前分数和注意事项见
+[docs/BENCHMARK.md](docs/BENCHMARK.md)。
 
 ## 渲染示例
 
@@ -293,7 +308,9 @@ examples/                      独立渲染示例
 tests/                         单元测试与测试框架
 tests/visual/                  可视化回归用例与 PPM 写出
 tools/                         Luckfox/NDK 构建、QEMU 运行、TLS 修补、覆盖率
-docs/                          GLSL 子集、移植说明与渲染截图
+egl/                           可选的 EGL 1.4 基准测试适配层
+bench/                         glmark2 运行脚本
+docs/                          GLSL 子集、基准测试说明、移植说明与截图
 ```
 
 ## 使用方式
