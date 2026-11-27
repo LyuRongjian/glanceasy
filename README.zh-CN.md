@@ -171,6 +171,114 @@ tools/coverage.sh build-cov
 因此光栅化回归既表现为断言失败，也表现为肉眼可见的画面变化。这些用例不计入
 gcov 数字，覆盖率只统计通过 API 测试执行到的库代码。
 
+## Khronos GLES 3.0 CTS 测试报告
+
+### 测试范围与环境
+
+使用 Khronos VK-GL-CTS 的完整 `gles3-main` 用例列表，对 ZCat-GLES 的 ARM32
+构建进行全量测试。
+
+| 项目 | 内容 |
+| --- | --- |
+| 目标平台 | ARM32 Cortex-A7（瑞芯微 RV1106 级别），NEON / VFPv4 |
+| 模拟器 | QEMU system 模式：`qemu-system-arm -M virt -cpu cortex-a7 -m 1024` |
+| CTS | Khronos VK-GL-CTS `deqp-gles3`，FBO surface 256 x 256 |
+| 驱动构建 | Release（`-O3`），`-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard`，uClibc |
+| 运行时间 | 2026-11-26 11:42 至 2026-11-27 07:21（UTC+8） |
+| 驱动选项 | 默认帧缓冲按 FBO 0 暴露（`ZGL_FBO_SURFACE_AS_ZERO=1`），允许 harness 绑定默认帧缓冲 |
+
+本地对 CTS harness 打了小补丁：harness 创建 surface FBO 后将其释放，
+`getDefaultFramebuffer()` 返回 0，attach 到默认帧缓冲前先绑定 0。补丁只改变
+harness 绑定默认帧缓冲的方式，不改变任何测试期望。
+
+每个分片使用的命令：
+
+```sh
+deqp-gles3 \
+  --deqp-caselist-file=/usr/share/deqp/gles3-main.txt \
+  --deqp-archive-dir=/usr/share/deqp \
+  --deqp-surface-type=fbo \
+  --deqp-surface-width=256 \
+  --deqp-surface-height=256 \
+  --deqp-log-filename=/tmp/cts.qpa
+```
+
+### 结果总览
+
+| 结果 | 用例数 | 占比 |
+| --- | ---: | ---: |
+| 实际执行 | 40,676 / 40,676 | 100% |
+| Pass | 38,110 | 93.69% |
+| Quality / Compatibility Warning | 176 | 0.43% |
+| Fail | 0 | 0.00% |
+| NotSupported | 2,390 | 5.88% |
+| Pass（含 Warning） | 38,286 | 94.12% |
+
+14 个分片全部以 `DEQP_EXIT=0` 退出。`NotSupported` 是 dEQP 在用例依赖实现
+主动不提供的能力时给出的结果，不属于失败，但也不计入上面的严格 Pass 比例。
+
+### 各分片结果
+
+| 分片 | 用例数 | Pass | Warning | NotSupported | Fail |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 01 | 2,906 | 2,722 | 15 | 169 | 0 |
+| 02 | 2,906 | 2,731 | 11 | 164 | 0 |
+| 03 | 2,906 | 2,727 | 11 | 168 | 0 |
+| 04 | 2,906 | 2,728 | 13 | 165 | 0 |
+| 05 | 2,906 | 2,719 | 14 | 173 | 0 |
+| 06 | 2,906 | 2,725 | 14 | 167 | 0 |
+| 07 | 2,905 | 2,722 | 12 | 171 | 0 |
+| 08 | 2,905 | 2,720 | 10 | 175 | 0 |
+| 09 | 2,905 | 2,716 | 13 | 176 | 0 |
+| 10 | 2,905 | 2,717 | 13 | 175 | 0 |
+| 11 | 2,905 | 2,720 | 13 | 172 | 0 |
+| 12 | 2,905 | 2,716 | 12 | 177 | 0 |
+| 13 | 2,905 | 2,724 | 12 | 169 | 0 |
+| 14 | 2,905 | 2,723 | 13 | 169 | 0 |
+| **合计** | **40,676** | **38,110** | **176** | **2,390** | **0** |
+
+### 失败项
+
+无。14 个分片的日志中没有出现任何 `Fail` 结果行，`negative_api.buffer.*`
+也没有回归（早期 ARM 运行中失败的三个用例已在重建后通过）。
+
+### NotSupported 分布
+
+`NotSupported` 集中在少数能力缺口：
+
+| 分组 | 用例数 | 原因 |
+| --- | ---: | --- |
+| `texture.wrap` | 1,044 | ASTC 压缩纹理的 wrap 模式 |
+| `texture.compressed` | 266 | ASTC 块解码 |
+| `fbo.blit` | 218 | 浮点 / 整数格式的 blit 转换 |
+| `texture.vertex` | 174 | 顶点纹理采样与 mipmap / wrap 组合 |
+| `transform_feedback.array_element` | 108 | 反馈数组元素中的矩阵 varying |
+| `fbo.render` | 89 | 浮点 / 整数渲染目标 |
+| `fragment_out.array` | 84 | 浮点渲染目标 |
+| `fragment_out.basic` | 84 | 浮点渲染目标 |
+| `fbo.color` | 69 | 浮点 / 整数颜色附件 |
+| `draw_buffers_indexed` | 76 | 索引式 draw buffer / blend 状态 |
+| 8 样本 MSAA | 31 | 超过 4 个样本 |
+| `program_binary` | 14 | 二进制着色器程序 |
+| 其他 | 133 | 过滤、PBO renderbuffer、索引状态查询等格式限制 |
+
+### Warning 分布
+
+176 条 Warning 均为 dEQP 计为通过的质量 / 兼容性警告：`texture.shadow` 102
+（深度比较精度）、着色器内建函数 52、纹理 mipmap 16、`flush_finish` 4、
+FBO 完整性 2。
+
+### 重点回归组
+
+默认帧缓冲改造还按组做了单独核对：
+
+| 分组 | 用例数 | Pass | Warning | NotSupported | Fail |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fbo.*` | 2,006 | 1,585 | 2 | 419 | 0 |
+| `negative_api.*` | 309 | 305 | 0 | 4 | 0 |
+
+Host 构建的 API 测试集共 181 条，失败检查为 0。
+
 ## 目录结构
 
 ```

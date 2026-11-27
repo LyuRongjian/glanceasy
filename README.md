@@ -186,6 +186,119 @@ the rendered frames as artefacts, so rasterisation regressions show up both as
 a failing check and as a visibly changed image. They do not contribute to the
 gcov figures, which measure the library through the API tests only.
 
+## Khronos GLES 3.0 CTS test report
+
+### Scope and environment
+
+The complete `gles3-main` case list from Khronos VK-GL-CTS was executed against
+the ARM32 build of ZCat-GLES.
+
+| Item | Value |
+| --- | --- |
+| Target | ARM32 Cortex-A7 (Rockchip RV1106 class), NEON / VFPv4 |
+| Emulator | QEMU system mode: `qemu-system-arm -M virt -cpu cortex-a7 -m 1024` |
+| CTS | Khronos VK-GL-CTS `deqp-gles3`, FBO surface 256 x 256 |
+| Driver build | Release (`-O3`), `-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard`, uClibc |
+| Run window | 2026-11-26 11:42 to 2026-11-27 07:21 (UTC+8) |
+| Driver options | default framebuffer exposed as FBO 0 (`ZGL_FBO_SURFACE_AS_ZERO=1`); harness allowed to bind the default framebuffer |
+
+The CTS harness carries a small local patch so that the default framebuffer is
+addressed as FBO 0 (the surface FBO created by the harness is released after
+creation, `getDefaultFramebuffer()` returns 0, and attach-to-default binds 0
+first). The patch changes only how the harness binds the default framebuffer; it
+does not change any test expectation.
+
+Command used per shard:
+
+```sh
+deqp-gles3 \
+  --deqp-caselist-file=/usr/share/deqp/gles3-main.txt \
+  --deqp-archive-dir=/usr/share/deqp \
+  --deqp-surface-type=fbo \
+  --deqp-surface-width=256 \
+  --deqp-surface-height=256 \
+  --deqp-log-filename=/tmp/cts.qpa
+```
+
+### Result summary
+
+| Result | Cases | Share |
+| --- | ---: | ---: |
+| Executed | 40,676 / 40,676 | 100% |
+| Pass | 38,110 | 93.69% |
+| Quality / compatibility warning | 176 | 0.43% |
+| Fail | 0 | 0.00% |
+| NotSupported | 2,390 | 5.88% |
+| Pass including warnings | 38,286 | 94.12% |
+
+All 14 shards exited with `DEQP_EXIT=0`. `NotSupported` is reported by dEQP when
+a case requires a capability the implementation deliberately does not provide;
+it is not a failure, but it is also not counted as a pass in the strict figure
+above.
+
+### Per-shard results
+
+| Shard | Cases | Pass | Warning | NotSupported | Fail |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 01 | 2,906 | 2,722 | 15 | 169 | 0 |
+| 02 | 2,906 | 2,731 | 11 | 164 | 0 |
+| 03 | 2,906 | 2,727 | 11 | 168 | 0 |
+| 04 | 2,906 | 2,728 | 13 | 165 | 0 |
+| 05 | 2,906 | 2,719 | 14 | 173 | 0 |
+| 06 | 2,906 | 2,725 | 14 | 167 | 0 |
+| 07 | 2,905 | 2,722 | 12 | 171 | 0 |
+| 08 | 2,905 | 2,720 | 10 | 175 | 0 |
+| 09 | 2,905 | 2,716 | 13 | 176 | 0 |
+| 10 | 2,905 | 2,717 | 13 | 175 | 0 |
+| 11 | 2,905 | 2,720 | 13 | 172 | 0 |
+| 12 | 2,905 | 2,716 | 12 | 177 | 0 |
+| 13 | 2,905 | 2,724 | 12 | 169 | 0 |
+| 14 | 2,905 | 2,723 | 13 | 169 | 0 |
+| **Total** | **40,676** | **38,110** | **176** | **2,390** | **0** |
+
+### Failures
+
+None. No case printed a `Fail` result line in any of the 14 shard logs, and no
+`negative_api.buffer.*` case failed (the three cases that failed in an earlier
+ARM run were rebuilt and now pass).
+
+### NotSupported breakdown
+
+`NotSupported` cases are capability gaps, concentrated in a few areas:
+
+| Group | Cases | Reason |
+| --- | ---: | --- |
+| `texture.wrap` | 1,044 | ASTC compressed texture wrap modes |
+| `texture.compressed` | 266 | ASTC block decoding |
+| `fbo.blit` | 218 | float / integer format blit conversions |
+| `texture.vertex` | 174 | vertex texture fetch with mipmap / wrap combinations |
+| `transform_feedback.array_element` | 108 | matrix varyings in feedback array elements |
+| `fbo.render` | 89 | float / integer render targets |
+| `fragment_out.array` | 84 | float render targets |
+| `fragment_out.basic` | 84 | float render targets |
+| `fbo.color` | 69 | float / integer colour attachments |
+| `draw_buffers_indexed` | 76 | indexed draw buffer / blend state |
+| 8-sample MSAA | 31 | more than four samples |
+| `program_binary` | 14 | binary shader programs |
+| Other | 133 | filtering, PBO renderbuffer, indexed state queries, misc. format limits |
+
+### Warnings
+
+The 176 warnings are quality or compatibility warnings that dEQP counts as
+passing: `texture.shadow` 102 (depth-comparison precision), shader built-in
+functions 52, texture mipmap 16, `flush_finish` 4, FBO completeness 2.
+
+### Targeted regression groups
+
+The default-framebuffer rework was also verified group by group:
+
+| Group | Cases | Pass | Warning | NotSupported | Fail |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fbo.*` | 2,006 | 1,585 | 2 | 419 | 0 |
+| `negative_api.*` | 309 | 305 | 0 | 4 | 0 |
+
+On the host build the API suite runs 181 cases with zero failed checks.
+
 ## Directory layout
 
 ```

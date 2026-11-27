@@ -1,6 +1,0 @@
-/home/user/zcat-gles-push/build-tests/CMakeFiles/sljit.dir
-/home/user/zcat-gles-push/build-tests/CMakeFiles/zcat_gles.dir
-/home/user/zcat-gles-push/build-tests/CMakeFiles/zgl_unittests.dir
-/home/user/zcat-gles-push/build-tests/CMakeFiles/zgl_visual_tests.dir
-/home/user/zcat-gles-push/build-tests/CMakeFiles/edit_cache.dir
-/home/user/zcat-gles-push/build-tests/CMakeFiles/rebuild_cache.dir
