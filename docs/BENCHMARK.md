@@ -61,7 +61,7 @@ ARM32 under qemu-user:
 ```sh
 export QEMU_LD_PREFIX=/path/to/luckfox/sysroot
 export LD_LIBRARY_PATH=$PWD/build-egl-arm
-qemu-arm-static build-glmark2-arm/src/glmark2-es2-null \
+qemu-arm-static -cpu cortex-a7 build-glmark2-arm/src/glmark2-es2-null \
   --data-path glmark2/data --off-screen=3 --size=320x240 -b :duration=1
 ```
 
@@ -85,13 +85,13 @@ Selected per-scene numbers at 320x240 (x86_64 / ARM32 qemu-user):
 
 | Scene | x86_64 FPS | ARM32 FPS | ARM32 frame time |
 | --- | ---: | ---: | ---: |
-| `build`, no VBO | 21 | 2 | 714 ms |
-| `texture`, nearest | 38 | 2 | 592 ms |
-| `shading`, phong | 3 | 1 | 6.65 s |
-| `pulsar` | 111 | 4 | 329 ms |
-| `conditionals`, steps=0 | 25 | 2 | 826 ms |
-| `function`, low | 3 | 1 | 7.94 s |
-| `terrain` | 1 | 1 | 384 s |
+| `build`, no VBO | 21 | 2 | 725 ms |
+| `texture`, nearest | 38 | 2 | 670 ms |
+| `shading`, phong | 3 | 1 | 7.11 s |
+| `pulsar` | 111 | 3 | 364 ms |
+| `conditionals`, steps=0 | 25 | 2 | 824 ms |
+| `function`, low | 3 | 1 | 8.16 s |
+| `terrain` | 1 | 1 | 387 s |
 
 ## Interpretation and caveats
 

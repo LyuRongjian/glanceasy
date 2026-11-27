@@ -9,6 +9,7 @@
 #   SIZE                 WxH, default 800x600
 #   BENCH                benchmark spec, default :duration=1
 #   QEMU                 qemu-arm-static path; when set, QEMU_LD_PREFIX is required
+#   QEMU_CPU             optional -cpu value, e.g. cortex-a7
 set -euo pipefail
 
 : "${GLMARK2_BIN:?set GLMARK2_BIN to glmark2-es2-null}"
@@ -25,7 +26,11 @@ export LD_LIBRARY_PATH="$GLANCEASY_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 if [[ -n ${QEMU:-} ]]; then
   : "${QEMU_LD_PREFIX:?set QEMU_LD_PREFIX to the ARM sysroot when using QEMU}"
-  exec "$QEMU" "$GLMARK2_BIN" "${args[@]}"
+  qemu_args=()
+  if [[ -n ${QEMU_CPU:-} ]]; then
+    qemu_args=(-cpu "$QEMU_CPU")
+  fi
+  exec "$QEMU" "${qemu_args[@]}" "$GLMARK2_BIN" "${args[@]}"
 fi
 
 exec "$GLMARK2_BIN" "${args[@]}"
